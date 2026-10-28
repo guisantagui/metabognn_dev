@@ -142,7 +142,7 @@ expr = convert_ids_ensembl(expr, hgnc, symbol_col=symbol_col, is_log2=is_log2)
 
 out_name = "%s_ensembl.csv" % os.path.basename(expr_f).split('.')[0]
 
-pen_df.write_csv(os.path.join(out_dir, out_name))
+expr.write_csv(os.path.join(out_dir, out_name))
 
 if delete_original:
     print("Deleting original input file...")

@@ -42,13 +42,6 @@ export MAMBA_ROOT_PREFIX="/work/projects/car_t_methylome/software/micromamba"
 eval "$(micromamba shell hook --shell bash)"
 micromamba activate metabolic_drug_repurposing
 
-expr_f = args.expr
-hgnc_f = args.hgnc
-symbol_col = args.symbol_col
-is_log2 = args.is_log2
-delete_original = args.delete_original
-out_dir = args.out_dir
-
 python expr_symb_to_ensembl.py \
     --expr "${out_dir_cell}expr.csv" \
     --hgnc "$hgnc" \
