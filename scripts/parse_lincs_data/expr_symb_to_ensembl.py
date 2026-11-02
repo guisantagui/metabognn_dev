@@ -123,7 +123,7 @@ delete_original = args.delete_original
 out_dir = args.out_dir
 
 if out_dir == None:
-    out_dir = os.dirname(expr_f)
+    out_dir = os.path.dirname(expr_f)
 
 
 ################################################################################

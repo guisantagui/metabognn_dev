@@ -59,7 +59,7 @@ gctxFile_pert <- parsed$gctx_pert
 gctxFile_ctrl <- parsed$gctx_ctrl
 cell <- parsed$cell
 drugs_f <- parsed$drugs
-ctrl_keep <- parsed$ctrls_keep
+ctrls_keep <- parsed$ctrls_keep
 out_dir <- parsed$out_dir
 
 #gctxFile_pert <- "/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cp_predicted_RNAseq_profiles.gctx"

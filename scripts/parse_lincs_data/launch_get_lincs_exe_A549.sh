@@ -25,7 +25,7 @@ out_dir_cell="${out_dir}/${cell}/"
 
 mkdir -p "$out_dir_cell"
 
-
+source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate r-4.3.1
 
 Rscript get_lincs_exe.R \
