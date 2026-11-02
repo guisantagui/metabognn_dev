@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=200GB
 #SBATCH -c 1
-#SBATCH --time=00-02:00:00
+#SBATCH --time=00-08:00:00
 #Define sdout path
 #SBATCH --output=mc_master_A549_rankAll.out
 #Define sderr path
@@ -54,11 +54,14 @@ python create_penalties.py \
     --hgnc "$hgnc_f" \
     --threshold 2 \
     --pen_mode "$penalty" \
-    --gem "$gem" \
+    --gem "$gem_f" \
     --out_dir $(dirname "$expr_f")
 
 expr_pen_f="${expr_f%.csv}_rank.csv"
+pen_base=$(basename "$expr_pen_f" .csv)
 
+# Remove batches from earlier runs, so that the array size below counts only these
+rm -f "${out_dir_expr}/${pen_base}"_batch_*.csv "${out_dir_expr}"/$(basename "$mdat_f" .csv)_batch_*.csv
 
 python prepare_input_matrices.py --expr "$expr_pen_f" \
     --mdat "$mdat_f" \
@@ -87,13 +90,20 @@ fi
 # Submit MetChange array
 # ---------------------------------------------------------
 
+# One array task per batch written by prepare_input_matrices.py
+n_batches=$(ls "${out_dir_expr}/${pen_base}"_batch_*.csv | wc -l)
+echo "Submitting ${n_batches} MetChange batches"
+mkdir -p logs
+
+# The batch files are named after the penalty matrix (expr_pen_f), which
+# launch_metchange_array.sh uses to find them.
 sbatch \
     --job-name="${SLURM_JOB_NAME}_arr" \
-    --array=0-31%8 \
+    --array=0-$((n_batches - 1))%8 \
     launch_metchange_array.sh \
     "$gem_f" \
     "$medium_f" \
     "$out_dir_expr" \
     "$out_dir_metchange" \
-    "$expr_f" \
+    "$expr_pen_f" \
     "$input_type"
