@@ -25,7 +25,7 @@ cell="A549"
 penalty="rank"
 medium_f="/home/users/gsantamaria/projects/metabo_pert/data/GEMs/gem_mediums/Human2-GEM/rpmi_medium.json"
 workers=64
-out_dir="/home/users/gsantamaria/projects/metabo_pert/results/labels/"
+out_dir="/home/users/gsantamaria/projects/metabognn_dev/results/labels/"
 
 medium=$(basename "${medium_f%.json}")
 expr="${delta_mat_dir}/${cell}/${penalty}/expr_${penalty}_metChange_${medium}_concat.csv"
