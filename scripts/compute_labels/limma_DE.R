@@ -61,12 +61,49 @@ if (!dir.exists(out_dir)) {
 ################################################################################
 
 message(sprintf("Loading expression data from %s", expr_f))
-expr <- as.data.frame(fread(expr_f, header = TRUE))
-rownames(expr) <- expr[, 1]
-expr <- expr[, 2:ncol(expr)]
+# One numeric matrix, filled from the data.table block by block while the
+# copied columns are dropped: a data.frame with one column per sample, apply()
+# and row subsetting held several full copies at once.
+dt <- fread(expr_f, header = TRUE)
+feature_ids <- dt[[1]]
+sample_ids <- names(dt)[-1]
+
+# Features with no variance (constant or with missing values) are dropped:
+# min and max per row, accumulated over the columns.
+row_min <- rep(Inf, nrow(dt))
+row_max <- rep(-Inf, nrow(dt))
+for (s in sample_ids) {
+    row_min <- pmin(row_min, dt[[s]])
+    row_max <- pmax(row_max, dt[[s]])
+}
+keep <- !is.na(row_min) & !is.na(row_max) & row_max > row_min
+message(sprintf("%d features, %d with no variance or missing values removed",
+                length(keep), sum(!keep)))
+
+expr <- matrix(NA_real_, nrow = sum(keep), ncol = length(sample_ids),
+               dimnames = list(feature_ids[keep], sample_ids))
+block <- 1000
+for (start in seq(1, length(sample_ids), by = block)) {
+    cols <- sample_ids[start:min(start + block - 1, length(sample_ids))]
+    for (s in cols) expr[, s] <- dt[[s]][keep]
+    dt[, (cols) := NULL]
+}
+rm(dt, row_min, row_max, keep)
+invisible(gc())
 
 message(sprintf("Loading and parsing metadata from %s", mdat_f))
 mdat <- as.data.frame(fread(mdat_f, header = TRUE))
+
+# Samples are selected below by metadata position, so the metadata rows must
+# follow the expression columns.
+if (!identical(mdat$id, colnames(expr))) {
+    if (!setequal(mdat$id, colnames(expr))) {
+        stop(sprintf("Expression columns and metadata ids differ (%d only in metadata, %d only in expression)",
+                     length(setdiff(mdat$id, colnames(expr))), length(setdiff(colnames(expr), mdat$id))))
+    }
+    message("Metadata rows are in a different order than the expression columns: reordering them.")
+    mdat <- mdat[match(colnames(expr), mdat$id), ]
+}
 #mdat$batch <- sapply(
 #        mdat$rna_plate,
 #        function(x) paste(strsplit(x, split = "_")[[1]][1:3], collapse = "_")
@@ -76,9 +113,6 @@ perts <- unique(mdat$perturbation[mdat$exper_group != "ctrl"])
 
 # Do parallelized limma analysis
 ################################################################################
-
-# Remove features with no variance
-expr <- expr[apply(expr, 1, var) != 0, ]
 
 options(future.globals.maxSize = 10 * 1024^3)
 plan(multicore, workers = workers)

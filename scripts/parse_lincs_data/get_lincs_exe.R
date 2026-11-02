@@ -26,6 +26,21 @@ writeCsvFst <- function(df, file, rowNames = T, colNames = T){
         data.table::fwrite(df, file, col.names = colNames)
 }
 
+# Writes cbind(mat_pert, mat_ctrl) with a V1 column of gene ids, in blocks of
+# genes, without building the combined matrix or a full data.table copy.
+writeExprBlocks <- function(mat_pert, mat_ctrl, file, block = 1000){
+        genes <- rownames(mat_pert)
+        for (start in seq(1, length(genes), by = block)){
+                idx <- start:min(start + block - 1, length(genes))
+                df <- data.table::data.table(
+                        V1 = genes[idx],
+                        mat_pert[idx, , drop = FALSE],
+                        mat_ctrl[idx, , drop = FALSE]
+                )
+                data.table::fwrite(df, file, append = start > 1, col.names = start == 1)
+        }
+}
+
 # Terminal argument parser
 ################################################################################
 parser <- arg_parser("Extract data from a given cell type into csv files.")
@@ -70,7 +85,8 @@ out_dir <- parsed$out_dir
 #out_dir <- "/home/users/gsantamaria/projects/metabo_pert/data/LINCS"
 
 if (!is.na(ctrls_keep)){
-        ctrls_keep <- strsplit(ctrls_keep, split = ",")
+        # [[1]]: strsplit returns a list, which %in% would compare as one element
+        ctrls_keep <- strsplit(ctrls_keep, split = ",")[[1]]
 }
 
 
@@ -89,9 +105,10 @@ message("Loading control metadata...")
 ################################################################################
 
 # Perturbation
-if (cell %in% metDat_pert$cell){
-        bool_cell <- metDat_pert$cell == cell
+if (!cell %in% metDat_pert$cell){
+        stop(sprintf("Cell %s not found in the perturbation metadata.", cell))
 }
+bool_cell <- metDat_pert$cell == cell
 
 if (!is.na(drugs_f)){
         drugs_df <- read.csv(drugs_f, row.names = 1)
@@ -102,8 +119,6 @@ if (!is.na(drugs_f)){
 }
 
 idxs_pert <- which(bool_cell & bool_drug)
-
-gctx_pert_filt <- parse_gctx(gctxFile_pert, cid = idxs_pert)
 metDat_pert_filt <- metDat_pert[idxs_pert, ]
 
 # Add batch column, using same criteria as Ma'ayan
@@ -148,6 +163,15 @@ if (!is.na(ctrls_keep)){
 
 
 idxs_ctrl <- which(bool_batch & ctrls_keep_bool)
+
+# Perturbation samples of batches without (kept) controls are dropped here, from
+# the metadata, so their expression is never read.
+ctrl_batches_kept <- unique(metDat_ctrl$batch[idxs_ctrl])
+good <- metDat_pert_filt$batch %in% ctrl_batches_kept
+message(sprintf("%d perturbation samples in batches without controls removed", sum(!good)))
+idxs_pert <- idxs_pert[good]
+
+gctx_pert_filt <- parse_gctx(gctxFile_pert, cid = idxs_pert)
 gctx_ctrl_filt <- parse_gctx(gctxFile_ctrl, cid = idxs_ctrl)
 
 # Generate output files
@@ -185,16 +209,17 @@ mdat_ctrl$exper_group <- "ctrl"
 pert_batches <- unique(mdat_pert$batch)
 ctrl_batches <- unique(mdat_ctrl$batch)
 
-# Remove samples from perturbation data that belong to batches without controls
-batches_wo_ctrls <- pert_batches[!pert_batches %in% ctrl_batches]
-keep_samps_good_batches <- !mdat_pert$batch %in% batches_wo_ctrls
-mat_pert <- mat_pert[, keep_samps_good_batches]
-mdat_pert <- mdat_pert[keep_samps_good_batches, ]
+# Batches without controls were already removed before reading the matrices
+stopifnot(all(pert_batches %in% ctrl_batches))
 
-mat_all <- cbind(
-        mat_pert,
-        mat_ctrl
-)
+# Genes must be in the same order in both matrices (they are combined by position)
+if (!identical(rownames(mat_pert), rownames(mat_ctrl))){
+        if (!setequal(rownames(mat_pert), rownames(mat_ctrl))){
+                stop("Perturbation and control GCTX files have different genes.")
+        }
+        message("Control genes are in a different order: reordering them.")
+        mat_ctrl <- mat_ctrl[rownames(mat_pert), , drop = FALSE]
+}
 
 cols_2add <- colnames(mdat_pert)[
         !colnames(mdat_pert) %in% colnames(mdat_ctrl)
@@ -229,5 +254,5 @@ mdat_all$perturbation <- paste(
 )
 
 # Save results
-writeCsvFst(mat_all, file = file.path(out_dir, "expr.csv"))
+writeExprBlocks(mat_pert, mat_ctrl, file = file.path(out_dir, "expr.csv"))
 writeCsvFst(mdat_all, file = file.path(out_dir, "mdat.csv"))
