@@ -21,7 +21,7 @@
 # Python env with torch (CUDA), numpy, pandas, scipy, scikit-learn, networkx
 conda activate torch_gnn
 
-project_dir="/home/users/gsantamaria/projects/metabo_pert"
+project_dir="/home/users/gsantamaria/projects/metabognn_dev"
 cell="A549"
 penalty="rank"
 net_dir="${project_dir}/data/networks/combined"
