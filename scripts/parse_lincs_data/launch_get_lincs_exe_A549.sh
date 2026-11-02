@@ -47,6 +47,5 @@ python expr_symb_to_ensembl.py \
     --hgnc "$hgnc" \
     --symbol_col "V1" \
     --is_log2 \
-    --delete_original \
     --out_dir "$out_dir_cell"
 micromamba deactivate

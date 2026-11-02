@@ -77,15 +77,6 @@ if (!is.na(ctrls_keep)){
 # Load data
 ################################################################################
 
-cell_info <- read.table(
-    cell_info_f,
-    sep = "\t",
-    header = TRUE,
-    quote = "",
-    fill = TRUE,
-    comment.char = ""
-)
-
 message("Loading perturbation metadata...")
 metDat_pert <- read_gctx_meta(gctxFile_pert, dim = "column")
 message("Done")
