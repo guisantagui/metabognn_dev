@@ -808,6 +808,9 @@ def main():
     fe.add_argument("--alpha", action="append", default=[], metavar="REL=W",
                     help="relation mixing weight (defaults: build_network.SUGGESTED_ALPHA)")
     fe.add_argument("--activity-floor", type=float, default=0.0)
+    fe.add_argument("--edge-weights", choices=["uniform", "evidence"], default="uniform",
+                    help="uniform: every curated edge counts 1; evidence: the weight column of edges.tsv "
+                         "(1 - 0.5^n_resources, GEM edges 1)")
     fe.add_argument("--no-poly", action="store_true")
     sa = ap.add_argument_group("sampling / split")
     sa.add_argument("--neg-per-pert", type=int, default=200)
@@ -851,6 +854,9 @@ def main():
 
     # ---- data
     g = Graph(args.nodes, args.edges)
+    if args.edge_weights == "uniform":
+        g.edges["weight"] = 1.0
+    log(f"edge weights: {args.edge_weights}")
     act = node_activity(g, args.baseline, args.activity_floor)
     perts_table = pd.read_csv(args.perturbations, sep="\t", dtype=str, keep_default_na=False)
     perts, sigs, fmap = load_signatures(g, args, perts_table)
