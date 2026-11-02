@@ -20,3 +20,23 @@ Perform DE on the metchange results using metChange results, accounting for batc
 - pvals.csv
 - qvals.csv
 This script is also used on the ENSEMBL expression data to compute basal level of the genes for each perturbation.
+
+### Papers with data for validating the tool.
+- Untargeted stable isotope-resolved metabolomics to assess the effect of PI3Kbeta inhibiton on metabolic pathway activities in a PTEN null breast cancer cell line. (10.3389/fmolb.2022.1004602). X13CMS Isotope labelling.
+- Respirometric Screening and Characterization of Mitochondrial Toxicants Within the ToxCast Phase I and II Chemical Libraries. (https://doi.org/10.1093/toxsci/kfaa059). Seahorse.
+- Profiling of the Tox21 chemical collection for mitochondrial function to identify compounds that acutely decrease mitochondrial membrane potential. (https://doi.org/10.1289/ehp.1408642). Mitochondrial membrane potential change in response to 10K drugs.
+- A framework for large-scale metabolome drug profiling links coenzyme A metabolism to the toxicity of anti-cancer drug dichloroacetate. (https://doi.org/10.1038/s42003-018-0111-x). Time-resolved metabolomics.
+- Schuhknecht
+- Sarvin
+- https://metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyType=&StudyID=ST000168
+- Metabolic drug survey highlights cancer cell dependencies and vulnerabilities (https://doi.org/10.1038/s41467-021-27329-x). Seahorse of basal state.
+- A functional analysis of 180 cancer cell lines reveals conserved intrinsic metabolic programs (https://pubmed.ncbi.nlm.nih.gov/36321552/). Only basal state--> no drugs arm.
+- https://metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyType=&StudyID=ST004447
+- https://metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyType=&StudyID=ST004448
+- https://metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyType=&StudyID=ST004449
+- https://metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyType=&StudyID=ST004450
+- https://metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyType=&StudyID=ST004457
+- https://metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyType=&StudyID=ST004458
+- https://metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyType=&StudyID=ST004460
+- https://metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyType=&StudyID=ST003944
+- https://metabolomicsworkbench.org/data/DRCCMetadata.php?Mode=Study&StudyType=&StudyID=ST003945

@@ -126,14 +126,17 @@ res <- future_lapply(
 
             fit <- eBayes(fit)
 
+            # sort.by = "none": keep the input gene order (topTable sorts by B by
+            # default, which differs between perturbations)
             results <- topTable(
                 fit,
                 coef = 2,
                 number = Inf,
                 adjust.method = "BH",
-                confint = TRUE
+                confint = TRUE,
+                sort.by = "none"
             )
-            basal <- fit$coefficients[, 1]
+            basal <- fit$coefficients[rownames(results), 1]
             #delta <- fit$coefficients[, 2]
 
             list(
@@ -161,34 +164,18 @@ message("limma done.")
 
 names(res) <- perts
 
-# Convert to matrices/data.frames
-basal <- do.call(
-    cbind,
-    lapply(res, function(x) {
-        setNames(x$basal, x$genes)
-    })
-)
-
-log2FCs <- do.call(
-    cbind,
-    lapply(res, function(x) {
-        setNames(x$log2FC, x$genes)
-    })
-)
-
-pvals <- do.call(
-    cbind,
-    lapply(res, function(x) {
-        setNames(x$pval, x$genes)
-    })
-)
-
-qvals <- do.call(
-    cbind,
-    lapply(res, function(x) {
-        setNames(x$qval, x$genes)
-    })
-)
+# Convert to matrices/data.frames. Each perturbation's values are matched to one
+# gene order by name: cbind() of named vectors aligns by position, not by name.
+genes_all <- rownames(expr)
+to_matrix <- function(field) {
+    m <- vapply(res, function(x) x[[field]][match(genes_all, x$genes)], numeric(length(genes_all)))
+    rownames(m) <- genes_all
+    m
+}
+basal <- to_matrix("basal")
+log2FCs <- to_matrix("log2FC")
+pvals <- to_matrix("pval")
+qvals <- to_matrix("qval")
 
 colnames(basal) <- perts
 colnames(log2FCs) <- perts
