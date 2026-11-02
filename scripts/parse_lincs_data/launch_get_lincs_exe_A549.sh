@@ -19,6 +19,7 @@ gctxFile_ctrl="/scratch/users/gsantamaria/test_large_files/data/perturbation/lin
 cell="A549"
 ctrls_keep="DMSO"
 hgnc="/home/users/gsantamaria/projects/metabo_pert/data/utilities/hgnc_complete_set.txt"
+gem_f="/home/users/gsantamaria/projects/metabo_pert/data/GEMs/Human2/Human-GEM/model/Human-GEM.xml"
 out_dir="/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cell_matrices/"
 
 out_dir_cell="${out_dir}/${cell}/"
@@ -45,6 +46,7 @@ micromamba activate metabolic_drug_repurposing
 python expr_symb_to_ensembl.py \
     --expr "${out_dir_cell}expr.csv" \
     --hgnc "$hgnc" \
+    --gem "$gem_f" \
     --symbol_col "V1" \
     --is_log2 \
     --out_dir "$out_dir_cell"

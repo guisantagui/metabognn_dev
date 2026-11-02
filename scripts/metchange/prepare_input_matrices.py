@@ -10,14 +10,16 @@
 ################################################################################
 
 import argparse
+import math
+import sys
+import numpy as np
 import pandas as pd
-import pyarrow
 from os import makedirs, getcwd
-from os.path import join, basename
-import polars as pl
-from collections import defaultdict
-import cobra
+from os.path import join, basename, dirname, abspath
 from cobra.io import read_sbml_model
+
+sys.path.insert(0, join(dirname(abspath(__file__)), "..", "parse_lincs_data"))
+from gene_id_mapping import symbol_to_ensembl_map, read_matrix, gem_symbol_overrides  # noqa: E402
 
 # Terminal argument parser
 ################################################################################
@@ -92,107 +94,61 @@ out_dir = args.out_dir
 
 makedirs(out_dir, exist_ok=True)
 
+################################################################################
 # Load data
 ################################################################################
 
+# Metadata rows are copied verbatim into the batch files; the id column is
+# only used to check that expression columns are in the same order.
 print("Loading metadata from %s..." % mdat_f)
-mdat = pl.read_csv(mdat_f)
-print("Loading expression data from %s..." % expr_f)
-expr = pl.read_csv(expr_f)
-
-n_batches = round(mdat.shape[0] / batch_size)
-
-# Parse data
-################################################################################
+with open(mdat_f) as fh:
+    mdat_lines = fh.readlines()
+mdat_ids = pd.read_csv(mdat_f, dtype=str, keep_default_na=False)["id"].tolist()
 
 if input_type == "expression":
-    # If expression, these files will be needed too.
+    # Symbols -> ENSEMBL (aliases / previous symbols only if unambiguous), only
+    # GEM genes kept while reading, duplicates summed in linear space.
     print("Loading gem %s..." % gem_f)
     gem = read_sbml_model(gem_f)
+    gem_genes = set(g.id for g in gem.genes)
     print("Loading HGNC data from %s..." % hgnc_f)
-    hgnc = pd.read_csv(hgnc_f, sep = '\t')
-
+    mapping = symbol_to_ensembl_map(pd.read_csv(hgnc_f, sep='\t', dtype=str), gem_symbol_overrides(gem))
     print("Expression type selected. Translation to ENSEMBL, sum of duplicate IDs, GEM filtering and split in batches will be done.")
-    # Create symbol to ENSEMBL dictionary
-    symbol_to_ensembl = (
-        hgnc.groupby("symbol")["ensembl_gene_id"]
-        .apply(lambda x: "|".join(x.dropna().astype(str)))
-        .to_dict()
-    )
-
-    alias_to_ensembl = defaultdict(list)
-
-    for _, row in hgnc.dropna(subset=["alias_symbol"]).iterrows():
-        for alias in row["alias_symbol"].split("|"):
-            alias_to_ensembl[alias].append(str(row["ensembl_gene_id"]))
-
-    alias_to_ensembl = {
-        k: "|".join(set(v)) for k, v in alias_to_ensembl.items()
-    }
-
-    ensembl_list = []
-
-    for gene in expr['V1'].to_list():
-        if gene in symbol_to_ensembl:
-            ensembl_list.append(symbol_to_ensembl[gene])
-        else:
-            ensembl_list.append(alias_to_ensembl.get(gene, ""))
-    symb_to_ensembl = pd.DataFrame(
-        {
-            'hgnc_symbol': expr['V1'].to_list(),
-            'ensembl_gene_id': ensembl_list
-        }
-    )
-
-    # Revert log2 expression to count-like expression, add ensembl column,
-    # remove genes without mapped ensembl and sum duplicated ENSEMBL IDs
-    expr = expr.with_columns(
-        pl.exclude("V1").pow(2)
-    )
-
-    expr = expr.with_columns(
-        pl.Series("ensembl_gene_id", ensembl_list)
-    )
-
-    expr = expr.filter(
-        pl.col("ensembl_gene_id") != ""
-    )
-
-    expr = expr.group_by("ensembl_gene_id").agg(
-        pl.exclude(["V1", "ensembl_gene_id"]).sum()
-    )
-
-    gem_genes = [x.id for x in gem.genes]
-
-    expr = expr.filter(
-        pl.col("ensembl_gene_id").is_in(gem_genes)
-    )
+    gene_ids, samples, X, report = read_matrix(expr_f, id_col="V1", mapping=mapping, keep=gem_genes, is_log2=True)
+    print("%d GEM genes kept (%d rows merged), %d of %d GEM genes missing" % (
+        len(gene_ids), (report.status == "merged").sum(), len(gem_genes - set(gene_ids)), len(gem_genes)))
+    # Revert log2 expression to count-like (linear) expression
+    np.exp2(X, out=X)
 elif input_type == "penalty":
     print("Penalty type selected. Only split in batches will be done.")
+    gene_ids, samples, X, _ = read_matrix(expr_f, is_log2=False)
 else:
     sys.exit("Unsuported input_type.")
+print("%d genes x %d samples" % X.shape)
+
+# Expression columns must follow the metadata rows: batches are cut by position.
+if samples != mdat_ids:
+    missing = sorted(set(mdat_ids) - set(samples))
+    extra = sorted(set(samples) - set(mdat_ids))
+    if missing or extra:
+        sys.exit("Expression columns and metadata ids differ: %d ids only in metadata (e.g. %s), "
+                 "%d only in expression (e.g. %s)" % (len(missing), missing[:3], len(extra), extra[:3]))
+    print("Expression columns are in a different order than the metadata: reordering them.")
+    order = pd.Series(range(len(samples)), index=samples)[mdat_ids].to_numpy()
+    X = X[:, order]
+    samples = mdat_ids
 
 # Save data
 ################################################################################
 
-gene_ids = expr.select("ensembl_gene_id")
+n_samples = len(mdat_ids)
+n_batches = math.ceil(n_samples / batch_size)   # the last batch may be smaller
+if n_batches_to_retain is not None:
+    n_batches = min(n_batches, n_batches_to_retain)
 
-if n_batches_to_retain != None:
-    end_loop = n_batches_to_retain + 1
-else:
-    end_loop = n_batches
-
-for i in range(0, end_loop):
+for i in range(n_batches):
     start = i * batch_size
-    end = min((i + 1) * batch_size, mdat.shape[0])
-
-    mdat_batch = mdat[start:end, :]
-
-    # Skip ensembl_gene_id when slicing expression samples
-    expr_batch = expr[:, (start + 1):(end + 1)]
-
-    # Add gene IDs back as the first column
-    expr_batch = gene_ids.hstack(expr_batch)
+    end = min((i + 1) * batch_size, n_samples)
 
     mdat_name = join(
         out_dir,
@@ -206,5 +162,7 @@ for i in range(0, end_loop):
 
     print("batch %s: %s to %s" % (i, start, end))
 
-    mdat_batch.write_csv(mdat_name)
-    expr_batch.write_csv(expr_name)
+    with open(mdat_name, "w") as fh:
+        fh.writelines([mdat_lines[0]] + mdat_lines[1 + start:1 + end])
+    pd.DataFrame(X[:, start:end], index=gene_ids, columns=samples[start:end]).to_csv(
+        expr_name, index_label="ensembl_gene_id", float_format="%.7g")

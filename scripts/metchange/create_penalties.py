@@ -11,66 +11,17 @@
 ################################################################################
 
 import os
+import sys
 from scipy.stats import gaussian_kde, norm, rankdata, skewnorm, gamma as gamma_dist
 from scipy.optimize import minimize
 from scipy.signal import argrelextrema
 import argparse
 import numpy as np
 import pandas as pd
-import polars as pl
-import cobra
-from cobra.io import read_sbml_model, write_sbml_model
-from collections import defaultdict
+from cobra.io import read_sbml_model
 
-def convert_ids_ensembl(df, hgnc, symbol_col="V1", is_log2=True):
-    symbol_to_ensembl = (
-        hgnc.groupby("symbol")["ensembl_gene_id"]
-        .apply(lambda x: "|".join(x.dropna().astype(str)))
-        .to_dict()
-    )
-    alias_to_ensembl = defaultdict(list)
-    for _, row in hgnc.dropna(subset=["alias_symbol"]).iterrows():
-        for alias in row["alias_symbol"].split("|"):
-            alias_to_ensembl[alias].append(str(row["ensembl_gene_id"]))
-    alias_to_ensembl = {
-        k: "|".join(sorted(set(v)))
-        for k, v in alias_to_ensembl.items()
-    }
-    ensembl_list = []
-    for gene in df[symbol_col].to_list():
-        if gene in symbol_to_ensembl:
-            ensembl_list.append(symbol_to_ensembl[gene])
-        else:
-            ensembl_list.append(alias_to_ensembl.get(gene, ""))
-    symb_to_ensembl = pd.DataFrame(
-        {
-            'hgnc_symbol': df[symbol_col].to_list(),
-            'ensembl_gene_id': ensembl_list
-        }
-    )
-    # Add ensembl column
-    df = df.with_columns(
-        pl.Series("ensembl_gene_id", ensembl_list)
-    )
-    # Remove unmatched rows
-    df = df.filter(
-        pl.col("ensembl_gene_id") != ""
-    )
-    if is_log2:
-        df = df.with_columns(
-            pl.exclude(["ensembl_gene_id", symbol_col]).pow(2)
-        )
-    # Sum eventual duplicates
-    df = (
-        df.group_by("ensembl_gene_id")
-        .agg(pl.exclude([symbol_col, "ensembl_gene_id"]).sum())
-        .sort("ensembl_gene_id")
-    )
-    if is_log2:
-        df = df.with_columns(
-            pl.exclude("ensembl_gene_id").sqrt()
-        )
-    return (df)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "parse_lincs_data"))
+from gene_id_mapping import symbol_to_ensembl_map, read_matrix, gem_symbol_overrides  # noqa: E402
 
 # Functions for fitting mixture model
 def fit_zfpkm(values, zero_cut=0.5, max_n=200_000, grid_n=2000, seed=0):
@@ -182,14 +133,6 @@ def make_penalties(t, p_main):
         "combined_1": lambda x: combined(x, 1.0),
     }
 
-def create_penalty_df(pen_arr, expr, row_name_col="ensembl_gene_id"):
-    df = pl.DataFrame(
-        pen_arr,
-        schema=expr.columns[1:],
-        orient="row"
-    ).insert_column(0, expr[row_name_col])
-    return (df)
-
 ################################################################################
 # Terminal argument parser                                                     #
 ################################################################################
@@ -245,13 +188,6 @@ args = parser.parse_args()
 # DIRECTORY STUFF                                                              #
 ################################################################################
 
-expr_f="/home/users/gsantamaria/projects/metabo_pert/data/LINCS/lincs_A549_expr.csv"
-hgnc_f="/home/users/gsantamaria/projects/metabo_pert/data/utilities/hgnc_complete_set.txt"
-pen_mode="mixture"
-threshold=2
-gem_f="/home/users/gsantamaria/projects/metabo_pert/data/GEMs/Human2/Human-GEM/model/Human-GEM.xml"
-out_dir="/scratch/users/gsantamaria/test_large_files/metabo_perts/results/gene_penalties/mixture_script/"
-
 expr_f = args.expr
 hgnc_f = args.hgnc
 convert_to_ensembl = args.convert_to_ensembl
@@ -265,71 +201,71 @@ os.makedirs(out_dir, exist_ok=True)
 ################################################################################
 # DATA LOADING                                                                 #
 ################################################################################
-print("Loading expression data from %s..." % expr_f)
-expr = pl.read_csv(expr_f)
-hgnc = pd.read_csv(hgnc_f, sep = '\t')
+# The matrix is read in row chunks into one float32 array (all genes are kept:
+# the rank penalty ranks each sample over every gene). Only the GEM genes are
+# written out.
 print("Loading GEM from %s..." % gem_f)
 gem = read_sbml_model(gem_f)
+gem_genes = set(g.id for g in gem.genes)
 
-print("Converting gene symbols to ENSEMBL...")
+mapping = None
 if convert_to_ensembl:
-    expr = convert_ids_ensembl(expr, hgnc, symbol_col="V1", is_log2=True)
+    print("Gene symbols will be converted to ENSEMBL while reading.")
+    mapping = symbol_to_ensembl_map(pd.read_csv(hgnc_f, sep='\t', dtype=str), gem_symbol_overrides(gem))
+print("Loading expression data from %s..." % expr_f)
+gene_ids, samples, X, _ = read_matrix(expr_f, mapping=mapping, is_log2=True)
+print("%d genes x %d samples" % X.shape)
+gem_rows = np.array([i for i, g in enumerate(gene_ids) if g in gem_genes])
+print("%d of %d GEM genes present" % (len(gem_rows), len(gem_genes)))
 
 ################################################################################
 # GET PENALTIES                                                                #
 ################################################################################
 if pen_mode == "rank":
     print("Computing rank-based penalties...")
-    gene_ids = expr["ensembl_gene_id"]
-    sample_cols = [c for c in expr.columns if c != "ensembl_gene_id"]
-    n_genes = expr.height
+    n_genes = X.shape[0]
     chunk_size = 128
-    pen_cols = []
-    for start in range(0, len(sample_cols), chunk_size):
-        cols = sample_cols[start:start + chunk_size]
-        # Shape: genes x samples
-        x = expr.select(cols).to_numpy()
-        # Rank each sample independently (ascending, average ties)
+    pen = np.empty((len(gem_rows), X.shape[1]), np.float32)
+    for start in range(0, X.shape[1], chunk_size):
+        # Shape: genes x samples. Rank each sample independently (ascending, average ties)
+        x = X[:, start:start + chunk_size]
         ranks = rankdata(x, axis=0, method="average")
         pvals = 1.0 - ranks / n_genes
         # Calculate the percentile separately for each sample
         cutoffs = np.percentile(pvals, 100 - threshold, axis=0)
         # Apply penalty
         pvals[pvals >= cutoffs] = 1.0
-        # Save the processed columns for reconstruction
-        pen_cols.extend(
-            pl.Series(name=col, values=pvals[:, j])
-            for j, col in enumerate(cols)
-        )
-    # Reconstruct the Polars DataFrame, preserving column names
-    pen_df = pl.DataFrame([gene_ids, *pen_cols])
-elif pen_mode = "mixture":
-    pooled = expr.select(pl.exclude("ensembl_gene_id")).to_numpy().flatten()
+        pen[:, start:start + chunk_size] = pvals[gem_rows]
+elif pen_mode == "mixture":
+    print("Fitting the expression mixture model...")
+    rng = np.random.default_rng(1)
+    # A random sample of all values is enough for the fit (the fitting functions
+    # subsample anyway); flattening the whole matrix would copy it.
+    flat = X.ravel()
+    pooled = flat[rng.integers(0, flat.size, size=min(flat.size, 5_000_000))].astype(np.float64)
+    pooled = pooled[np.isfinite(pooled)]
     pos = pooled[pooled > 0]
-    pooled_cut = valley_cut(pooled)
-    params_pooled = fit_zfpkm(pooled, zero_cut=pooled_cut[0])
-    #rng = np.random.default_rng(1)
-    #idx = rng.permutation(pos.size)
-    #x_tr, x_te = pos[idx[:100_000]], pos[idx[100_000:300_000]]
-    #v = rng.choice(pos, size=500_000, replace=False)
-    init = dict(w=np.mean(pos > pooled_cut[0]), lam=1.0,
+    pooled_cut, cut_ok = valley_cut(pooled)
+    if not np.isfinite(pooled_cut) or not cut_ok:
+        print("warning: no clear valley in the expression density; using zero_cut = 0.5")
+        pooled_cut = 0.5
+    params_pooled = fit_zfpkm(pooled, zero_cut=pooled_cut)
+    init = dict(w=np.mean(pos > pooled_cut), lam=1.0,
                 mu=params_pooled["mu"], sigma=params_pooled["sigma"])
-    t = fit_mixture(pos[idx[:500_000]], "expon", "skewnorm", init)
+    t = fit_mixture(rng.choice(pos, size=min(500_000, pos.size), replace=False), "expon", "skewnorm", init)
     print("skew-normal shape:", round(t[4], 2), "| w:", round(1/(1+np.exp(-t[0])), 3))
-    p_main = posterior_from_fit(t, "expon", "skewnorm", pos.max())
+    p_main = posterior_from_fit(t, "expon", "skewnorm", float(np.nanmax(X)))
     pen_fns = make_penalties(t, p_main)
-    pen_arr = pen_fns["saturating"](expr[:, 1:expr.shape[1]])
-    pen_df = create_penalty_df(pen_arr, expr)
-    
+    pen = np.empty((len(gem_rows), X.shape[1]), np.float32)
+    for start in range(0, X.shape[1], 1024):
+        pen[:, start:start + 1024] = pen_fns["saturating"](X[gem_rows, start:start + 1024])
+else:
+    sys.exit("Unsupported pen_mode: %s (rank or mixture)" % pen_mode)
 
 ################################################################################
-# FILTER AND SAVE                                                              #
+# SAVE                                                                         #
 ################################################################################
-
-# Keep only genes in the GEM
-gem_genes = [x.id for x in gem.genes]
-pen_df = pen_df.filter(pl.col("ensembl_gene_id").is_in(gem_genes))
-
 out_name = "%s_%s.csv" % (os.path.basename(expr_f).split('.')[0], pen_mode)
-pen_df.write_csv(os.path.join(out_dir, out_name))
+pd.DataFrame(pen, index=[gene_ids[i] for i in gem_rows], columns=samples).to_csv(
+    os.path.join(out_dir, out_name), index_label="ensembl_gene_id", float_format="%.7g")
 print("%s saved in %s." % (out_name, out_dir))
