@@ -19,7 +19,8 @@
 #SBATCH --qos=normal
 
 # Python env with torch (CUDA), numpy, pandas, scipy, scikit-learn, networkx
-conda activate torch_gnn
+#conda activate torch_gnn
+conda activate metabolic_drug_repurposing
 
 project_dir="/home/users/gsantamaria/projects/metabognn_dev"
 cell="A549"
@@ -28,6 +29,7 @@ net_dir="${project_dir}/data/networks/combined"
 cell_dir="${project_dir}/data/perturbation/lincs/cell_matrices/${cell}"
 labels_dir="${project_dir}/results/labels/${cell}/metchange/${penalty}"   # rerun limma_DE.R (fixed) first
 out_dir="${project_dir}/results/predict_targets/${cell}/metchange_${penalty}"
+device="cpu" # cpu, cuda
 
 # MetChange inconsistency is sign-flipped so that positive = more production (Schuhknecht benchmark convention).
 # Relation weights default to build_network.SUGGESTED_ALPHA; ablations: --alpha grn_binding=0,
@@ -43,7 +45,7 @@ python metabolic_target_prediction.py \
         --mode metchange \
         --drug-targets "${project_dir}/data/drug_targets/combined/drug_targets.tsv" \
         --drug-metabolites "${net_dir}/drug_metabolite_matches.tsv" \
-        --device cuda \
+        --device "$device" \
         --predict-unlabeled \
         --out-dir "${out_dir}"
 
