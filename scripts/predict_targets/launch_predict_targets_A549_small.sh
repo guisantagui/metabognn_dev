@@ -43,6 +43,9 @@ fi
 # MetChange inconsistency is sign-flipped so that positive = more production (Schuhknecht benchmark convention).
 # Relation weights default to build_network.SUGGESTED_ALPHA; ablations: --alpha grn_binding=0,
 # --alpha second_messenger=0, --no-vae.
+# Cross-validation by drug: --n-folds 5 runs all folds in this job; or submit as an array (#SBATCH --array=0-4)
+# with --n-folds 5 --fold "$SLURM_ARRAY_TASK_ID" (the job that completes the last fold pools them).
+# --linear-only: logistic regression only, minutes instead of hours.
 python metabolic_target_prediction.py \
         --nodes "${net_dir}/nodes.tsv" \
         --edges "${net_dir}/edges.tsv" \

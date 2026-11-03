@@ -35,7 +35,21 @@ Drugs are labelled by name (pertname), pooling the targets of all their BRD ids.
 not used for training or evaluation (no annotation is not evidence of no target); --predict-unlabeled scores them.
 
 Outputs (--out-dir): config.json, feature_names.txt, models.pt, metrics.json, test_predicted_targets.tsv,
-  test_drug_ranks.tsv, and with --predict-unlabeled unlabeled_predicted_targets.tsv
+  test_drug_ranks.tsv (per perturbation), test_drug_ranks_per_drug.tsv (probabilities averaged over doses),
+  logreg_coefficients.tsv, and with --predict-unlabeled unlabeled_predicted_targets.tsv
+
+Evaluation: each test drug is ranked among two candidate sets, all labelled drugs (rank_*, the repurposing setting)
+and the held-out drugs of its split only (rank_*_heldout). Training drugs' targets are, by construction, the ones
+the model and the target-frequency baseline have seen as positives, which pushes held-out drugs down the first
+ranking; the held-out ranking has no such bias (random: median_percentile 0.5). With --n-folds K the drugs are split
+into K folds, each fold is the test set once (validation drugs drawn from the other folds), each fold goes to
+<out-dir>/fold<i>/, and the pooled out-of-fold ranks to <out-dir>/cv_metrics.json, cv_drug_ranks.tsv and
+cv_drug_ranks_per_drug.tsv. --fold i runs one fold (SLURM arrays); the job that completes the last fold pools them,
+or run --aggregate-only.
+
+A multinomial logistic regression on the standardised base features (no polynomial, no VAE) is always fitted on the
+same rows and sample weights as the FNNs and scored the same way (rank_logreg): the reference the deep model has to
+beat. --linear-only fits only that model (minutes instead of hours).
 """
 import argparse
 import json
@@ -50,6 +64,7 @@ import scipy.sparse as sp
 from scipy.sparse import csgraph
 from scipy.stats import hypergeom, norm
 from sklearn.cluster import MiniBatchKMeans
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, f1_score
 from sklearn.preprocessing import StandardScaler
 
@@ -318,6 +333,23 @@ def split_drugs(drugs, val_frac, test_frac, seed):
     rng.shuffle(drugs)
     n_test, n_val = int(round(len(drugs) * test_frac)), int(round(len(drugs) * val_frac))
     return set(drugs[n_test + n_val:]), set(drugs[n_test:n_test + n_val]), set(drugs[:n_test])
+
+
+def drug_splits(drugs, args):
+    """[(train, val, test)] drug sets: one random split, or one per fold with --n-folds (validation drugs drawn
+    from the other folds, val_frac of all drugs)."""
+    if not args.n_folds:
+        return [split_drugs(drugs, args.val_frac, args.test_frac, args.seed)]
+    drugs = np.array(sorted(drugs))
+    np.random.default_rng(args.seed).shuffle(drugs)
+    folds = np.array_split(drugs, args.n_folds)
+    n_val = int(round(len(drugs) * args.val_frac))
+    out = []
+    for i, te in enumerate(folds):
+        rest = np.concatenate([f for j, f in enumerate(folds) if j != i])
+        np.random.default_rng([args.seed, i]).shuffle(rest)
+        out.append((set(rest[n_val:]), set(rest[:n_val]), set(te)))
+    return out
 
 
 # --------------------------------------------------------------------------------------
@@ -667,6 +699,21 @@ def majority_vote(probs):
     return np.where(counts == best, probs.mean(0), -1).argmax(-1)
 
 
+def fit_logreg(X, y, w, C, seed):
+    """Multinomial logistic regression on standardised base features, same sample weights as the FNNs
+    (normalised to mean 1 so that C keeps its usual meaning)."""
+    scaler = StandardScaler().fit(X)
+    lr = LogisticRegression(C=C, max_iter=2000, random_state=seed)
+    lr.fit(np.nan_to_num(scaler.transform(X)), y, sample_weight=w / w.mean())
+    return scaler, lr
+
+
+def logreg_proba(model, X, batch=262144):
+    scaler, lr = model
+    return np.concatenate([lr.predict_proba(np.nan_to_num(scaler.transform(X[s:s + batch])))
+                           for s in range(0, len(X), batch)]).astype(np.float32)
+
+
 def train_ffn(cfg, pre, in_dim, Xtr, ytr, wtr, Xva, yva, args, device, seed):
     torch.manual_seed(seed)
     model = FFN_decay(in_dim, args.hidden, 3, args.layers, args.dropout, args.decay).to(device)
@@ -694,7 +741,8 @@ def train_ffn(cfg, pre, in_dim, Xtr, ytr, wtr, Xva, yva, args, device, seed):
         m = node_metrics(yva, predict_proba([model], pre, Xva, device)[0])
         log(f"  FFN {cfg} epoch {epoch + 1}: loss {tot / max(len(loader), 1):.4f} | val "
             + ", ".join(f"{k} {v:.4f}" for k, v in m.items() if v is not None))
-        score = m["macro_f1_targets"]
+        score = m["auprc_target_vs_none"] if args.select_metric == "auprc" else m["macro_f1_targets"]
+        score = -1.0 if score is None else score
         if score > best:
             best, bad = score, 0
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
@@ -763,9 +811,51 @@ class DrugRanker:
 
 
 def rank_summary(ranks, n):
+    """n: number of candidates, scalar or one per rank (held-out sets differ between folds). Random ranking gives
+    median_percentile ~0.5 and topX_pct ~X / 100."""
     r = np.asarray(ranks, float)
-    return {"median_rank": float(np.median(r)), "mean_rank": float(r.mean()), "n_candidates": n,
-            **{f"top{k}": float((r <= k).mean()) for k in (1, 5, 10, 50)}}
+    n = np.broadcast_to(np.asarray(n, float), r.shape)
+    pct = r / n
+    return {"n": int(len(r)), "median_rank": float(np.median(r)), "mean_rank": float(r.mean()),
+            "n_candidates": float(np.median(n)), "median_percentile": float(np.median(pct)),
+            **{f"top{k}": float((r <= k).mean()) for k in (1, 5, 10, 50) if k < n.min()},
+            **{f"top{q}_pct": float((pct <= q / 100).mean()) for q in (5, 10, 25)}}
+
+
+RANK_COLS = ("rank_bes", "rank_prob", "rank_logreg", "rank_baseline")
+
+
+def summarise_ranks(per_pert, per_drug):
+    m = {}
+    for name, df in (("test_per_perturbation", per_pert), ("test_per_drug", per_drug)):
+        m[name] = {k + s: rank_summary(df[k + s], df["n_candidates" + s])
+                   for s in ("", "_heldout") for k in RANK_COLS if k + s in df}
+    return m
+
+
+def aggregate_folds(out_dir, n_folds):
+    """Pool the out-of-fold ranks; does nothing until every fold has written its metrics.json."""
+    dirs = [os.path.join(out_dir, f"fold{i}") for i in range(n_folds)]
+    missing = [i for i, d in enumerate(dirs) if not os.path.exists(os.path.join(d, "metrics.json"))]
+    if missing:
+        log(f"cross-validation: folds {missing} not finished, pooling skipped")
+        return
+    pp = pd.concat([pd.read_csv(os.path.join(d, "test_drug_ranks.tsv"), sep="\t").assign(fold=i)
+                    for i, d in enumerate(dirs)], ignore_index=True)
+    pdr = pd.concat([pd.read_csv(os.path.join(d, "test_drug_ranks_per_drug.tsv"), sep="\t").assign(fold=i)
+                     for i, d in enumerate(dirs)], ignore_index=True)
+    m = summarise_ranks(pp, pdr)
+    folds = [json.load(open(os.path.join(d, "metrics.json"))) for d in dirs]
+    m["per_fold_auprc_target_vs_none"] = {
+        part: {model: [f[part][model]["auprc_target_vs_none"] for f in folds] for model in folds[0][part]
+               if "auprc_target_vs_none" in folds[0][part][model]}
+        for part in ("val_sampled_rows", "test_full_proteome_nodes")}
+    pp.to_csv(os.path.join(out_dir, "cv_drug_ranks.tsv"), sep="\t", index=False)
+    pdr.to_csv(os.path.join(out_dir, "cv_drug_ranks_per_drug.tsv"), sep="\t", index=False)
+    with open(os.path.join(out_dir, "cv_metrics.json"), "w") as fh:
+        json.dump(m, fh, indent=2)
+    log(f"cross-validation, {n_folds} folds, {pdr.drug.nunique()} drugs out of fold:\n"
+        + json.dumps({k: m[k] for k in ("test_per_perturbation", "test_per_drug")}, indent=2))
 
 
 def predicted_rows(chunk, votes, mean_p, prot_symbols, targets, top_k):
@@ -786,15 +876,15 @@ def predicted_rows(chunk, votes, mean_p, prot_symbols, targets, top_k):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     io = ap.add_argument_group("inputs")
-    io.add_argument("--nodes", required=True)
-    io.add_argument("--edges", required=True)
-    io.add_argument("--baseline", required=True)
-    io.add_argument("--perturbations", required=True)
-    io.add_argument("--signatures", required=True)
+    io.add_argument("--nodes")
+    io.add_argument("--edges")
+    io.add_argument("--baseline")
+    io.add_argument("--perturbations")
+    io.add_argument("--signatures")
     io.add_argument("--qvalues")
     io.add_argument("--signature-sign", type=float, default=1.0)
     io.add_argument("--mode", choices=["metchange", "metaflux"], default="metchange")
-    io.add_argument("--drug-targets", required=True)
+    io.add_argument("--drug-targets")
     io.add_argument("--drug-metabolites")
     io.add_argument("--out-dir", required=True)
     fe = ap.add_argument_group("features")
@@ -817,7 +907,10 @@ def main():
     sa.add_argument("--kmeans-clusters", type=int, default=50)
     sa.add_argument("--chunk", type=int, default=32, help="perturbations per feature batch")
     sa.add_argument("--val-frac", type=float, default=0.1)
-    sa.add_argument("--test-frac", type=float, default=0.1)
+    sa.add_argument("--test-frac", type=float, default=0.1, help="single split only (ignored with --n-folds)")
+    sa.add_argument("--n-folds", type=int, default=0, help="cross-validation by drug (0: one random split)")
+    sa.add_argument("--fold", type=int, default=None, help="with --n-folds: run only this fold (0-based)")
+    sa.add_argument("--aggregate-only", action="store_true", help="with --n-folds: only pool finished folds")
     sa.add_argument("--max-perts", type=int, default=0, help="subsample perturbations (smoke tests)")
     sa.add_argument("--max-test-perts", type=int, default=0, help="cap full-proteome test scoring")
     sa.add_argument("--predict-unlabeled", action="store_true", help="also score drugs without known targets")
@@ -825,6 +918,9 @@ def main():
                     help="called targets written per perturbation (the drug ranking uses all of them)")
     mo = ap.add_argument_group("models")
     mo.add_argument("--no-vae", action="store_true", help="ablation: FNN on the min-max features")
+    mo.add_argument("--linear-only", action="store_true",
+                    help="fit only the logistic-regression reference (no polynomial, VAE or FNN)")
+    mo.add_argument("--logreg-c", type=float, default=1.0, help="inverse L2 strength of the logistic regression")
     mo.add_argument("--vae-hidden", type=int, default=1500)
     mo.add_argument("--vae-layers", type=int, default=5)
     mo.add_argument("--latent", type=int, default=100)
@@ -840,12 +936,27 @@ def main():
     mo.add_argument("--lr", type=float, default=0.005)
     mo.add_argument("--ffn-epochs", type=int, default=30)
     mo.add_argument("--patience", type=int, default=5)
+    mo.add_argument("--select-metric", choices=["auprc", "macro_f1"], default="auprc",
+                    help="validation metric for early stopping: auprc (target vs none, threshold-free) or "
+                         "macro_f1 (argmax classes 1/2, as in Menacho et al.)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="auto", help="auto (cuda > mps > cpu), cuda, mps or cpu")
     args = ap.parse_args()
 
+    if args.fold is not None and not 0 <= args.fold < max(args.n_folds, 1):
+        ap.error("--fold needs --n-folds and 0 <= fold < n-folds")
+    if args.aggregate_only:
+        if not args.n_folds:
+            ap.error("--aggregate-only needs --n-folds")
+        aggregate_folds(args.out_dir, args.n_folds)
+        return
+    missing = [f"--{k.replace('_', '-')}" for k in ("nodes", "edges", "baseline", "perturbations", "signatures",
+                                                     "drug_targets") if getattr(args, k) is None]
+    if missing:
+        ap.error("the following arguments are required: " + ", ".join(missing))
     os.makedirs(args.out_dir, exist_ok=True)
-    with open(os.path.join(args.out_dir, "config.json"), "w") as fh:
+    with open(os.path.join(args.out_dir, "config.json" if args.fold is None else f"config_fold{args.fold}.json"),
+              "w") as fh:
         json.dump(vars(args), fh, indent=2)
     rng = np.random.default_rng(args.seed)
     torch.manual_seed(args.seed)
@@ -872,9 +983,7 @@ def main():
     if args.max_perts:
         perts = perts.sample(min(args.max_perts, len(perts)), random_state=args.seed).reset_index(drop=True)
     globals_ = pert_globals(perts)
-    tr_d, va_d, te_d = split_drugs(perts.drug.unique(), args.val_frac, args.test_frac, args.seed)
-    split = perts.drug.map(lambda d: "train" if d in tr_d else "val" if d in va_d else "test")
-    log(f"split by drug: {split.value_counts().to_dict()} perturbations")
+    splits = drug_splits(perts.drug.unique(), args)
 
     used = np.unique(np.concatenate([fmap[f] for p in pd.concat([perts.pert, unlabeled.pert]) for f in sigs[p][0]]))
     fb = FeatureBuilder(g, act, membership_matrix(g), used, args)
@@ -882,106 +991,156 @@ def main():
         fh.write("\n".join(fb.names) + "\n")
     log(f"{len(fb.names)} base features per protein")
 
-    # ---- sampled training / validation rows
-    data = {}
-    for part in ("train", "val"):
-        sub = perts[split == part]
-        Xs, ys, ps = [], [], []
-        for chunk, X, y in iter_chunks(fb, sub, sigs, fmap, targets, drug_mets, globals_, args):
-            keep = sample_rows(X, y, len(chunk), args, rng)
-            Xs.append(X[keep])
-            ys.append(y[keep])
-            ps.append(chunk.index.to_numpy()[keep // len(g.prot)])
-        data[part] = (np.concatenate(Xs), np.concatenate(ys), np.concatenate(ps))
-        log(f"{part}: {len(data[part][1]):,} rows, class counts {np.bincount(data[part][1], minlength=4).tolist()}")
+    def run_split(tr_d, va_d, te_d, out_dir, rng):
+        os.makedirs(out_dir, exist_ok=True)
+        split = perts.drug.map(lambda d: "train" if d in tr_d else "val" if d in va_d else "test")
+        log(f"split by drug: {split.value_counts().to_dict()} perturbations")
 
-    Xtr, ytr, ptr = data["train"]
-    poly = PolyMinMax(Xtr.shape[1], poly=not args.no_poly).to(device).fit(Xtr, device)
-    vae = None if args.no_vae else train_vae(poly, Xtr, args, device, rng)
-    pre = Preprocessor(poly, vae).to(device).eval()
-    in_dim = int(poly.keep.sum())
+        # ---- sampled training / validation rows
+        data = {}
+        for part in ("train", "val"):
+            sub = perts[split == part]
+            Xs, ys, ps = [], [], []
+            for chunk, X, y in iter_chunks(fb, sub, sigs, fmap, targets, drug_mets, globals_, args):
+                keep = sample_rows(X, y, len(chunk), args, rng)
+                Xs.append(X[keep])
+                ys.append(y[keep])
+                ps.append(chunk.index.to_numpy()[keep // len(g.prot)])
+            data[part] = (np.concatenate(Xs), np.concatenate(ys), np.concatenate(ps))
+            log(f"{part}: {len(data[part][1]):,} rows, class counts {np.bincount(data[part][1], minlength=4).tolist()}")
 
-    # class 3 is not trained on; the sampler balances classes and drugs (many doses of one drug should not
-    # outweigh a drug measured once)
-    trainable = ytr < 3
-    Xtr, ytr, ptr = Xtr[trainable], ytr[trainable], ptr[trainable]
-    class_w = 1.0 / np.bincount(ytr, minlength=3).clip(min=1)
-    drug_n = perts.drug.map(perts.drug.value_counts()).to_numpy()
-    w = (class_w[ytr] / drug_n[ptr]).astype(np.float64)
-    Xva, yva, _ = data["val"]
+        Xtr, ytr, ptr = data["train"]
+        if not args.linear_only:
+            poly = PolyMinMax(Xtr.shape[1], poly=not args.no_poly).to(device).fit(Xtr, device)
+            vae = None if args.no_vae else train_vae(poly, Xtr, args, device, rng)
+            pre = Preprocessor(poly, vae).to(device).eval()
+            in_dim = int(poly.keep.sum())
 
-    models = [train_ffn(cfg, pre, in_dim, Xtr, ytr, w, Xva, yva, args, device, args.seed + i)
-              for i, cfg in enumerate(ENSEMBLE_CONFIGS)]
-    probs_va = predict_proba(models, pre, Xva, device)
-    metrics = {"val_sampled_rows": {f"model{i + 1}": node_metrics(yva, probs_va[i]) for i in range(len(models))}}
-    metrics["val_sampled_rows"]["ensemble_vote"] = evaluate_ffn(yva, majority_vote(probs_va))
-    torch.save({"poly": poly.state_dict(), "vae": None if vae is None else vae.state_dict(),
-                "ffns": [m.state_dict() for m in models], "feature_names": fb.names, "args": vars(args)},
-               os.path.join(args.out_dir, "models.pt"))
+        # class 3 is not trained on; the sampler balances classes and drugs (many doses of one drug should not
+        # outweigh a drug measured once)
+        trainable = ytr < 3
+        Xtr, ytr, ptr = Xtr[trainable], ytr[trainable], ptr[trainable]
+        class_w = 1.0 / np.bincount(ytr, minlength=3).clip(min=1)
+        drug_n = perts.drug.map(perts.drug.value_counts()).to_numpy()
+        w = (class_w[ytr] / drug_n[ptr]).astype(np.float64)
+        Xva, yva, _ = data["val"]
 
-    # ---- full-proteome scoring of held-out drugs
-    test = perts[split == "test"]
-    if args.max_test_perts:
-        test = test.sample(min(args.max_test_perts, len(test)), random_state=args.seed)
-    tkeys = {d: targets[d] for d in sorted({d.lower() for d in perts.drug})}  # candidates: all labelled A549 drugs
-    ranker = DrugRanker(tkeys, len(g.prot))
-    train_drugs = sorted({d.lower() for d in tr_d})
-    prior = np.zeros((len(g.prot), 3))
-    for d in train_drugs:
-        for gene, c in targets[d].items():
-            if c == 3:
-                prior[gene, 1:] += 0.5
-            else:
-                prior[gene, c] += 1
-    prior /= len(train_drugs)
-    prior_scores = ranker.prob_scores(prior)
+        t0 = time.time()
+        lin = fit_logreg(Xtr, ytr, w, args.logreg_c, args.seed)
+        metrics = {"val_sampled_rows": {"logreg": node_metrics(yva, logreg_proba(lin, Xva))}}
+        log(f"logistic regression ({time.time() - t0:.0f}s) | val " + ", ".join(
+            f"{k} {v:.4f}" for k, v in metrics["val_sampled_rows"]["logreg"].items() if v is not None))
+        coef = pd.DataFrame(lin[1].coef_.T, index=fb.names, columns=[f"class{c}" for c in lin[1].classes_])
+        coef["target_vs_none"] = coef.drop(columns="class0").mean(axis=1) - coef["class0"]
+        coef.sort_values("target_vs_none", key=np.abs, ascending=False).to_csv(
+            os.path.join(out_dir, "logreg_coefficients.tsv"), sep="\t", index_label="feature")
 
-    rank_rows, pred_rows, ys_all, probs_all, drug_prob = [], [], [], [], {}
-    for chunk, X, y in iter_chunks(fb, test, sigs, fmap, targets, drug_mets, globals_, args):
-        P = predict_proba(models, pre, X, device)
-        votes = majority_vote(P).reshape(len(chunk), -1)
-        mean_p = P.mean(0).reshape(len(chunk), len(g.prot), 3)
-        ys_all.append(y)
-        probs_all.append(P.mean(0).astype(np.float32))
-        for j, (p, d) in enumerate(zip(chunk.pert, chunk.drug)):
-            key, v, pr = d.lower(), votes[j], mean_p[j]
-            drug_prob.setdefault(key, []).append(pr)
-            known = targets[key]
-            rank_rows.append(dict(
-                pert=p, drug=d, n_predicted=int((v > 0).sum()), n_true_targets=len(known),
-                true_targets_hit=int(sum(v[gn] in ((1, 2) if c == 3 else (c,)) for gn, c in known.items())),
-                rank_bes=float(ranker.bes_ranks(v)[ranker.col[key]]),
-                rank_prob=ranker.rank_of(ranker.prob_scores(pr), key),
-                rank_baseline=ranker.rank_of(prior_scores, key)))
-        pred_rows += predicted_rows(chunk, votes, mean_p, g.prot_symbols, targets, args.report_top_k)
-        log(f"test scoring: {len(rank_rows)}/{len(test)} perturbations")
+        models = []
+        if not args.linear_only:
+            models = [train_ffn(cfg, pre, in_dim, Xtr, ytr, w, Xva, yva, args, device, args.seed + i)
+                      for i, cfg in enumerate(ENSEMBLE_CONFIGS)]
+            probs_va = predict_proba(models, pre, Xva, device)
+            metrics["val_sampled_rows"].update({f"model{i + 1}": node_metrics(yva, probs_va[i]) for i in range(len(models))})
+            metrics["val_sampled_rows"]["ensemble_vote"] = evaluate_ffn(yva, majority_vote(probs_va))
+            torch.save({"poly": poly.state_dict(), "vae": None if vae is None else vae.state_dict(),
+                        "ffns": [m.state_dict() for m in models], "feature_names": fb.names, "args": vars(args)},
+                       os.path.join(out_dir, "models.pt"))
 
-    ranks = pd.DataFrame(rank_rows)
-    ranks.to_csv(os.path.join(args.out_dir, "test_drug_ranks.tsv"), sep="\t", index=False)
-    pd.DataFrame(pred_rows).to_csv(os.path.join(args.out_dir, "test_predicted_targets.tsv"), sep="\t", index=False)
-    yt, pt = np.concatenate(ys_all), np.concatenate(probs_all)
-    nd = len(ranker.drugs)
-    drug_ranks = [ranker.rank_of(ranker.prob_scores(np.mean(ps, 0)), d) for d, ps in drug_prob.items()]
-    metrics["test_full_proteome_nodes"] = node_metrics(yt, pt)
-    metrics["test_per_perturbation"] = {k: rank_summary(ranks[k], nd) for k in ("rank_bes", "rank_prob", "rank_baseline")}
-    metrics["test_per_drug"] = {"rank_prob_mean_over_doses": rank_summary(drug_ranks, nd),
-                                "rank_baseline": rank_summary([ranker.rank_of(prior_scores, d) for d in drug_prob], nd)}
+        # ---- full-proteome scoring of held-out drugs
+        test = perts[split == "test"]
+        if args.max_test_perts:
+            test = test.sample(min(args.max_test_perts, len(test)), random_state=args.seed)
+        # candidates: all labelled A549 drugs, and the held-out drugs of this split only
+        rankers = {s: DrugRanker({d: targets[d] for d in sorted({d.lower() for d in keys})}, len(g.prot))
+                   for s, keys in (("", perts.drug), ("_heldout", te_d))}
+        train_drugs = sorted({d.lower() for d in tr_d})
+        prior = np.zeros((len(g.prot), 3))
+        for d in train_drugs:
+            for gene, c in targets[d].items():
+                if c == 3:
+                    prior[gene, 1:] += 0.5
+                else:
+                    prior[gene, c] += 1
+        prior /= len(train_drugs)
+        prior_scores = {s: rk.prob_scores(prior) for s, rk in rankers.items()}
 
-    # ---- drugs without known targets (application, no evaluation possible)
-    if args.predict_unlabeled and len(unlabeled):
-        ug = pert_globals(unlabeled)
-        rows = []
-        for chunk, X, _ in iter_chunks(fb, unlabeled, sigs, fmap, {}, drug_mets, ug, args):
-            P = predict_proba(models, pre, X, device)
-            rows += predicted_rows(chunk, majority_vote(P).reshape(len(chunk), -1),
-                                   P.mean(0).reshape(len(chunk), len(g.prot), 3), g.prot_symbols, {},
-                                   args.report_top_k)
-        pd.DataFrame(rows).to_csv(os.path.join(args.out_dir, "unlabeled_predicted_targets.tsv"), sep="\t", index=False)
-        log(f"unlabeled drugs: {len(rows):,} predicted targets for {unlabeled.drug.nunique()} drugs")
+        rank_rows, pred_rows, ys_all, probs_all, lin_all, drug_prob, lin_prob = [], [], [], [], [], {}, {}
+        for chunk, X, y in iter_chunks(fb, test, sigs, fmap, targets, drug_mets, globals_, args):
+            PL = logreg_proba(lin, X)
+            lin_all.append(PL)
+            PL = PL.reshape(len(chunk), len(g.prot), 3)
+            ys_all.append(y)
+            if models:
+                P = predict_proba(models, pre, X, device)
+                votes = majority_vote(P).reshape(len(chunk), -1)
+                mean_p = P.mean(0).reshape(len(chunk), len(g.prot), 3)
+                probs_all.append(P.mean(0).astype(np.float32))
+                pred_rows += predicted_rows(chunk, votes, mean_p, g.prot_symbols, targets, args.report_top_k)
+            for j, (p, d) in enumerate(zip(chunk.pert, chunk.drug)):
+                key = d.lower()
+                known = targets[key]
+                lin_prob.setdefault(key, []).append(PL[j])
+                row = dict(pert=p, drug=d, n_true_targets=len(known))
+                if models:
+                    v = votes[j]
+                    drug_prob.setdefault(key, []).append(mean_p[j])
+                    row.update(n_predicted=int((v > 0).sum()),
+                               true_targets_hit=int(sum(v[gn] in ((1, 2) if c == 3 else (c,)) for gn, c in known.items())))
+                for s, rk in rankers.items():
+                    row["n_candidates" + s] = len(rk.drugs)
+                    row["rank_logreg" + s] = rk.rank_of(rk.prob_scores(PL[j]), key)
+                    row["rank_baseline" + s] = rk.rank_of(prior_scores[s], key)
+                    if models:
+                        row["rank_bes" + s] = float(rk.bes_ranks(v)[rk.col[key]])
+                        row["rank_prob" + s] = rk.rank_of(rk.prob_scores(mean_p[j]), key)
+                rank_rows.append(row)
+            log(f"test scoring: {len(rank_rows)}/{len(test)} perturbations")
 
-    with open(os.path.join(args.out_dir, "metrics.json"), "w") as fh:
-        json.dump(metrics, fh, indent=2)
-    log(json.dumps({k: metrics[k] for k in ("test_per_perturbation", "test_per_drug")}, indent=2))
+        ranks = pd.DataFrame(rank_rows)
+        ranks.to_csv(os.path.join(out_dir, "test_drug_ranks.tsv"), sep="\t", index=False)
+        if models:
+            pd.DataFrame(pred_rows).to_csv(os.path.join(out_dir, "test_predicted_targets.tsv"), sep="\t", index=False)
+        drug_rows = []
+        for key, ps in lin_prob.items():
+            row = dict(drug=key, n_perturbations=len(ps))
+            for s, rk in rankers.items():
+                row["n_candidates" + s] = len(rk.drugs)
+                row["rank_logreg" + s] = rk.rank_of(rk.prob_scores(np.mean(ps, 0)), key)
+                row["rank_baseline" + s] = rk.rank_of(prior_scores[s], key)
+                if models:
+                    row["rank_prob" + s] = rk.rank_of(rk.prob_scores(np.mean(drug_prob[key], 0)), key)
+            drug_rows.append(row)
+        drug_ranks = pd.DataFrame(drug_rows)
+        drug_ranks.to_csv(os.path.join(out_dir, "test_drug_ranks_per_drug.tsv"), sep="\t", index=False)
+        yt = np.concatenate(ys_all)
+        metrics["test_full_proteome_nodes"] = {"logreg": node_metrics(yt, np.concatenate(lin_all))}
+        if models:
+            metrics["test_full_proteome_nodes"]["ensemble"] = node_metrics(yt, np.concatenate(probs_all))
+        metrics.update(summarise_ranks(ranks, drug_ranks))
+
+        # ---- drugs without known targets (application, no evaluation possible)
+        if args.predict_unlabeled and len(unlabeled) and models:
+            ug = pert_globals(unlabeled)
+            rows = []
+            for chunk, X, _ in iter_chunks(fb, unlabeled, sigs, fmap, {}, drug_mets, ug, args):
+                P = predict_proba(models, pre, X, device)
+                rows += predicted_rows(chunk, majority_vote(P).reshape(len(chunk), -1),
+                                       P.mean(0).reshape(len(chunk), len(g.prot), 3), g.prot_symbols, {},
+                                       args.report_top_k)
+            pd.DataFrame(rows).to_csv(os.path.join(out_dir, "unlabeled_predicted_targets.tsv"), sep="\t", index=False)
+            log(f"unlabeled drugs: {len(rows):,} predicted targets for {unlabeled.drug.nunique()} drugs")
+
+        with open(os.path.join(out_dir, "metrics.json"), "w") as fh:
+            json.dump(metrics, fh, indent=2)
+        log(json.dumps({k: metrics[k] for k in ("test_per_perturbation", "test_per_drug")}, indent=2))
+
+    if not args.n_folds:
+        run_split(*splits[0], args.out_dir, rng)
+        return
+    for i in range(args.n_folds) if args.fold is None else [args.fold]:
+        log(f"---- fold {i + 1}/{args.n_folds}")
+        run_split(*splits[i], os.path.join(args.out_dir, f"fold{i}"), np.random.default_rng([args.seed, i]))
+    aggregate_folds(args.out_dir, args.n_folds)
 
 
 if __name__ == "__main__":
