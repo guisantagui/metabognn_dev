@@ -22,7 +22,7 @@ conda activate r-4.3.1
 cell="A549"
 cell_mat_dir=/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cell_matrices/
 workers=64
-out_dir="/home/users/gsantamaria/projects/metabo_pert/results/labels/"
+out_dir="/scratch/users/gsantamaria/test_large_files/metabognn_dev/results/labels/"
 
 mkdir -p "$out_dir"
 
