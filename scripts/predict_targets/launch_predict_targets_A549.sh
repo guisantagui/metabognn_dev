@@ -26,10 +26,19 @@ project_dir="/home/users/gsantamaria/projects/metabognn_dev"
 cell="A549"
 penalty="rank"
 net_dir="${project_dir}/data/networks/combined"
-cell_dir="${project_dir}/data/perturbation/lincs/cell_matrices/${cell}"
+cell_dir="/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cell_matrices/${cell}"   # as in the other launchers
+hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
 labels_dir="${project_dir}/results/labels/${cell}/metchange/${penalty}"   # rerun limma_DE.R (fixed) first
 out_dir="${project_dir}/results/predict_targets/${cell}/metchange_${penalty}"
 device="cpu" # cpu, cuda
+
+# Control baseline (baseline_ctrl.tsv) and perturbation table (perturbations.tsv), derived from expr.csv and
+# mdat.csv: (re)computed when missing or older than their inputs
+if [ ! -f "${cell_dir}/baseline_ctrl.tsv" ] || [ ! -f "${cell_dir}/perturbations.tsv" ] \
+   || [ "${cell_dir}/expr.csv" -nt "${cell_dir}/baseline_ctrl.tsv" ] \
+   || [ "${cell_dir}/mdat.csv" -nt "${cell_dir}/perturbations.tsv" ]; then
+        python prepare_inputs.py --cell-dir "$cell_dir" --hgnc "$hgnc_f"
+fi
 
 # MetChange inconsistency is sign-flipped so that positive = more production (Schuhknecht benchmark convention).
 # Relation weights default to build_network.SUGGESTED_ALPHA; ablations: --alpha grn_binding=0,
