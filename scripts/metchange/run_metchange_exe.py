@@ -382,7 +382,7 @@ def ensure_max_fluxes(S, lb, ub, path, threads=1):
 # https://sysbiochalmers.github.io/Human-GEM-guide/faq_troubleshoot/
 # https://github.com/SysBioChalmers/Human-GEM/issues/172
 
-def build_split_stoichiometry(model, ignore_compartments=("x",)):
+def build_split_stoichiometry(model, ignore_compartments=()):
     S = create_stoichiometric_matrix(model, array_type="dok").tocoo()
     rows, cols, data = S.row, S.col, S.data
 
