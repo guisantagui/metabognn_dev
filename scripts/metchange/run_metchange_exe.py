@@ -599,7 +599,7 @@ start_time = time.time()
 print ("Computing LP2...")
 result = metchange_gurobi_parallel(
     S, lb, ub, expr, met_ids,
-    "lp1_fluxes.npy", n_workers=n_workers, threads_per_worker=1
+    os.path.join(out_dir, "lp1_fluxes.npy"), n_workers=n_workers, threads_per_worker=1
 )
 print("LP2 finished: %s seconds elapsed" % (time.time() - start_time))
 result.columns = g.columns
