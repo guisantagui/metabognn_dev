@@ -114,7 +114,7 @@ perts <- unique(mdat$perturbation[mdat$exper_group != "ctrl"])
 # Do parallelized limma analysis
 ################################################################################
 
-options(future.globals.maxSize = 10 * 1024^3)
+options(future.globals.maxSize = 30 * 1024^3)
 plan(multicore, workers = workers)
 
 message("Running limma...")
