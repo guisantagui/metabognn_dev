@@ -48,32 +48,41 @@ out_dir_metchange="${out_dir}/${cell}/${penalty}/"
 mkdir -p "$out_dir_expr"
 mkdir -p "$out_dir_metchange"
 
-# Create rank-based penalties
-python create_penalties.py \
-    --expr "$expr_f" \
-    --hgnc "$hgnc_f" \
-    --threshold 2 \
-    --pen_mode "$penalty" \
-    --gem "$gem_f" \
-    --out_dir $(dirname "$expr_f")
-
 expr_pen_f="${expr_f%.csv}_rank.csv"
 pen_base=$(basename "$expr_pen_f" .csv)
+mdat_base=$(basename "$mdat_f" .csv)
 
-# Remove batches from earlier runs, so that the array size below counts only these
-rm -f "${out_dir_expr}/${pen_base}"_batch_*.csv "${out_dir_expr}"/$(basename "$mdat_f" .csv)_batch_*.csv
+# Rank-based penalties: (re)computed only when missing or older than the expression
+if [ ! -f "$expr_pen_f" ] || [ "$expr_f" -nt "$expr_pen_f" ]; then
+    python create_penalties.py \
+        --expr "$expr_f" \
+        --hgnc "$hgnc_f" \
+        --threshold 2 \
+        --pen_mode "$penalty" \
+        --gem "$gem_f" \
+        --out_dir $(dirname "$expr_f")
+else
+    echo "${expr_pen_f} is up to date, skipping create_penalties.py."
+fi
 
-python prepare_input_matrices.py --expr "$expr_pen_f" \
-    --mdat "$mdat_f" \
-    --input_type "$input_type" \
-    --hgnc "$hgnc_f" \
-    --batch_size "$batch_size" \
-    --gem "$gem_f" \
-    --out_dir "$out_dir_expr"
+# Batches: rewritten only when missing or older than the penalties / metadata. Batch 0 is written first, so
+# if it is newer than both inputs the split finished (prepare_input_matrices.py exits non-zero otherwise).
+n_expected=$(( ($(head -1 "$expr_pen_f" | tr ',' '\n' | wc -l) - 1 + batch_size - 1) / batch_size ))
+n_found=$(ls "${out_dir_expr}/${pen_base}"_batch_*.csv 2>/dev/null | wc -l)
+first_batch="${out_dir_expr}/${pen_base}_batch_0.csv"
+if [ "$n_found" -ne "$n_expected" ] || [ "$expr_pen_f" -nt "$first_batch" ] || [ "$mdat_f" -nt "$first_batch" ]; then
+    # Remove batches from earlier runs, so that the array size below counts only these
+    rm -f "${out_dir_expr}/${pen_base}"_batch_*.csv "${out_dir_expr}/${mdat_base}"_batch_*.csv
 
-if [ $? -ne 0 ]; then
-    echo "ERROR: prepare_input_matrices.py failed."
-    exit 1
+    python prepare_input_matrices.py --expr "$expr_pen_f" \
+        --mdat "$mdat_f" \
+        --input_type "$input_type" \
+        --hgnc "$hgnc_f" \
+        --batch_size "$batch_size" \
+        --gem "$gem_f" \
+        --out_dir "$out_dir_expr"
+else
+    echo "${n_found} batches in ${out_dir_expr} are up to date, skipping prepare_input_matrices.py."
 fi
 
 max_fluxes_file="${out_dir_metchange}/lp1_fluxes.npy"
