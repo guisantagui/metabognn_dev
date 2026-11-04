@@ -110,111 +110,106 @@ if (!identical(mdat$id, colnames(expr))) {
 #)
 
 perts <- unique(mdat$perturbation[mdat$exper_group != "ctrl"])
+genes_all <- rownames(expr)
+
+# Samples of one perturbation's model: its own samples and the controls of the
+# same timepoint in its batches.
+fit_samples <- function(pert) {
+    pert_bool <- mdat$perturbation == pert
+    timepoint <- unique(mdat$timepoint[pert_bool])
+    ctrl_bool <- (
+        mdat$exper_group == "ctrl" &
+        mdat$timepoint == timepoint &
+        mdat$batch %in% unique(mdat$batch[pert_bool])
+    )
+    pert_bool | ctrl_bool
+}
+
+# limma for one perturbation: genes x (basal, log2FC, pval, qval), or NULL if
+# there are no matched controls.
+fit_one <- function(pert) {
+    sel <- fit_samples(pert)
+    mdat_filt <- mdat[sel, ]
+    if (length(unique(mdat_filt$perturbation)) < 2) return(NULL)
+    dat_filt <- expr[, sel, drop = FALSE]
+    design <- model.matrix(~ perturbation, data = mdat_filt)
+
+    if (length(unique(mdat_filt$batch)) > 1) {
+        corfit <- duplicateCorrelation(dat_filt, design, block = mdat_filt$batch)
+        fit <- lmFit(dat_filt, design, block = mdat_filt$batch,
+                     correlation = corfit$consensus.correlation)
+    } else {
+        fit <- lmFit(dat_filt, design)
+    }
+    fit <- eBayes(fit)
+
+    # sort.by = "none": keep the input gene order (topTable sorts by B by
+    # default, which differs between perturbations)
+    results <- topTable(fit, coef = 2, number = Inf, adjust.method = "BH",
+                        confint = TRUE, sort.by = "none")
+    out <- cbind(fit$coefficients[rownames(results), 1], results$logFC,
+                 results$P.Value, results$adj.P.Val)
+    if (!identical(rownames(results), genes_all)) {
+        out <- out[match(genes_all, rownames(results)), , drop = FALSE]
+    }
+    dimnames(out) <- NULL
+    # Forked workers inherit the parent's garbage-collection threshold, which is
+    # large once the expression matrix is loaded: without an explicit gc() each
+    # worker accumulates GBs of discarded fits before R collects them. A full
+    # gc() costs ~10-100 ms, so it is run after large models and every 8 fits.
+    big <- length(dat_filt) > 1e7
+    rm(dat_filt, fit, results, mdat_filt, design)
+    gc_counter <<- gc_counter + 1
+    if (big || gc_counter %% 8 == 0) invisible(gc(verbose = FALSE))
+    out
+}
+gc_counter <- 0   # per worker: each forked worker modifies its own copy
 
 # Do parallelized limma analysis
 ################################################################################
+# Workers are forked and read expr without copying it. Perturbations are run in
+# rounds of workers x 4, largest models first (from 2 to thousands of samples,
+# so that the slowest ones do not end up last), and each round's results go
+# straight into the output matrices: the parent never holds all the per-
+# perturbation results next to the final matrices.
 
 options(future.globals.maxSize = 30 * 1024^3)
 plan(multicore, workers = workers)
 
+n_samples <- vapply(perts, function(p) sum(fit_samples(p)), integer(1))
+order_run <- order(n_samples, decreasing = TRUE)
+message(sprintf("%d perturbations, %d to %d samples per model (median %d)", length(perts),
+                min(n_samples), max(n_samples), as.integer(median(n_samples))))
+
+empty <- function() matrix(NA_real_, nrow = length(genes_all), ncol = length(perts),
+                           dimnames = list(genes_all, perts))
+basal <- empty()
+log2FCs <- empty()
+pvals <- empty()
+qvals <- empty()
+
 message("Running limma...")
-res <- future_lapply(
-    perts,
-    function(pert) {
-        pert_bool <- mdat$perturbation == pert
-        mdat_pert <- mdat[pert_bool, ]
-
-        batches <- unique(mdat_pert$batch)
-        timepoint <- unique(mdat_pert$timepoint)
-
-        ctrl_bool <- (
-            mdat$exper_group == "ctrl" &
-            mdat$timepoint == timepoint &
-            mdat$batch %in% batches
-        )
-
-        mdat_filt <- mdat[pert_bool | ctrl_bool, ]
-        dat_filt <- expr[, pert_bool | ctrl_bool, drop = FALSE]
-
-        if (length(unique(mdat_filt$perturbation)) > 1){
-            design <- model.matrix(~ perturbation, data = mdat_filt)
-
-            if (length(unique(mdat_filt$batch)) > 1) {
-
-                corfit <- duplicateCorrelation(
-                    dat_filt,
-                    design,
-                    block = mdat_filt$batch
-                )
-
-                fit <- lmFit(
-                    dat_filt,
-                    design,
-                    block = mdat_filt$batch,
-                    correlation = corfit$consensus.correlation
-                )
-
-            } else {
-                fit <- lmFit(dat_filt, design)
-            }
-
-            fit <- eBayes(fit)
-
-            # sort.by = "none": keep the input gene order (topTable sorts by B by
-            # default, which differs between perturbations)
-            results <- topTable(
-                fit,
-                coef = 2,
-                number = Inf,
-                adjust.method = "BH",
-                confint = TRUE,
-                sort.by = "none"
-            )
-            basal <- fit$coefficients[rownames(results), 1]
-            #delta <- fit$coefficients[, 2]
-
-            list(
-                basal = basal,
-                #delta = delta,
-                log2FC = results$logFC,
-                pval   = results$P.Value,
-                qval   = results$adj.P.Val,
-                genes  = rownames(results)
-            )
-        } else {
-            list(
-                basal = setNames(rep(NA_real_, nrow(expr)), rownames(expr)),
-                #delta = setNames(rep(NA_real_, nrow(expr)), rownames(expr)),
-                log2FC = setNames(rep(NA_real_, nrow(expr)), rownames(expr)),
-                pval   = setNames(rep(NA_real_, nrow(expr)), rownames(expr)),
-                qval   = setNames(rep(NA_real_, nrow(expr)), rownames(expr)),
-                genes  = rownames(expr)
-            )
-        }
-    },
-    future.seed = TRUE
-)
-message("limma done.")
-
-names(res) <- perts
-
-# Convert to matrices/data.frames. Each perturbation's values are matched to one
-# gene order by name: cbind() of named vectors aligns by position, not by name.
-genes_all <- rownames(expr)
-to_matrix <- function(field) {
-    m <- vapply(res, function(x) x[[field]][match(genes_all, x$genes)], numeric(length(genes_all)))
-    rownames(m) <- genes_all
-    m
+round_size <- workers * 4
+n_rounds <- ceiling(length(perts) / round_size)
+for (r in seq_len(n_rounds)) {
+    idx <- order_run[((r - 1) * round_size + 1):min(r * round_size, length(perts))]
+    res <- future_lapply(perts[idx], fit_one, future.seed = TRUE)
+    for (k in seq_along(idx)) {
+        m <- res[[k]]
+        if (is.null(m)) next
+        j <- idx[k]
+        basal[, j] <- m[, 1]
+        log2FCs[, j] <- m[, 2]
+        pvals[, j] <- m[, 3]
+        qvals[, j] <- m[, 4]
+    }
+    rm(res)
+    invisible(gc(verbose = FALSE))
+    message(sprintf("round %d / %d done (%d perturbations)", r, n_rounds, min(r * round_size, length(perts))))
 }
-basal <- to_matrix("basal")
-log2FCs <- to_matrix("log2FC")
-pvals <- to_matrix("pval")
-qvals <- to_matrix("qval")
-
-colnames(basal) <- perts
-colnames(log2FCs) <- perts
-colnames(pvals) <- perts
-colnames(qvals) <- perts
+message("limma done.")
+message(sprintf("%d perturbations without matched controls (NA columns)",
+                sum(colSums(!is.na(log2FCs)) == 0)))
 
 write_table_fast(basal, f = file.path(out_dir, "basal.csv"))
 write_table_fast(log2FCs, f = file.path(out_dir, "log2FC.csv"))
