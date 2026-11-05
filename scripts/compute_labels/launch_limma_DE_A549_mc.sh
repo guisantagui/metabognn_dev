@@ -32,9 +32,8 @@ workers=64
 out_dir="/home/users/gsantamaria/projects/metabognn_dev/results/labels/"
 
 medium=$(basename "${medium_f%.json}")
-expr="${delta_mat_dir}/${cell}/${penalty}/expr_${penalty}_metChange_${medium}_concat.csv"
+expr="${delta_mat_dir}/${cell}/${penalty}/expr_ensembl_${penalty}_metChange_${medium}_concat.csv"
 mdat="${cell_mat_dir}/${cell}/mdat.csv"
-mdat="/home/users/gsantamaria/projects/metabo_pert/data/LINCS/lincs_A549_mdat.csv"
 out_dir_cell="${out_dir}/${cell}/metchange/${penalty}/"
 
 

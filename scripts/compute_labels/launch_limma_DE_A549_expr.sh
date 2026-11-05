@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=200GB
 #SBATCH -c 128
-#SBATCH --time=01-00:00:00
+#SBATCH --time=02-00:00:00
 #Define sdout path
 #SBATCH --output=./limma_A549_expr.out
 #Define sderr path
