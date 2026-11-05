@@ -18,6 +18,10 @@
 #SBATCH --qos=normal
 
 conda activate r-4.3.1
+# One BLAS thread per worker: the workers already use all the cores
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+# Results are checkpointed in <out_dir>/checkpoints: if the job hits the time
+# limit, resubmit it as is and it continues where it stopped.
 
 cell="A549"
 cell_mat_dir=/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cell_matrices/
