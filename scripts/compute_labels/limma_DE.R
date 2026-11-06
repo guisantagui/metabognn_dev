@@ -63,31 +63,41 @@ message(sprintf("Loading expression data from %s", expr_f))
 # One numeric matrix, filled from the data.table block by block while the
 # copied columns are dropped: a data.frame with one column per sample, apply()
 # and row subsetting held several full copies at once.
-dt <- fread(expr_f, header = TRUE)
+# Column types are given, not guessed: on wide files with empty fields (missing
+# values, e.g. MetChange written by polars) fread's type guessing has to re-read
+# columns, and with ~150k columns that crashed data.table (segfault).
+header <- names(fread(expr_f, header = TRUE, nrows = 0))
+dt <- fread(expr_f, header = TRUE, colClasses = c("character", rep("double", length(header) - 1)))
 feature_ids <- dt[[1]]
 sample_ids <- names(dt)[-1]
 
-# Features with no variance (constant or with missing values) are dropped:
-# min and max per row, accumulated over the columns.
+# Features with no variance among their non-missing values (constant, or all
+# missing) are dropped: min and max per row, accumulated over the columns.
+# Features with some missing values are kept; limma fits them on the samples
+# they have.
 row_min <- rep(Inf, nrow(dt))
 row_max <- rep(-Inf, nrow(dt))
-for (s in sample_ids) {
-    row_min <- pmin(row_min, dt[[s]])
-    row_max <- pmax(row_max, dt[[s]])
+n_missing <- rep(0L, nrow(dt))
+for (k in seq_along(sample_ids) + 1L) {
+    x <- dt[[k]]
+    row_min <- pmin(row_min, x, na.rm = TRUE)
+    row_max <- pmax(row_max, x, na.rm = TRUE)
+    n_missing <- n_missing + is.na(x)
 }
-keep <- !is.na(row_min) & !is.na(row_max) & row_max > row_min
-message(sprintf("%d features, %d with no variance or missing values removed",
-                length(keep), sum(!keep)))
+keep <- row_max > row_min
+message(sprintf("%d features, %d with no variance or all values missing removed, %d kept with some missing values",
+                length(keep), sum(!keep), sum(keep & n_missing > 0)))
 
 expr <- matrix(NA_real_, nrow = sum(keep), ncol = length(sample_ids),
                dimnames = list(feature_ids[keep], sample_ids))
 block <- 1000
 for (start in seq(1, length(sample_ids), by = block)) {
-    cols <- sample_ids[start:min(start + block - 1, length(sample_ids))]
-    for (s in cols) expr[, s] <- dt[[s]][keep]
-    dt[, (cols) := NULL]
+    idx <- start:min(start + block - 1, length(sample_ids))
+    # the columns before this block were dropped: sample idx[1] is column 2
+    for (k in idx) expr[, k] <- dt[[k - start + 2L]][keep]
+    dt[, (sample_ids[idx]) := NULL]
 }
-rm(dt, row_min, row_max, keep)
+rm(dt, row_min, row_max, n_missing, keep, x)
 invisible(gc())
 
 message(sprintf("Loading and parsing metadata from %s", mdat_f))
@@ -130,12 +140,26 @@ fit_samples <- function(pert) {
 # samples) projected block design for every gene, although it does not depend on
 # the gene: ~2 s per gene with 4,000 samples, i.e. ~12 h per perturbation. Here
 # the SVD is done once and the genes are projected together, in chunks; the
-# per-gene gamma GLM (glmgam.fit) is the same. Other cases go to limma.
+# per-gene gamma GLM (glmgam.fit) is the same. Genes with missing values go
+# through limma (each is fitted on its own samples) and the consensus is taken
+# over all genes, as in limma. Other cases go to limma entirely.
 dup_cor_fast <- function(M, design, block, trim = 0.15, chunk = 2000L) {
     design <- as.matrix(design)
     QR <- qr(design)
-    if (anyNA(M) || max(table(block)) < 2L || QR$rank < ncol(design)) {
+    if (max(table(block)) < 2L || QR$rank < ncol(design)) {
         return(duplicateCorrelation(M, design, block = block, trim = trim))
+    }
+    incomplete <- rowSums(is.na(M)) > 0
+    if (all(incomplete)) return(duplicateCorrelation(M, design, block = block, trim = trim))
+    if (any(incomplete)) {
+        # limma clips each gene's correlation to the same bounds before the
+        # trimmed mean, so the two parts can be computed apart and pooled
+        arho <- rep_len(NA_real_, nrow(M))
+        arho[!incomplete] <- dup_cor_fast(M[!incomplete, , drop = FALSE], design, block, trim, chunk)$atanh.correlations
+        arho[incomplete] <- duplicateCorrelation(M[incomplete, , drop = FALSE], design, block = block,
+                                                 trim = trim)$atanh.correlations
+        mrho <- tanh(mean(arho, trim = trim, na.rm = TRUE))
+        return(list(consensus.correlation = mrho, cor = mrho, atanh.correlations = arho))
     }
     A <- factor(block)
     nobs <- ncol(M)
@@ -175,6 +199,22 @@ dup_cor_fast <- function(M, design, block, trim = 0.15, chunk = 2000L) {
     list(consensus.correlation = mrho, cor = mrho, atanh.correlations = arho)
 }
 
+# lmFit, with the genes that have missing values fitted apart: with a single
+# missing value limma fits every gene one by one (with block, a Cholesky
+# decomposition of samples x samples per gene) instead of all genes together.
+# Each gene's fit does not depend on the others, so the per-gene results are
+# the same (up to rounding) and are put back in the input order.
+lm_fit_split <- function(M, design, ...) {
+    incomplete <- rowSums(is.na(M)) > 0
+    if (!any(incomplete) || all(incomplete)) return(lmFit(M, design, ...))
+    fit <- lmFit(M[!incomplete, , drop = FALSE], design, ...)
+    fit_na <- lmFit(M[incomplete, , drop = FALSE], design, ...)
+    ord <- order(c(which(!incomplete), which(incomplete)))
+    for (f in c("coefficients", "stdev.unscaled")) fit[[f]] <- rbind(fit[[f]], fit_na[[f]])[ord, , drop = FALSE]
+    for (f in c("sigma", "df.residual", "Amean")) fit[[f]] <- c(fit[[f]], fit_na[[f]])[ord]
+    fit
+}
+
 # limma for one perturbation: genes x (basal, log2FC, pval, qval), or NULL if
 # there are no matched controls, plus the model's size and correlation.
 fit_one <- function(pert) {
@@ -189,10 +229,10 @@ fit_one <- function(pert) {
     if (info$n_batches > 1) {
         corfit <- dup_cor_fast(dat_filt, design, block = mdat_filt$batch)
         info$correlation <- corfit$consensus.correlation
-        fit <- lmFit(dat_filt, design, block = mdat_filt$batch,
-                     correlation = corfit$consensus.correlation)
+        fit <- lm_fit_split(dat_filt, design, block = mdat_filt$batch,
+                            correlation = corfit$consensus.correlation)
     } else {
-        fit <- lmFit(dat_filt, design)
+        fit <- lm_fit_split(dat_filt, design)
     }
     fit <- eBayes(fit)
 
