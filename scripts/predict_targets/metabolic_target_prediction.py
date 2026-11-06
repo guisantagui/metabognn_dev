@@ -6,6 +6,16 @@ Adaptation of the Menacho et al. 2026 framework (SIGN features -> VAE -> FNN ens
 DETF input is replaced by the significantly changed metabolites (MetChange) or reactions (METAflux) of each
 perturbation, propagated through the network built by build_network.py.
 
+--mode (signature features -> source nodes) and the network they go with (build_network.py --network):
+  metchange  GEM metabolites (compartment-free ids map to every compartment copy)   metabolic
+  metaflux   GEM reactions                                                          metabolic
+  tf         differentially expressed TFs (is_tf nodes), the input of Menacho et al.   tf (or gene)
+  expr       all differentially expressed genes                                     gene
+The tf and expr signatures are the limma output of the expression (genes x perturbations); their rows, gene
+symbols or Ensembl ids, are mapped to the network's HGNC symbols with --hgnc. Menacho et al. fall back to all
+differentially expressed genes when a perturbation has no differentially expressed TF; here such perturbations
+are dropped (--min-sources), so that the tf ablation only ever sees TFs.
+
 Differences from the original code (DL_drug_repurposing/model_library.py), all deliberate:
   * up- and down-stream passes really use A and A^T (the original builds adj2 identical to adj)
   * the signal has two channels (increased, decreased) instead of act=1 / inh=2 in one channel
@@ -23,7 +33,9 @@ Inputs
   --baseline               prepare_inputs.py output: symbol, value (A549 control mean, HGNC symbols)
   --perturbations          prepare_inputs.py output: perturbation, pertname, pert_ids, dose, timepoint
   --signatures             features x perturbations matrix (compute_labels log2FC.csv); rows are GEM metabolite
-                           (MetChange) or reaction (METAflux) ids, columns perturbation names as in mdat.csv
+                           (MetChange) or reaction (METAflux) ids, or genes (tf, expr), columns perturbation names
+                           as in mdat.csv
+  --hgnc                   HGNC table (tf, expr): maps the signature genes to the network's symbols
   --qvalues                same shape (qvals.csv); without it the --top-n features by |value| are used
   --signature-sign         multiply the signatures by this (MetChange inconsistency: -1 gives positive = more
                            production, the convention of the Schuhknecht benchmark)
@@ -74,7 +86,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "build_network"))
-from build_network import SUGGESTED_ALPHA  # noqa: E402
+from build_network import HGNC, SUGGESTED_ALPHA  # noqa: E402
 
 # 0 = no effect, 1 = activation, 2 = inhibition, 3 = unknown direction (wildcard, not trained on)
 EFFECT_CLASS = {"act": 1, "inh": 2, "unknown": 3}
@@ -240,7 +252,15 @@ def membership_matrix(g):
 # --------------------------------------------------------------------------------------
 def feature_node_map(g, features, mode):
     """Signature feature id -> node indices: the node itself, or (MetChange) every compartment copy of a
-    compartment-free metabolite id."""
+    compartment-free metabolite id; tf and expr: the protein node of that symbol (tf: TFs only)."""
+    if mode in ("tf", "expr"):
+        prot = g.nodes[g.nodes.node_type == "protein"]
+        if mode == "tf":
+            if "is_tf" not in prot:
+                sys.exit("--mode tf needs a network with the is_tf column (build_network.py, any --network)")
+            prot = prot[prot.is_tf == "1"]
+        ids = set(prot.node_id)
+        return {f: g.pos[[f]].to_numpy() for f in features if f in ids}
     node_type = "metabolite" if mode == "metchange" else "reaction"
     typed = g.nodes[g.nodes.node_type == node_type]
     ids = set(typed.node_id)
@@ -259,9 +279,22 @@ def load_signatures(g, args, perts_table):
     val.index = val.index.astype(str)
     val = val * args.signature_sign
     qv = pd.read_csv(args.qvalues, index_col=0).reindex(index=val.index, columns=val.columns) if args.qvalues else None
+    if args.mode in ("tf", "expr"):
+        # gene symbols or Ensembl ids -> HGNC approved symbols; rows without one, or repeating one, are dropped
+        hgnc = HGNC(args.hgnc)
+        sym = val.index.map(hgnc)
+        keep = (sym != "") & ~pd.Index(sym).duplicated()
+        log(f"signature genes: {len(sym):,} rows, {(sym == '').sum():,} without an HGNC protein-coding symbol, "
+            f"{((sym != '') & ~keep).sum():,} repeating one (first row kept)")
+        val = val[keep]
+        val.index = sym[keep]
+        if qv is not None:
+            qv = qv[keep]
+            qv.index = sym[keep]
     fmap = feature_node_map(g, val.index, args.mode)
+    what = {"tf": "TF nodes", "expr": "protein nodes"}.get(args.mode, "network nodes")
     log(f"signatures: {val.shape[0]:,} features x {val.shape[1]:,} perturbations; {len(fmap):,} features map to "
-        f"network nodes ({val.shape[0] - len(fmap):,} do not, e.g. excluded currency metabolites)")
+        f"{what} ({val.shape[0] - len(fmap):,} do not, e.g. excluded currency metabolites or non-TF genes)")
     val = val.loc[[f for f in val.index if f in fmap]]
     if qv is not None:
         qv = qv.loc[val.index]
@@ -883,7 +916,8 @@ def main():
     io.add_argument("--signatures")
     io.add_argument("--qvalues")
     io.add_argument("--signature-sign", type=float, default=1.0)
-    io.add_argument("--mode", choices=["metchange", "metaflux"], default="metchange")
+    io.add_argument("--mode", choices=["metchange", "metaflux", "tf", "expr"], default="metchange")
+    io.add_argument("--hgnc", help="HGNC table (hgnc_complete_set.txt), needed by --mode tf / expr")
     io.add_argument("--drug-targets")
     io.add_argument("--drug-metabolites")
     io.add_argument("--out-dir", required=True)
@@ -954,6 +988,8 @@ def main():
                                                      "drug_targets") if getattr(args, k) is None]
     if missing:
         ap.error("the following arguments are required: " + ", ".join(missing))
+    if args.mode in ("tf", "expr") and not args.hgnc:
+        ap.error(f"--mode {args.mode} needs --hgnc")
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "config.json" if args.fold is None else f"config_fold{args.fold}.json"),
               "w") as fh:

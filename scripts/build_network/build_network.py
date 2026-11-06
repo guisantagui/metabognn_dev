@@ -7,6 +7,16 @@ only reach them by changing enzyme transcription:
 
     drug target -> signaling / modification -> TF -> enzyme gene -> reaction -> metabolite
 
+--network selects the layers, for the ablations of metabolic_target_prediction.py:
+  metabolic  the full network above (default)
+  tf         proteins only, without transcriptional edges: drug target -> signaling / modification / PPI -> TF.
+             The setting of Menacho et al. 2026, whose inputs are the differentially expressed TFs (--mode tf)
+  gene       proteins only, transcriptional edges included: drug target -> ... -> TF -> any gene in the genome,
+             no GEM layer (--mode expr: all differentially expressed genes)
+TFs are the sources of signed regulon edges (grn: TRRUST, CollecTRI), in every mode (nodes.tsv is_tf), and the
+evidence thresholds and enzyme-substrate filter are applied before the layers are dropped, so the protein edges of
+the three networks are the same. Pruning keeps the components with a metabolite (metabolic) or a TF (tf, gene).
+
 Inputs (paths relative to --data-dir, i.e. metabognn_dev/data)
   GEMs/Human-GEM/model/Human-GEM.xml                     Human-GEM 2.0 (SBML)
   utilities/hgnc_complete_set.txt                        HGNC: every protein id is mapped to an approved symbol
@@ -37,14 +47,15 @@ Relations (column `relation` in edges.tsv)
 
 Outputs (--out-dir)
   nodes.tsv          node_id, node_type, symbol, ensembl, base_met, compartment, gpr, gpr_ensembl, subsystem,
-                     constitutive
+                     constitutive, is_tf
   edges.tsv          src, dst, relation, directed, sign, n_resources, n_references, resources, origins, weight
   id_mapping.tsv     per input source: rows loaded, rows dropped because an endpoint has no HGNC symbol
   report.txt         edge counts, transcriptional-route coverage, suggested --alpha for the pipeline
-  drug_metabolite_matches.tsv   (with --drug-targets) drugs whose name is a GEM metabolite
+  drug_metabolite_matches.tsv   (with --drug-targets, metabolic) drugs whose name is a GEM metabolite
 
 Usage
   python build_network.py --data-dir ../../data --out-dir ../../data/networks/combined
+  python build_network.py --data-dir ../../data --out-dir ../../data/networks/tf --network tf
 """
 import argparse
 import os
@@ -77,6 +88,11 @@ DIRECTED_PROTEIN_RELATIONS = ["signaling", "enzyme_substrate", "grn", "grn_bindi
 PROTEIN_RELATIONS = DIRECTED_PROTEIN_RELATIONS + ["ppi"]
 ROUTE_RELATIONS = ["signaling", "enzyme_substrate", "grn", "second_messenger"]  # directed, visible in expression
 
+# Relations kept by each --network (None: all)
+NETWORK_RELATIONS = {"metabolic": None,
+                     "tf": ["signaling", "enzyme_substrate", "ppi"],
+                     "gene": ["signaling", "enzyme_substrate", "ppi", "grn", "grn_binding"]}
+
 # Starting mixing weights for metabolic_target_prediction.py --alpha with an expression-derived signal.
 # Not tuned: they encode which routes can be seen in the signature. Tune them by ablation.
 SUGGESTED_ALPHA = {"metabolic": 1.0, "catalysis": 1.0, "grn": 1.0, "signaling": 1.0, "enzyme_substrate": 1.0,
@@ -89,6 +105,7 @@ MESSENGERS = {"C00575": "cAMP", "C00942": "cGMP", "C00076": "Ca2+", "C01245": "I
 
 @dataclass
 class Config:
+    network: str = "metabolic"        # metabolic | tf | gene (see the module docstring)
     min_directed_resources: int = 2   # signaling / grn: keep if >= this many resources ...
     min_directed_refs: int = 1        # ... or >= this many PMIDs
     min_ppi_resources: int = 2
@@ -100,7 +117,7 @@ class Config:
     string_min_score: int = 700
     hippie_min_score: float = 0.73    # HIPPIE "high confidence"
     max_ppi_degree: int = 0           # 0 = keep hubs
-    prune: bool = True                # drop components without metabolites
+    prune: bool = True                # drop components without metabolites (tf, gene: without TFs)
     max_hops: int = 5
     kegg_min_maps: int = 2            # KEGG messenger -> effector edges drawn in fewer maps are dropped
 
@@ -561,7 +578,7 @@ def load_sources(paths, cfg, messenger_node_of=None):
         print(f"[CollecTRI] {paths['collectri']} not found: signed regulons come from TRRUST only")
     if os.path.isdir(paths["kegg_kgml"]) and messenger_node_of:
         raw.append(load_kegg_messengers(paths["kegg_kgml"], messenger_node_of))
-    else:
+    elif messenger_node_of:
         print(f"[KEGG] {paths['kegg_kgml']} not found: no second-messenger edges (run dl_kegg.sh)")
     return pd.concat(raw, ignore_index=True)
 
@@ -645,13 +662,29 @@ def evidence_weight(e):
     return np.where(e.relation.isin(["metabolic", "catalysis"]), 1.0, w)
 
 
-def assemble_nodes(nodes_gem, edges, hgnc):
+NODE_COLUMNS = ["node_id", "node_type", "symbol", "ensembl", "base_met", "compartment", "gpr", "gpr_ensembl",
+                "subsystem", "constitutive"]
+
+
+def assemble_nodes(nodes_gem, edges, hgnc, tfs=()):
     gem_ids = set(nodes_gem.node_id)
     proteins = sorted((set(edges.src) | set(edges.dst)) - gem_ids)
     prot = pd.DataFrame(dict(node_id=proteins, node_type="protein", symbol=proteins,
                              ensembl=[hgnc.ensembl.get(p, "") for p in proteins], base_met="", compartment="",
                              gpr="", gpr_ensembl="", subsystem="", constitutive=0))
-    return pd.concat([nodes_gem, prot], ignore_index=True)
+    nodes = pd.concat([nodes_gem, prot], ignore_index=True)
+    nodes["is_tf"] = nodes.node_id.isin(set(tfs)).astype(int)
+    return nodes
+
+
+def regulon_tfs(edges):
+    """TFs: sources of signed regulon edges (grn), whether or not the network keeps those edges."""
+    return set(edges.src[edges.relation == "grn"])
+
+
+def select_layers(edges, network):
+    keep = NETWORK_RELATIONS[network]
+    return edges if keep is None else edges[edges.relation.isin(keep)].reset_index(drop=True)
 
 
 def adjacency(nodes, edges, relations=None):
@@ -665,11 +698,16 @@ def adjacency(nodes, edges, relations=None):
     return sp.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(len(nodes),) * 2)
 
 
-def keep_metabolic_components(nodes, edges):
+def keep_anchored_components(nodes, edges, anchor):
+    """Keep the weakly connected components that contain an anchor node (boolean array over nodes)."""
     _, comp = csgraph.connected_components(adjacency(nodes, edges), directed=True, connection="weak")
-    keep = set(nodes.node_id[np.isin(comp, list(set(comp[(nodes.node_type == "metabolite").to_numpy()])))])
+    keep = set(nodes.node_id[np.isin(comp, list(set(comp[np.asarray(anchor)])))])
     return (nodes[nodes.node_id.isin(keep)].reset_index(drop=True),
             edges[edges.src.isin(keep) & edges.dst.isin(keep)].reset_index(drop=True))
+
+
+def keep_metabolic_components(nodes, edges):
+    return keep_anchored_components(nodes, edges, (nodes.node_type == "metabolite").to_numpy())
 
 
 # --------------------------------------------------------------------------------------
@@ -684,12 +722,15 @@ def distance_to_set(A, targets):
     return csgraph.shortest_path(S, directed=True, indices=0, unweighted=True)[1:] - 1
 
 
-def transcriptional_route(nodes, edges):
-    """Distance of every node to a TF that has a signed regulon edge to a GEM enzyme, along directed edges.
-    This is the route an expression-derived metabolic signature can see."""
-    enzymes = set(edges.src[edges.relation == "catalysis"])
-    grn = edges[edges.relation == "grn"]
-    tfs = sorted(set(grn.src[grn.dst.isin(enzymes)]))
+def transcriptional_route(nodes, edges, network="metabolic"):
+    """Distance of every node to the TFs a signature can see, along directed edges: metabolic, TFs with a signed
+    regulon edge to a GEM enzyme (the route of an expression-derived metabolic signature); tf and gene, any TF."""
+    if network == "metabolic":
+        enzymes = set(edges.src[edges.relation == "catalysis"])
+        grn = edges[edges.relation == "grn"]
+        tfs = sorted(set(grn.src[grn.dst.isin(enzymes)]))
+    else:
+        tfs = sorted(nodes.node_id[nodes.is_tf == 1])
     pos = pd.Series(np.arange(len(nodes)), index=nodes.node_id)
     A = adjacency(nodes, edges, ROUTE_RELATIONS)
     return distance_to_set(A, pos[tfs].to_numpy()), tfs
@@ -697,11 +738,13 @@ def transcriptional_route(nodes, edges):
 
 def report(nodes, edges, cfg, drug_targets=None):
     prot = (nodes.node_type == "protein").to_numpy()
-    dist, tfs = transcriptional_route(nodes, edges)
-    lines = [f"nodes: {nodes.node_type.value_counts().to_dict()}",
+    dist, tfs = transcriptional_route(nodes, edges, cfg.network)
+    tf_kind = "TFs with signed regulon edges to GEM enzymes" if cfg.network == "metabolic" else "TFs (is_tf)"
+    lines = [f"network: {cfg.network}",
+             f"nodes: {nodes.node_type.value_counts().to_dict()}",
              f"edges per relation: {edges.relation.value_counts().to_dict()}",
              f"signed edges per relation: {edges[edges.sign != 0].relation.value_counts().to_dict()}",
-             f"TFs with signed regulon edges to GEM enzymes: {len(tfs)}",
+             f"{tf_kind}: {len(tfs)}",
              f"proteins within {cfg.max_hops} directed hops of such a TF: {np.mean(dist[prot] <= cfg.max_hops):.3f}"]
     if drug_targets is not None:
         pos = pd.Series(np.arange(len(nodes)), index=nodes.node_id)
@@ -776,30 +819,40 @@ def main():
     args = ap.parse_args()
     paths = {k: os.path.join(args.data_dir, getattr(args, k)) for k in DEFAULT_PATHS}
     cfg = Config(**{f.name: getattr(args, f.name) for f in fields(Config)})
+    if cfg.network not in NETWORK_RELATIONS:
+        ap.error(f"--network must be one of {list(NETWORK_RELATIONS)}")
+    print(f"[network] {cfg.network}: relations {NETWORK_RELATIONS[cfg.network] or 'all'}")
 
     hgnc = HGNC(paths["hgnc"])
-    gem = load_gem(paths["gem"])
-    excluded, bookkeeping = gem_exclusions(gem)
-    gene_sym = gem_gene_symbols(gem, hgnc)
-    nodes_gem, edges_gem, G = build_gem_layer(gem, excluded, bookkeeping, gene_sym)
-    print(f"[GEM] {nodes_gem.node_type.value_counts().to_dict()}, {edges_gem.relation.value_counts().to_dict()}")
-    node_of = messenger_nodes(paths["gem_metabolites"], set(nodes_gem.node_id))
+    if cfg.network == "metabolic":
+        gem = load_gem(paths["gem"])
+        excluded, bookkeeping = gem_exclusions(gem)
+        gene_sym = gem_gene_symbols(gem, hgnc)
+        nodes_gem, edges_gem, G = build_gem_layer(gem, excluded, bookkeeping, gene_sym)
+        print(f"[GEM] {nodes_gem.node_type.value_counts().to_dict()}, {edges_gem.relation.value_counts().to_dict()}")
+        node_of = messenger_nodes(paths["gem_metabolites"], set(nodes_gem.node_id))
+        gem_edges = [edges_gem, gem_messenger_edges(gem, G, node_of, gene_sym)]
+    else:  # no GEM layer, hence no second messengers (GEM metabolite nodes) either
+        nodes_gem, node_of, gem_edges = pd.DataFrame(columns=NODE_COLUMNS), {}, []
 
-    raw = pd.concat([edges_gem, gem_messenger_edges(gem, G, node_of, gene_sym), load_sources(paths, cfg, node_of)],
-                    ignore_index=True)
+    raw = pd.concat(gem_edges + [load_sources(paths, cfg, node_of)], ignore_index=True)
     raw, mapping, _ = harmonise(raw, hgnc, set(nodes_gem.node_id))
     print(mapping.to_string(index=False))
     edges, log = curate(merge_edges(raw), cfg, node_of.values())
     print(f"[curate] {log}")
-    nodes = assemble_nodes(nodes_gem, edges, hgnc)
+    tfs = regulon_tfs(edges)
+    edges = select_layers(edges, cfg.network)
+    nodes = assemble_nodes(nodes_gem, edges, hgnc, tfs)
     if cfg.prune:
-        nodes, edges = keep_metabolic_components(nodes, edges)
+        anchor = (nodes.node_type == "metabolite") if cfg.network == "metabolic" else (nodes.is_tf == 1)
+        nodes, edges = keep_anchored_components(nodes, edges, anchor.to_numpy())
     check(nodes, edges)
 
     drug_targets = matches = None
     if args.drug_targets:
         drug_targets = load_drug_targets(args.drug_targets, hgnc)
-        matches = drug_metabolite_matches(drug_targets, nodes)
+        if cfg.network == "metabolic":
+            matches = drug_metabolite_matches(drug_targets, nodes)
     lines = report(nodes, edges, cfg, drug_targets)
     write_outputs(args.out_dir, nodes, edges, mapping, lines, matches)
     print("\n".join(lines))
