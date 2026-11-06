@@ -40,5 +40,6 @@ out_dir_cell="${out_dir}/${cell}/metchange/${penalty}/"
 Rscript limma_DE.R --expr "$expr" \
         --mdat "$mdat" \
         --workers "$workers" \
+        --reader lines \
         --out_dir "$out_dir_cell"
 conda deactivate

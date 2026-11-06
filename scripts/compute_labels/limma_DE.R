@@ -42,6 +42,10 @@ parser <- add_argument(parser = parser,
                                 "Output directory to save the results."),
                        flag = c(F, F, F, F))
 
+parser <- add_argument(parser = parser, arg = "--reader", default = "fread",
+                       help = paste("How the matrix is read: fread (fast) or lines (line by line,",
+                                    "for files that crash fread, e.g. ~150k columns of MetChange)."))
+
 parsed <- parse_args(parser)
 
 # Directory stuff
@@ -51,6 +55,8 @@ expr_f <- parsed$expr
 mdat_f <- parsed$mdat
 workers <- as.numeric(parsed$workers)
 out_dir <- parsed$out_dir
+reader <- parsed$reader
+if (!reader %in% c("fread", "lines")) stop("--reader must be fread or lines")
 
 if (!dir.exists(out_dir)) {
         dir.create(out_dir, recursive = TRUE)
@@ -59,45 +65,85 @@ if (!dir.exists(out_dir)) {
 # Load the data
 ################################################################################
 
-message(sprintf("Loading expression data from %s", expr_f))
-# One numeric matrix, filled from the data.table block by block while the
-# copied columns are dropped: a data.frame with one column per sample, apply()
-# and row subsetting held several full copies at once.
-# Column types are given, not guessed: on wide files with empty fields (missing
-# values, e.g. MetChange written by polars) fread's type guessing has to re-read
-# columns, and with ~150k columns that crashed data.table (segfault).
-header <- names(fread(expr_f, header = TRUE, nrows = 0))
-dt <- fread(expr_f, header = TRUE, colClasses = c("character", rep("double", length(header) - 1)))
-feature_ids <- dt[[1]]
-sample_ids <- names(dt)[-1]
-
 # Features with no variance among their non-missing values (constant, or all
-# missing) are dropped: min and max per row, accumulated over the columns.
-# Features with some missing values are kept; limma fits them on the samples
-# they have.
-row_min <- rep(Inf, nrow(dt))
-row_max <- rep(-Inf, nrow(dt))
-n_missing <- rep(0L, nrow(dt))
-for (k in seq_along(sample_ids) + 1L) {
-    x <- dt[[k]]
-    row_min <- pmin(row_min, x, na.rm = TRUE)
-    row_max <- pmax(row_max, x, na.rm = TRUE)
-    n_missing <- n_missing + is.na(x)
-}
-keep <- row_max > row_min
-message(sprintf("%d features, %d with no variance or all values missing removed, %d kept with some missing values",
-                length(keep), sum(!keep), sum(keep & n_missing > 0)))
+# missing) are dropped. Features with some missing values are kept; limma fits
+# them on the samples they have.
 
-expr <- matrix(NA_real_, nrow = sum(keep), ncol = length(sample_ids),
-               dimnames = list(feature_ids[keep], sample_ids))
-block <- 1000
-for (start in seq(1, length(sample_ids), by = block)) {
-    idx <- start:min(start + block - 1, length(sample_ids))
-    # the columns before this block were dropped: sample idx[1] is column 2
-    for (k in idx) expr[, k] <- dt[[k - start + 2L]][keep]
-    dt[, (sample_ids[idx]) := NULL]
+# --reader lines: the CSV read in blocks of lines with scan(), each block
+# filtered before the next one (memory: the kept rows plus one block).
+# data.table's fread crashes (segfault) on the MetChange matrix (~150k columns,
+# lines of ~3 MB), with or without the column types given. scan() parses the
+# values straight into numbers (strsplit + as.numeric is ~7x slower: one R string
+# per value), stops on lines with another number of fields or non-numeric
+# values, and reads empty fields as NA.
+read_matrix_lines <- function(f, chunk = 50L) {
+    con <- file(f, open = "r")
+    on.exit(close(con))
+    header <- gsub('^"|"$', "", strsplit(readLines(con, n = 1L), ",", fixed = TRUE)[[1]])
+    n <- length(header) - 1L
+    what <- c(list(""), rep(list(0), n))
+    blocks <- list()
+    n_read <- 0L
+    n_na <- 0L
+    repeat {
+        r <- scan(con, what = what, sep = ",", nmax = chunk, quiet = TRUE, multi.line = FALSE)
+        k <- length(r[[1]])
+        if (k == 0L) break
+        X <- matrix(unlist(r[-1], use.names = FALSE), nrow = k, dimnames = list(r[[1]], NULL))
+        rm(r)
+        row_min <- suppressWarnings(apply(X, 1, min, na.rm = TRUE))
+        row_max <- suppressWarnings(apply(X, 1, max, na.rm = TRUE))
+        keep <- row_max > row_min
+        n_na <- n_na + sum(keep & rowSums(is.na(X)) > 0)
+        blocks[[length(blocks) + 1L]] <- X[keep, , drop = FALSE]
+        n_read <- n_read + k
+        if (length(blocks) %% 20L == 0L) message(sprintf("  %d features read", n_read))
+    }
+    expr <- do.call(rbind, blocks)
+    colnames(expr) <- header[-1]
+    message(sprintf("%d features, %d with no variance or all values missing removed, %d kept with some missing values",
+                    n_read, n_read - nrow(expr), n_na))
+    expr
 }
-rm(dt, row_min, row_max, n_missing, keep, x)
+
+message(sprintf("Loading expression data from %s", expr_f))
+if (reader == "lines") {
+    expr <- read_matrix_lines(expr_f)
+} else {
+    # One numeric matrix, filled from the data.table block by block while the
+    # copied columns are dropped: a data.frame with one column per sample, apply()
+    # and row subsetting held several full copies at once. Column types are given,
+    # not guessed.
+    header <- names(fread(expr_f, header = TRUE, nrows = 0))
+    dt <- fread(expr_f, header = TRUE, colClasses = c("character", rep("double", length(header) - 1)))
+    feature_ids <- dt[[1]]
+    sample_ids <- names(dt)[-1]
+
+    # min and max per row, accumulated over the columns
+    row_min <- rep(Inf, nrow(dt))
+    row_max <- rep(-Inf, nrow(dt))
+    n_missing <- rep(0L, nrow(dt))
+    for (k in seq_along(sample_ids) + 1L) {
+        x <- dt[[k]]
+        row_min <- pmin(row_min, x, na.rm = TRUE)
+        row_max <- pmax(row_max, x, na.rm = TRUE)
+        n_missing <- n_missing + is.na(x)
+    }
+    keep <- row_max > row_min
+    message(sprintf("%d features, %d with no variance or all values missing removed, %d kept with some missing values",
+                    length(keep), sum(!keep), sum(keep & n_missing > 0)))
+
+    expr <- matrix(NA_real_, nrow = sum(keep), ncol = length(sample_ids),
+                   dimnames = list(feature_ids[keep], sample_ids))
+    block <- 1000
+    for (start in seq(1, length(sample_ids), by = block)) {
+        idx <- start:min(start + block - 1, length(sample_ids))
+        # the columns before this block were dropped: sample idx[1] is column 2
+        for (k in idx) expr[, k] <- dt[[k - start + 2L]][keep]
+        dt[, (sample_ids[idx]) := NULL]
+    }
+    rm(dt, row_min, row_max, n_missing, keep, x)
+}
 invisible(gc())
 
 message(sprintf("Loading and parsing metadata from %s", mdat_f))
