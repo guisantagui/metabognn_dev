@@ -53,7 +53,10 @@ Outputs (--out-dir): config.json, feature_names.txt, models.pt, metrics.json, te
 Evaluation: each test drug is ranked among two candidate sets, all labelled drugs (rank_*, the repurposing setting)
 and the held-out drugs of its split only (rank_*_heldout). Training drugs' targets are, by construction, the ones
 the model and the target-frequency baseline have seen as positives, which pushes held-out drugs down the first
-ranking; the held-out ranking has no such bias (random: median_percentile 0.5). With --n-folds K the drugs are split
+ranking; the held-out ranking has no such bias (random: median_percentile 0.5; topX_pct X / 100, top1_pct being the
+closest to the top-1st-percentile recall of Menacho et al.). With --de-counts / --min-de-genes, perturbations with
+fewer DE genes (no transcriptional response to learn from) are left out of training and validation but still
+scored, and every metric is also reported on the active ones (test_per_*_active). With --n-folds K the drugs are split
 into K folds, each fold is the test set once (validation drugs drawn from the other folds), each fold goes to
 <out-dir>/fold<i>/, and the pooled out-of-fold ranks to <out-dir>/cv_metrics.json, cv_drug_ranks.tsv and
 cv_drug_ranks_per_drug.tsv. --fold i runs one fold (SLURM arrays); the job that completes the last fold pools them,
@@ -822,8 +825,8 @@ class DrugRanker:
     def bes_ranks(self, vote):
         tok = np.concatenate([2 * np.where(vote == 1)[0], 2 * np.where(vote == 2)[0] + 1])
         k = len(tok)
-        if k == 0:
-            return np.full(len(self.drugs), len(self.drugs), float)
+        if k == 0:  # nothing predicted: every drug tied, average rank as in compute_BES_score
+            return np.full(len(self.drugs), (len(self.drugs) + 1) / 2, float)
         overlap = np.asarray(self.DM[tok].sum(0)).ravel()
         hyp = np.where(overlap > 0, hypergeom.sf(overlap - 1, self.U, self.m, k), 1.0)
         pemp = 1 - hypergeom.pmf(0, self.U, self.m, k)  # P(random set of size k hits the drug)
@@ -851,17 +854,25 @@ def rank_summary(ranks, n):
     return {"n": int(len(r)), "median_rank": float(np.median(r)), "mean_rank": float(r.mean()),
             "n_candidates": float(np.median(n)), "median_percentile": float(np.median(pct)),
             **{f"top{k}": float((r <= k).mean()) for k in (1, 5, 10, 50) if k < n.min()},
-            **{f"top{q}_pct": float((pct <= q / 100).mean()) for q in (5, 10, 25)}}
+            **{f"top{q}_pct": float((pct <= q / 100).mean()) for q in (1, 5, 10, 25)}}
 
 
 RANK_COLS = ("rank_bes", "rank_prob", "rank_logreg", "rank_baseline")
 
 
 def summarise_ranks(per_pert, per_drug):
+    """All test perturbations, and with --de-counts also the active ones (*_active: perturbations with
+    >= --min-de-genes DE genes; per drug, the probabilities averaged over its active perturbations only)."""
+    per_drug_all = per_drug[per_drug.subset == "all"] if "subset" in per_drug else per_drug
+    sets = [("", per_pert, per_drug_all)]
+    if "active" in per_pert:
+        sets.append(("_active", per_pert[per_pert.active.astype(bool)], per_drug[per_drug.subset == "active"]))
     m = {}
-    for name, df in (("test_per_perturbation", per_pert), ("test_per_drug", per_drug)):
-        m[name] = {k + s: rank_summary(df[k + s], df["n_candidates" + s])
-                   for s in ("", "_heldout") for k in RANK_COLS if k + s in df}
+    for suffix, pp, pdr in sets:
+        for name, df in (("test_per_perturbation", pp), ("test_per_drug", pdr)):
+            if len(df):
+                m[name + suffix] = {k + s: rank_summary(df[k + s], df["n_candidates" + s])
+                                    for s in ("", "_heldout") for k in RANK_COLS if k + s in df}
     return m
 
 
@@ -887,7 +898,7 @@ def aggregate_folds(out_dir, n_folds):
     with open(os.path.join(out_dir, "cv_metrics.json"), "w") as fh:
         json.dump(m, fh, indent=2)
     log(f"cross-validation, {n_folds} folds, {pdr.drug.nunique()} drugs out of fold:\n"
-        + json.dumps({k: m[k] for k in ("test_per_perturbation", "test_per_drug")}, indent=2))
+        + json.dumps({k: v for k, v in m.items() if k.startswith("test_per")}, indent=2))
 
 
 def predicted_rows(chunk, votes, mean_p, prot_symbols, targets, top_k):
@@ -928,6 +939,13 @@ def main():
     fe.add_argument("--top-n", type=int, default=100)
     fe.add_argument("--min-abs-score", type=float, default=0.0)
     fe.add_argument("--min-sources", type=int, default=3, help="drop weaker perturbations")
+    fe.add_argument("--de-counts", help="CSV, perturbation -> number of DE genes (e.g. fit_info_nsig.csv of the "
+                                        "expression limma output); needed by --min-de-genes")
+    fe.add_argument("--de-column", default="n_sig", help="column of --de-counts with the count")
+    fe.add_argument("--min-de-genes", type=int, default=0,
+                    help="active perturbations: >= this many DE genes. Only active ones are used for training, "
+                         "validation and --predict-unlabeled; all are scored, metrics are reported for all and "
+                         "for the active ones (*_active)")
     fe.add_argument("--alpha", action="append", default=[], metavar="REL=W",
                     help="relation mixing weight (defaults: build_network.SUGGESTED_ALPHA)")
     fe.add_argument("--activity-floor", type=float, default=0.0)
@@ -989,6 +1007,8 @@ def main():
         ap.error("the following arguments are required: " + ", ".join(missing))
     if args.mode in ("tf", "expr") and not args.hgnc:
         ap.error(f"--mode {args.mode} needs --hgnc")
+    if args.min_de_genes and not args.de_counts:
+        ap.error("--min-de-genes needs --de-counts")
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "config.json" if args.fold is None else f"config_fold{args.fold}.json"),
               "w") as fh:
@@ -1009,11 +1029,19 @@ def main():
     targets = load_drug_targets(args.drug_targets, g, perts_table)
     drug_mets = load_drug_metabolites(args.drug_metabolites, g)
     perts = perts[perts.n_sig >= args.min_sources].reset_index(drop=True)
+    if args.de_counts:
+        n_de = pd.read_csv(args.de_counts, index_col=0)[args.de_column]
+        perts["n_de_genes"] = perts.pert.map(n_de)
+        perts["active"] = (perts.n_de_genes >= args.min_de_genes).to_numpy()  # missing counts: inactive
+        log(f"activity: {perts.active.sum():,} of {len(perts):,} perturbations with >= {args.min_de_genes} DE genes "
+            f"({perts.n_de_genes.isna().sum():,} not in --de-counts); only those are used for training")
     labeled = perts.drug.str.lower().isin(targets.keys())
     log(f"{len(perts):,} perturbations with >= {args.min_sources} features: {labeled.sum():,} of "
         f"{perts.drug[labeled].nunique()} drugs with known targets, {(~labeled).sum():,} of "
         f"{perts.drug[~labeled].nunique()} drugs without (not used for training or evaluation)")
     unlabeled = perts[~labeled].reset_index(drop=True)
+    if args.de_counts:
+        unlabeled = unlabeled[unlabeled.active].reset_index(drop=True)
     perts = perts[labeled].reset_index(drop=True)
     if args.max_perts:
         perts = perts.sample(min(args.max_perts, len(perts)), random_state=args.seed).reset_index(drop=True)
@@ -1030,11 +1058,15 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
         split = perts.drug.map(lambda d: "train" if d in tr_d else "val" if d in va_d else "test")
         log(f"split by drug: {split.value_counts().to_dict()} perturbations")
+        has_active = "active" in perts
+        active = perts.active if has_active else pd.Series(True, index=perts.index)
+        if has_active:
+            log(f"active (used for training / validation): {split[active].value_counts().to_dict()}")
 
         # ---- sampled training / validation rows
         data = {}
         for part in ("train", "val"):
-            sub = perts[split == part]
+            sub = perts[(split == part) & active]
             Xs, ys, ps = [], [], []
             for chunk, X, y in iter_chunks(fb, sub, sigs, fmap, targets, drug_mets, globals_, args):
                 keep = sample_rows(X, y, len(chunk), args, rng)
@@ -1056,7 +1088,7 @@ def main():
         trainable = ytr < 3
         Xtr, ytr, ptr = Xtr[trainable], ytr[trainable], ptr[trainable]
         class_w = 1.0 / np.bincount(ytr, minlength=3).clip(min=1)
-        drug_n = perts.drug.map(perts.drug.value_counts()).to_numpy()
+        drug_n = perts.drug.map(perts.drug[active].value_counts()).fillna(1).to_numpy()
         w = (class_w[ytr] / drug_n[ptr]).astype(np.float64)
         Xva, yva, _ = data["val"]
 
@@ -1099,7 +1131,7 @@ def main():
         prior /= len(train_drugs)
         prior_scores = {s: rk.prob_scores(prior) for s, rk in rankers.items()}
 
-        rank_rows, pred_rows, ys_all, probs_all, lin_all, drug_prob, lin_prob = [], [], [], [], [], {}, {}
+        rank_rows, pred_rows, ys_all, probs_all, lin_all, drug_prob, lin_prob, drug_act = [], [], [], [], [], {}, {}, {}
         for chunk, X, y in iter_chunks(fb, test, sigs, fmap, targets, drug_mets, globals_, args):
             PL = logreg_proba(lin, X)
             lin_all.append(PL)
@@ -1115,7 +1147,10 @@ def main():
                 key = d.lower()
                 known = targets[key]
                 lin_prob.setdefault(key, []).append(PL[j])
+                drug_act.setdefault(key, []).append(bool(active[chunk.index[j]]))
                 row = dict(pert=p, drug=d, n_true_targets=len(known))
+                if has_active:
+                    row.update(n_de_genes=chunk.n_de_genes.iloc[j], active=bool(chunk.active.iloc[j]))
                 if models:
                     v = votes[j]
                     drug_prob.setdefault(key, []).append(mean_p[j])
@@ -1135,16 +1170,22 @@ def main():
         ranks.to_csv(os.path.join(out_dir, "test_drug_ranks.tsv"), sep="\t", index=False)
         if models:
             pd.DataFrame(pred_rows).to_csv(os.path.join(out_dir, "test_predicted_targets.tsv"), sep="\t", index=False)
+        # per drug: probabilities averaged over all its perturbations, and (--de-counts) over its active ones
         drug_rows = []
-        for key, ps in lin_prob.items():
-            row = dict(drug=key, n_perturbations=len(ps))
-            for s, rk in rankers.items():
-                row["n_candidates" + s] = len(rk.drugs)
-                row["rank_logreg" + s] = rk.rank_of(rk.prob_scores(np.mean(ps, 0)), key)
-                row["rank_baseline" + s] = rk.rank_of(prior_scores[s], key)
-                if models:
-                    row["rank_prob" + s] = rk.rank_of(rk.prob_scores(np.mean(drug_prob[key], 0)), key)
-            drug_rows.append(row)
+        for subset in ("all", "active") if has_active else ("all",):
+            for key, ps in lin_prob.items():
+                sel = np.ones(len(ps), bool) if subset == "all" else np.array(drug_act[key])
+                if not sel.any():
+                    continue
+                row = dict(drug=key, subset=subset, n_perturbations=int(sel.sum()))
+                for s, rk in rankers.items():
+                    row["n_candidates" + s] = len(rk.drugs)
+                    row["rank_logreg" + s] = rk.rank_of(rk.prob_scores(np.mean(np.asarray(ps)[sel], 0)), key)
+                    row["rank_baseline" + s] = rk.rank_of(prior_scores[s], key)
+                    if models:
+                        row["rank_prob" + s] = rk.rank_of(
+                            rk.prob_scores(np.mean(np.asarray(drug_prob[key])[sel], 0)), key)
+                drug_rows.append(row)
         drug_ranks = pd.DataFrame(drug_rows)
         drug_ranks.to_csv(os.path.join(out_dir, "test_drug_ranks_per_drug.tsv"), sep="\t", index=False)
         yt = np.concatenate(ys_all)
@@ -1167,7 +1208,7 @@ def main():
 
         with open(os.path.join(out_dir, "metrics.json"), "w") as fh:
             json.dump(metrics, fh, indent=2)
-        log(json.dumps({k: metrics[k] for k in ("test_per_perturbation", "test_per_drug")}, indent=2))
+        log(json.dumps({k: v for k, v in metrics.items() if k.startswith("test_per")}, indent=2))
 
     if not args.n_folds:
         run_split(*splits[0], args.out_dir, rng)
