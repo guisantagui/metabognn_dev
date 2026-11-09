@@ -35,7 +35,7 @@ while IFS=$'\t' read -r cell; do
     log2FC="${proj_dir}/results/labels/${cell}/expr/log2FC.csv"
     qvals="${proj_dir}/results/labels/${cell}/expr/qvals.csv"
     basal="${proj_dir}/results/labels/${cell}/expr/basal.csv"
-    if [[ -f "$basal" && -f "$qvals" && -f "$log2FC" && overwrite == false ]]; then
+    if [[ -f "$basal" && -f "$qvals" && -f "$log2FC" && $overwrite == false ]]; then
         echo "DE files already exist for ${cell}. Skipping."
     else
         echo "Launching ${cell} extraction..."

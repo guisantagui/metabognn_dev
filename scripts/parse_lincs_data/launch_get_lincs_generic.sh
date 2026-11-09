@@ -23,7 +23,7 @@ gem_f="$6"
 proj_dir="$7"
 overwrite="$8"
 run_limma="$9"
-limma_workers="$10"
+limma_workers="${10}"
 
 
 # Setting up output directory
@@ -48,7 +48,8 @@ if [[ ! -f "${out_dir_cell}/expr.csv" || $overwrite == true ]]; then
         --gctx_ctrl "$ctrl_file" \
         --cell "$cell" \
         --ctrls_keep "$ctrls_keep" \
-        --out_dir "$out_dir_cell"
+        --out_dir "$out_dir_cell" \
+        || { echo "LINCS extraction failed for ${cell}"; exit 1; }
 else
     echo "expr.csv already exists in ${out_dir_cell}. Skipping extraction of ${cell} data."
 fi
@@ -72,7 +73,8 @@ if [[ ! -f "${out_dir_cell}/expr_ensembl.csv" || $overwrite == true ]]; then
         --gem "$gem_f" \
         --symbol_col "V1" \
         --is_log2 \
-        --out_dir "$out_dir_cell"
+        --out_dir "$out_dir_cell" \
+        || { echo "ENSEMBL conversion failed for ${cell}"; exit 1; }
     micromamba deactivate
 else
     echo "expr_ensembl.csv already exists in ${out_dir_cell}. Skipping conversion to ENSEMBL gene IDs of ${cell} data..."
@@ -82,7 +84,7 @@ fi
 ################################################################################
 log2FC="${proj_dir}/results/labels/${cell}/expr/log2FC.csv"
 qvals="${proj_dir}/results/labels/${cell}/expr/qvals.csv"
-basal="${proj_dir}/results/labels/${cell}/expr/qvals.csv"
+basal="${proj_dir}/results/labels/${cell}/expr/basal.csv"
 if [[ "$run_limma" == true ]] && \
    [[ "$overwrite" == true || ! -f "$basal" || ! -f "$qvals" || ! -f "$log2FC" ]]; then
     cd ../compute_labels
