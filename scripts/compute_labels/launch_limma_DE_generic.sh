@@ -50,5 +50,18 @@ mkdir -p "$out_dir_cell"
 Rscript limma_DE.R --expr "$expr" \
         --mdat "$mdat" \
         --workers "$workers" \
-        --out_dir "$out_dir_cell"
+        --out_dir "$out_dir_cell" \
+        || { echo "limma failed or stopped for ${cell}: resubmit to resume from checkpoints"; exit 1; }
 conda deactivate
+
+export MAMBA_ROOT_PREFIX="/work/projects/car_t_methylome/software/micromamba"
+eval "$(micromamba shell hook --shell bash)"
+
+
+# Generate report file of number of DE genes per perturbation
+################################################################################
+micromamba activate metabolic_drug_repurposing
+
+python check_limma_nsign_vs_nsamps.py --dir "$out_dir_cell"
+
+micromamba deactivate
