@@ -799,8 +799,7 @@ def compute_BES_score(pemp, hypergeo_pval, rank_hy, pi0=0.99, w_posterior=20.0, 
     rank_hy_norm = 1 - (rank_hy - np.min(rank_hy)) / (np.max(rank_hy) - np.min(rank_hy) + 1e-8)
     BES = w_posterior * s_posterior + w_hypergeo * (1 - hypergeo_pval) + w_hypergeo_rank * rank_hy_norm
     BES[mask_zero] = 0.0
-    BES_rank = pd.Series(BES).rank(ascending=False, method="min").to_numpy(copy=True)  # writable under pandas 3
-    BES_rank[BES == 0.0] = len(BES)
+    BES_rank = pd.Series(BES).rank(ascending=False, method="average").to_numpy(copy=True)
     return BES, BES_rank
 
 
