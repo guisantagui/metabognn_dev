@@ -21,9 +21,9 @@ ctrls_keep="$4"
 hgnc="$5"
 gem_f="$6"
 proj_dir="$7"
-overwrite_lincs="$8"
-run_limma=true
-limma_workers=64
+overwrite="$8"
+run_limma="$9"
+limma_workers="$10"
 
 
 # Setting up output directory
@@ -41,7 +41,7 @@ conda activate r-4.3.1
 # Extract data from LINCS
 ################################################################################
 
-if [ -f "${out_dir_cell}/expr.csv" && $overwrite_lincs == false ]; then
+if [[ ! -f "${out_dir_cell}/expr.csv" || $overwrite == true ]]; then
     echo "Extracting ${cell} expression data from LINCS GCTX files..."
     Rscript get_lincs_exe.R \
         --gctx_pert "$pert_file" \
@@ -62,7 +62,7 @@ conda deactivate
 export MAMBA_ROOT_PREFIX="/work/projects/car_t_methylome/software/micromamba"
 eval "$(micromamba shell hook --shell bash)"
 
-if [ -f "${out_dir_cell}/expr_ensembl.csv" && $overwrite_lincs == false ]; then
+if [[ ! -f "${out_dir_cell}/expr_ensembl.csv" || $overwrite == true ]]; then
     echo "Converting ${cell} expr.csv HGNC gene symbols to ENSEMBL gene IDs..."
     micromamba activate metabolic_drug_repurposing
 
@@ -80,7 +80,11 @@ fi
 
 # Compute DEGs with limma
 ################################################################################
-if [ run_limma == true ]; then
+log2FC="${proj_dir}/results/labels/${cell}/expr/log2FC.csv"
+qvals="${proj_dir}/results/labels/${cell}/expr/qvals.csv"
+basal="${proj_dir}/results/labels/${cell}/expr/qvals.csv"
+if [[ "$run_limma" == true ]] && \
+   [[ "$overwrite" == true || ! -f "$basal" || ! -f "$qvals" || ! -f "$log2FC" ]]; then
     cd ../compute_labels
 
     mkdir -p "logs/"
@@ -89,8 +93,10 @@ if [ run_limma == true ]; then
         --job-name="limma_${cell}_expr" \
         --output="logs/limma_${cell}_expr.out" \
         --error="logs/limma_${cell}_expr.err" \
-        launch_get_lincs_generic.sh \
+        launch_limma_DE_generic.sh \
         "$proj_dir" \
         "$cell" \
         "$limma_workers"
+else
+    echo "Limma outputs already exist for ${cell}, or limma execution is disabled. Skipping."
 fi

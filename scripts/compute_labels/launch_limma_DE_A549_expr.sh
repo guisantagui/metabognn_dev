@@ -32,7 +32,7 @@ mkdir -p "$out_dir"
 
 expr="${cell_mat_dir}/${cell}/expr_ensembl.csv"
 mdat="${cell_mat_dir}/${cell}/mdat.csv"
-out_dir_cell="${out_dir}/${cell}/expr/${penalty}/"
+out_dir_cell="${out_dir}/${cell}/expr/"
 
 mkdir -p "$out_dir_cell"
 

@@ -25,23 +25,34 @@ ctrls_keep="DMSO"
 hgnc="/home/users/gsantamaria/projects/metabo_pert/data/utilities/hgnc_complete_set.txt"
 gem_f="/home/users/gsantamaria/projects/metabo_pert/data/GEMs/Human2/Human-GEM/model/Human-GEM.xml"
 proj_dir="/scratch/users/gsantamaria/test_large_files/metabognn_dev/"
-overwrite_lincs=false
+overwrite=false
+run_limma=true
+limma_workers=64
 
 mkdir -p "logs/"
 
 while IFS=$'\t' read -r cell; do
-    echo "Launching ${cell} extraction..."
-    sbatch \
-        --job-name="lincs_${cell}" \
-        --output="logs/get_lincs_${cell}.out" \
-        --error="logs/get_lincs_${cell}.err" \
-        launch_get_lincs_generic.sh \
-        "$pert_file" \
-        "$ctrl_file" \
-        "$cell" \
-        "$ctrls_keep" \
-        "$hgnc" \
-        "$gem_f" \
-        "$proj_dir" \
-        "$overwrite_lincs"
+    log2FC="${proj_dir}/results/labels/${cell}/expr/log2FC.csv"
+    qvals="${proj_dir}/results/labels/${cell}/expr/qvals.csv"
+    basal="${proj_dir}/results/labels/${cell}/expr/basal.csv"
+    if [[ -f "$basal" && -f "$qvals" && -f "$log2FC" && overwrite == false ]]; then
+        echo "DE files already exist for ${cell}. Skipping."
+    else
+        echo "Launching ${cell} extraction..."
+        sbatch \
+            --job-name="lincs_${cell}" \
+            --output="logs/get_lincs_${cell}.out" \
+            --error="logs/get_lincs_${cell}.err" \
+            launch_get_lincs_generic.sh \
+            "$pert_file" \
+            "$ctrl_file" \
+            "$cell" \
+            "$ctrls_keep" \
+            "$hgnc" \
+            "$gem_f" \
+            "$proj_dir" \
+            "$overwrite" \
+            "$run_limma" \
+            "$limma_workers"
+    fi
 done < "$cell_file"

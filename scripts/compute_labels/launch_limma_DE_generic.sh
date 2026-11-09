@@ -31,6 +31,8 @@ workers="$3"
 # Get paths
 ################################################################################
 
+echo "Running limma of ${cell}."
+
 cell_mat_dir="${project_dir}/data/perturbation/lincs/cell_matrices/"
 out_dir="${project_dir}/results/labels/"
 
@@ -38,7 +40,7 @@ mkdir -p "$out_dir"
 
 expr="${cell_mat_dir}/${cell}/expr_ensembl.csv"
 mdat="${cell_mat_dir}/${cell}/mdat.csv"
-out_dir_cell="${out_dir}/${cell}/expr/${penalty}/"
+out_dir_cell="${out_dir}/${cell}/expr/"
 
 mkdir -p "$out_dir_cell"
 
