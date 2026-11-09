@@ -21,6 +21,9 @@ ctrls_keep="$4"
 hgnc="$5"
 gem_f="$6"
 proj_dir="$7"
+overwrite_lincs="$8"
+run_limma=true
+limma_workers=64
 
 
 # Setting up output directory
@@ -38,12 +41,17 @@ conda activate r-4.3.1
 # Extract data from LINCS
 ################################################################################
 
-Rscript get_lincs_exe.R \
-    --gctx_pert "$pert_file" \
-    --gctx_ctrl "$ctrl_file" \
-    --cell "$cell" \
-    --ctrls_keep "$ctrls_keep" \
-    --out_dir "$out_dir_cell"
+if [ -f "${out_dir_cell}/expr.csv" && $overwrite_lincs == false ]; then
+    echo "Extracting ${cell} expression data from LINCS GCTX files..."
+    Rscript get_lincs_exe.R \
+        --gctx_pert "$pert_file" \
+        --gctx_ctrl "$ctrl_file" \
+        --cell "$cell" \
+        --ctrls_keep "$ctrls_keep" \
+        --out_dir "$out_dir_cell"
+else
+    echo "expr.csv already exists in ${out_dir_cell}. Skipping extraction of ${cell} data."
+fi
 
 conda deactivate
 
@@ -53,13 +61,36 @@ conda deactivate
 # Convert symbols to ensembl_gene_id
 export MAMBA_ROOT_PREFIX="/work/projects/car_t_methylome/software/micromamba"
 eval "$(micromamba shell hook --shell bash)"
-micromamba activate metabolic_drug_repurposing
 
-python expr_symb_to_ensembl.py \
-    --expr "${out_dir_cell}expr.csv" \
-    --hgnc "$hgnc" \
-    --gem "$gem_f" \
-    --symbol_col "V1" \
-    --is_log2 \
-    --out_dir "$out_dir_cell"
-micromamba deactivate
+if [ -f "${out_dir_cell}/expr_ensembl.csv" && $overwrite_lincs == false ]; then
+    echo "Converting ${cell} expr.csv HGNC gene symbols to ENSEMBL gene IDs..."
+    micromamba activate metabolic_drug_repurposing
+
+    python expr_symb_to_ensembl.py \
+        --expr "${out_dir_cell}expr.csv" \
+        --hgnc "$hgnc" \
+        --gem "$gem_f" \
+        --symbol_col "V1" \
+        --is_log2 \
+        --out_dir "$out_dir_cell"
+    micromamba deactivate
+else
+    echo "expr_ensembl.csv already exists in ${out_dir_cell}. Skipping conversion to ENSEMBL gene IDs of ${cell} data..."
+fi
+
+# Compute DEGs with limma
+################################################################################
+if [ run_limma == true ]; then
+    cd ../compute_labels
+
+    mkdir -p "logs/"
+
+    sbatch \
+        --job-name="limma_${cell}_expr" \
+        --output="logs/limma_${cell}_expr.out" \
+        --error="logs/limma_${cell}_expr.err" \
+        launch_get_lincs_generic.sh \
+        "$proj_dir" \
+        "$cell" \
+        "$limma_workers"
+fi

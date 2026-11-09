@@ -19,12 +19,13 @@
 
 
 cell_file="/home/users/gsantamaria/projects/metabognn_dev/data/LINCS/core_cell_lines.tsv"
-pert_file="/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cp_predicted_RNAseq_profiles.gctx"
-ctrl_file="/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/ctl_predicted_RNAseq_profiles.gctx"
+pert_file="/scratch/users/gsantamaria/test_large_files/metabognn_dev/data/perturbation/lincs/cp_predicted_RNAseq_profiles.gctx"
+ctrl_file="/scratch/users/gsantamaria/test_large_files/metabognn_dev/data/perturbation/lincs/ctl_predicted_RNAseq_profiles.gctx"
 ctrls_keep="DMSO"
 hgnc="/home/users/gsantamaria/projects/metabo_pert/data/utilities/hgnc_complete_set.txt"
 gem_f="/home/users/gsantamaria/projects/metabo_pert/data/GEMs/Human2/Human-GEM/model/Human-GEM.xml"
 proj_dir="/scratch/users/gsantamaria/test_large_files/metabognn_dev/"
+overwrite_lincs=false
 
 mkdir -p "logs/"
 
@@ -41,5 +42,6 @@ while IFS=$'\t' read -r cell; do
         "$ctrls_keep" \
         "$hgnc" \
         "$gem_f" \
-        "$proj_dir"
+        "$proj_dir" \
+        "$overwrite_lincs"
 done < "$cell_file"
