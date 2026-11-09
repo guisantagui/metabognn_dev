@@ -31,6 +31,7 @@ hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
 #labels_dir="${project_dir}/results/labels/${cell}/expr"   # limma_DE.R on the expression
 labels_dir="${project_dir_scratch}/results/labels/${cell}/expr"
 out_dir="${project_dir}/results/predict_targets/${cell}/tf"
+out_dir="${project_dir}/results/predict_targets/A549/tf_active200"
 device="cuda" # cpu, cuda
 
 
@@ -62,7 +63,9 @@ python metabolic_target_prediction.py \
         --drug-targets "${project_dir}/data/drug_targets/combined/drug_targets.tsv" \
         --device "$device" \
         --predict-unlabeled \
+        --de-counts "${labels_dir}/fit_info_nsig.csv" \
         --min-de-genes 200 \
+        --ignore-qvalue --top-n 100 \
         --n-folds 5 \
         --no-vae \
         --out-dir "${out_dir}"

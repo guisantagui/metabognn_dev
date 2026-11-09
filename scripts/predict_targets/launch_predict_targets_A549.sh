@@ -30,8 +30,9 @@ net_dir="${project_dir}/data/networks/combined"
 cell_dir="${project_dir_scratch}/data/perturbation/lincs/cell_matrices/${cell}"   # as in the other launchers
 hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
 labels_dir="${project_dir}/results/labels/${cell}/metchange/${penalty}"   # rerun limma_DE.R (fixed) first
+labels_dir_expr="${project_dir_scratch}/results/labels/${cell}/expr"
 out_dir="${project_dir}/results/predict_targets/${cell}/metchange_${penalty}"
-device="cpu" # cpu, cuda
+device="cuda" # cpu, cuda
 
 # Control baseline (baseline_ctrl.tsv) and perturbation table (perturbations.tsv), derived from expr.csv and
 # mdat.csv: (re)computed when missing or older than their inputs
@@ -60,6 +61,10 @@ python metabolic_target_prediction.py \
         --drug-metabolites "${net_dir}/drug_metabolite_matches.tsv" \
         --device "$device" \
         --predict-unlabeled \
+        --de-counts "${labels_dir_expr}/fit_info_nsig.csv" \
+        --min-de-genes 200 \
+        --ignore-qvalue --top-n 100 \
+        --n-folds 5 \
         --out-dir "${out_dir}"
 
 conda deactivate
