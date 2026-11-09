@@ -23,10 +23,11 @@
 conda activate metabolic_drug_repurposing
 
 project_dir="/home/users/gsantamaria/projects/metabognn_dev"
+project_dir_scratch="/scratch/users/gsantamaria/test_large_files/metabognn_dev"
 cell="A549"
 penalty="rank"
 net_dir="${project_dir}/data/networks/combined"
-cell_dir="/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cell_matrices/${cell}"   # as in the other launchers
+cell_dir="${project_dir_scratch}/data/perturbation/lincs/cell_matrices/${cell}"   # as in the other launchers
 hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
 labels_dir="${project_dir}/results/labels/${cell}/metchange/${penalty}"   # rerun limma_DE.R (fixed) first
 out_dir="${project_dir}/results/predict_targets/${cell}/metchange_${penalty}"

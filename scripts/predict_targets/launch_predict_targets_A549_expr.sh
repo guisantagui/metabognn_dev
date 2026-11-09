@@ -23,13 +23,14 @@
 conda activate metabolic_drug_repurposing
 
 project_dir="/home/users/gsantamaria/projects/metabognn_dev"
+project_dir_scratch="/scratch/users/gsantamaria/test_large_files/metabognn_dev"
 cell="A549"
 net_dir="${project_dir}/data/networks/gene"
-cell_dir="/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cell_matrices/${cell}"   # as in the other launchers
+cell_dir="${project_dir_scratch}/data/perturbation/lincs/cell_matrices/${cell}"   # as in the other launchers
 hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
-labels_dir="${project_dir}/results/labels/${cell}/expr"   # limma_DE.R on the expression
+labels_dir="${project_dir_scratch}/results/labels/${cell}/expr"
 out_dir="${project_dir}/results/predict_targets/${cell}/expr"
-device="cpu" # cpu, cuda
+device="cuda" # cpu, cuda
 
 # Control baseline (baseline_ctrl.tsv) and perturbation table (perturbations.tsv), derived from expr.csv and
 # mdat.csv: (re)computed when missing or older than their inputs
@@ -59,6 +60,8 @@ python metabolic_target_prediction.py \
         --drug-targets "${project_dir}/data/drug_targets/combined/drug_targets.tsv" \
         --device "$device" \
         --predict-unlabeled \
+        --n-folds 5 \
+        --no-vae \
         --out-dir "${out_dir}"
 
 conda deactivate
