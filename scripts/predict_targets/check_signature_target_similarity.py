@@ -17,6 +17,10 @@ Reported (stdout and <out-dir>/summary.json; random = AUROC 0.5, enrichment 1):
   *_null              the same with drug labels permuted among perturbations (--n-perm times)
 <out-dir>/per_target.tsv: for each target hit by >= --min-drugs drugs, AUROC of pairs where both drugs hit it
 vs pairs where only one does (and they share no target): which target classes leave a recognisable signature.
+<out-dir>/overlap_drug_pairs.tsv: the drug pairs behind each target-overlap bin (perturbation pairs, mean
+correlation overall, at the same and at different time points, shared targets), largest first.
+<out-dir>/top_pairs_different_drugs.tsv: the 300 most correlated perturbation pairs of different drugs, to spot
+the same compound listed under two names.
 """
 import argparse
 import json
@@ -128,13 +132,44 @@ res.update(pair_metrics(d))
 # graded: pairs of different drugs by the overlap of their target sets, each bin against pairs sharing none
 jp = jac[d[i], d[j]]
 res["by_target_overlap"] = {}
+bin_rows = []
 for lo, hi, name in ((0, 0.1, "jaccard (0, 0.1]"), (0.1, 0.25, "jaccard (0.1, 0.25]"), (0.25, 0.5, "jaccard (0.25, 0.5]"),
                      (0.5, 0.999, "jaccard (0.5, 1)"), (0.999, 1.0, "identical target sets")):
     pos = (jp > lo) & (jp <= hi) & ~same
     m = pos | none
+    st, dt_ = pos & same_t, pos & ~same_t
     res["by_target_overlap"][name] = {"n_pairs": int(pos.sum()), "n_drug_pairs": int(len(set(zip(d[i][pos], d[j][pos])))),
                                       "mean_corr": float(c[pos].mean()) if pos.any() else None,
+                                      "mean_corr_same_time": float(c[st].mean()) if st.any() else None,
+                                      "mean_corr_diff_time": float(c[dt_].mean()) if dt_.any() else None,
                                       "auroc_vs_no_shared": auroc(c[m], pos[m])}
+    if pos.any():
+        bin_rows.append(pd.DataFrame({"overlap": name, "a": d[i][pos], "b": d[j][pos], "corr": c[pos],
+                                      "same_time": same_t[pos]}))
+
+# drug pairs behind each overlap bin: which ones dominate it (many perturbation pairs) and whether time drives them
+bp = pd.concat(bin_rows)
+lo_, hi_ = np.minimum(bp.a, bp.b), np.maximum(bp.a, bp.b)
+bp["drug_a"], bp["drug_b"] = drugs[lo_], drugs[hi_]
+g = bp.groupby(["overlap", "drug_a", "drug_b"], sort=False)
+drug_pairs = g.agg(n_pert_pairs=("corr", "size"), mean_corr=("corr", "mean"),
+                   frac_same_time=("same_time", "mean")).reset_index()
+drug_pairs["mean_corr_same_time"] = g.apply(lambda x: x["corr"][x.same_time].mean()).to_numpy()
+drug_pairs["mean_corr_diff_time"] = g.apply(lambda x: x["corr"][~x.same_time].mean()).to_numpy()
+drug_pairs["shared_targets"] = [",".join(sorted(targets[a] & targets[b])[:10]) for a, b in
+                                zip(drug_pairs.drug_a, drug_pairs.drug_b)]
+drug_pairs.sort_values(["overlap", "n_pert_pairs"], ascending=[True, False]).to_csv(
+    os.path.join(args.out_dir, "overlap_drug_pairs.tsv"), sep="\t", index=False, float_format="%.4g")
+
+# most correlated perturbation pairs of different drugs: duplicated compounds under two names show up here
+dose = pt.loc[cols, "dose"].to_numpy()
+other = ~same
+top = np.argsort(-np.where(other, c, -np.inf))[:300]
+pd.DataFrame({"pert_a": np.array(cols)[i[top]], "pert_b": np.array(cols)[j[top]], "drug_a": drug[i[top]],
+              "drug_b": drug[j[top]], "dose_a": dose[i[top]], "dose_b": dose[j[top]], "time_a": time[i[top]],
+              "time_b": time[j[top]], "corr": c[top], "target_jaccard": jp[top],
+              "identical_targets": jp[top] > 0.999}).to_csv(
+    os.path.join(args.out_dir, "top_pairs_different_drugs.tsv"), sep="\t", index=False, float_format="%.4g")
 enr, hit, base = knn_enrichment(d)
 res["knn"] = {"k": args.k, "enrichment": enr, "frac_sharing_target": hit, "expected": base}
 
