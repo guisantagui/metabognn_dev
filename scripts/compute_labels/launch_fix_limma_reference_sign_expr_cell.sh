@@ -5,7 +5,7 @@
 #SBATCH --mail-user=guillem.santamaria@uni.lu
 #SBATCH --mail-type=begin,end,fail
 #SBATCH --ntasks-per-node=1
-#SBATCH --mem=72GB
+#SBATCH --mem=48GB
 #SBATCH -c 1
 #SBATCH --time=00-03:00:00
 #Define sdout path
