@@ -3,8 +3,10 @@
 proj_dir="/scratch/users/gsantamaria/test_large_files/metabognn_dev/"
 cell_file="/home/users/gsantamaria/projects/metabognn_dev/data/LINCS/core_cell_lines.tsv"
 
+mkdir -p logs
+
 while IFS=$'\t' read -r cell; do
-    echo "Launching ${cell} extraction..."
+    echo "Launching ${cell} sign fix..."
     sbatch \
         --job-name="corr_sign_${cell}" \
         --output="logs/corr_sign_${cell}.out" \
