@@ -30,15 +30,17 @@ eval "$(micromamba shell hook --shell bash)"
 
 micromamba activate metabolic_drug_repurposing
 
+project_dir="/home/users/gsantamaria/projects/metabognn_dev/"
+project_dir_scratch="/scratch/users/gsantamaria/test_large_files/metabognn_dev/"
 cell="A549"
 penalty="rank"
-cell_mat_dir=/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cell_matrices/
-hgnc_f="/home/users/gsantamaria/projects/metabo_pert/data/utilities/hgnc_complete_set.txt"
+cell_mat_dir="${project_dir_scratch}/data/perturbation/lincs/cell_matrices/"
+hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
 input_type="penalty"
 batch_size=1000
-gem_f="/home/users/gsantamaria/projects/metabo_pert/data/GEMs/Human2/Human-GEM/model/Human-GEM.xml"
-medium_f="/home/users/gsantamaria/projects/metabo_pert/data/GEMs/gem_mediums/Human2-GEM/rpmi_medium.json"
-out_dir="/scratch/users/gsantamaria/test_large_files/metabo_perts/results/metChange/"
+gem_f="${project_dir}/data/GEMs/Human-GEM/model/Human-GEM.xml"
+medium_f="${project_dir}/data/GEMs/gem_mediums/Human2-GEM/rpmi_medium.json"
+out_dir="${project_dir_scratch}/results/metChange/"
 
 expr_f="${cell_mat_dir}/${cell}/expr_ensembl.csv"
 mdat_f="${cell_mat_dir}/${cell}/mdat.csv"
