@@ -44,7 +44,7 @@ out_dir="${project_dir_scratch}/results/metChange/"
 
 expr_f="${cell_mat_dir}/${cell}/expr_ensembl.csv"
 mdat_f="${cell_mat_dir}/${cell}/mdat.csv"
-out_dir_expr="${cell_mat_dir}/batch_split/${penalty}/"
+out_dir_expr="${cell_mat_dir}/${cell}/batch_split/${penalty}/"
 out_dir_metchange="${out_dir}/${cell}/${penalty}/"
 
 mkdir -p "$out_dir_expr"
@@ -70,7 +70,8 @@ fi
 # Batches: rewritten only when missing or older than the penalties / metadata. Batch 0 is written first, so
 # if it is newer than both inputs the split finished (prepare_input_matrices.py exits non-zero otherwise).
 n_expected=$(( ($(head -1 "$expr_pen_f" | tr ',' '\n' | wc -l) - 1 + batch_size - 1) / batch_size ))
-n_found=$(ls "${out_dir_expr}/${pen_base}"_batch_*.csv 2>/dev/null | wc -l)
+# find, not ls: with no batches yet ls fails, and under set -e / pipefail that silently ends the job
+n_found=$(find "$out_dir_expr" -maxdepth 1 -name "${pen_base}_batch_*.csv" | wc -l)
 first_batch="${out_dir_expr}/${pen_base}_batch_0.csv"
 if [ "$n_found" -ne "$n_expected" ] || [ "$expr_pen_f" -nt "$first_batch" ] || [ "$mdat_f" -nt "$first_batch" ]; then
     # Remove batches from earlier runs, so that the array size below counts only these
@@ -87,7 +88,7 @@ else
     echo "${n_found} batches in ${out_dir_expr} are up to date, skipping prepare_input_matrices.py."
 fi
 
-max_fluxes_file="${out_dir_metchange}/lp1_fluxes.npy"
+max_fluxes_file="${out_dir}/lp1_fluxes.npy"
 
 if [ ! -f "$max_fluxes_file" ]; then
     python run_metchange_exe_lp1.py --medium "$medium_f" \
@@ -96,6 +97,8 @@ if [ ! -f "$max_fluxes_file" ]; then
 else
     echo "${max_fluxes_file} already exists."
 fi
+
+cp "$max_fluxes_file" "$out_dir_metchange/"
 
 # ---------------------------------------------------------
 # Submit MetChange array

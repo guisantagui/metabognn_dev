@@ -69,7 +69,8 @@ fi
 # Batches: rewritten only when missing or older than the penalties / metadata. Batch 0 is written first, so
 # if it is newer than both inputs the split finished (prepare_input_matrices.py exits non-zero otherwise).
 n_expected=$(( ($(head -1 "$expr_pen_f" | tr ',' '\n' | wc -l) - 1 + batch_size - 1) / batch_size ))
-n_found=$(ls "${out_dir_expr}/${pen_base}"_batch_*.csv 2>/dev/null | wc -l)
+# find, not ls: with no batches yet ls fails, and under set -e / pipefail that silently ends the job
+n_found=$(find "$out_dir_expr" -maxdepth 1 -name "${pen_base}_batch_*.csv" | wc -l)
 first_batch="${out_dir_expr}/${pen_base}_batch_0.csv"
 if [ "$n_found" -ne "$n_expected" ] || [ "$expr_pen_f" -nt "$first_batch" ] || [ "$mdat_f" -nt "$first_batch" ]; then
     # Remove batches from earlier runs, so that the array size below counts only these
