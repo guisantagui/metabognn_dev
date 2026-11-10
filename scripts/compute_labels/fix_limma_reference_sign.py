@@ -31,6 +31,8 @@ ap.add_argument("--control", default="DMSO_nan", help="control name without the 
 ap.add_argument("--min-ratio", type=float, default=1.5,
                 help="clear case: the farther candidate is at least this many times farther from the reference")
 ap.add_argument("--block", type=int, default=500, help="features per block when deciding the flips")
+ap.add_argument("--name-flips", help="limma_reference_order.R output (perturbation, flipped_R): R's own level order "
+                                     "in the limma jobs' environment, used instead of the approximate name rule")
 args = ap.parse_args()
 if os.path.abspath(args.out_dir) == os.path.abspath(args.dir):
     ap.error("--out-dir must differ from --dir (the originals are kept)")
@@ -76,7 +78,15 @@ def key(s):
     return "".join(ch for ch in s.lower() if ch.isalnum())
 
 
-name_rule = np.array([key(p) < key(f"{args.control}_{t}") for p, t in zip(cols, time)])
+if args.name_flips:
+    fr = pd.read_csv(args.name_flips, sep="\t").set_index("perturbation").flipped_R.astype(str).str.upper() == "TRUE"
+    missing = ~cols.isin(fr.index)
+    if missing.any():
+        raise SystemExit(f"{missing.sum():,} perturbations not in --name-flips, e.g. {list(cols[missing][:3])}")
+    name_rule = fr.reindex(cols).to_numpy()
+    print(f"name rule: R's level order from {args.name_flips}")
+else:
+    name_rule = np.array([key(p) < key(f"{args.control}_{t}") for p, t in zip(cols, time)])
 ratio = np.maximum(dA, dB) / np.maximum(np.minimum(dA, dB), 1e-12)
 clear = ratio >= args.min_ratio
 agree = (flip == name_rule)[clear].mean() if clear.any() else float("nan")
