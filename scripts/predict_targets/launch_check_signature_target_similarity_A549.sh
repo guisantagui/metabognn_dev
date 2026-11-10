@@ -10,7 +10,7 @@
 #SBATCH -c 1
 #SBATCH --time=00-08:00:00
 #Define sdout path
-#SBATCH --output=mtarg_sim_A549.out
+#SBATCH --output=targ_sim_A549.out
 #Define sderr path
 #SBATCH --error=targ_sim_A549.err
 #Define the queue (Quality Of Service) to which the task shall be submitted to
