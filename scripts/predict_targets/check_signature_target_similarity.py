@@ -80,7 +80,10 @@ gpos = {g: i for i, g in enumerate(genes)}
 rows = [i for i, x in enumerate(drugs) for g in targets[x]]
 cols_t = [gpos[g] for x in drugs for g in targets[x]]
 T = sparse.csr_matrix((np.ones(len(rows)), (rows, cols_t)), shape=(len(drugs), len(genes)))
-share = (T @ T.T).toarray() > 0  # drugs x drugs: at least one target in common
+inter = (T @ T.T).toarray()
+share = inter > 0  # drugs x drugs: at least one target in common
+n_t = np.asarray(T.sum(1)).ravel()
+jac = inter / (n_t[:, None] + n_t[None, :] - inter)  # Jaccard of the two target sets
 print(f"{len(drugs):,} drugs, {len(genes):,} distinct targets")
 
 # ---- Spearman correlation = Pearson on per-signature gene ranks
@@ -121,6 +124,17 @@ res = {"n_perturbations": len(cols), "n_drugs": len(drugs), "n_genes": int(sig.s
        "mean_corr": {"same_drug": float(c[same].mean()), "shared_target": float(c[shr].mean()),
                      "no_shared_target": float(c[none].mean())}}
 res.update(pair_metrics(d))
+
+# graded: pairs of different drugs by the overlap of their target sets, each bin against pairs sharing none
+jp = jac[d[i], d[j]]
+res["by_target_overlap"] = {}
+for lo, hi, name in ((0, 0.1, "jaccard (0, 0.1]"), (0.1, 0.25, "jaccard (0.1, 0.25]"), (0.25, 0.5, "jaccard (0.25, 0.5]"),
+                     (0.5, 0.999, "jaccard (0.5, 1)"), (0.999, 1.0, "identical target sets")):
+    pos = (jp > lo) & (jp <= hi) & ~same
+    m = pos | none
+    res["by_target_overlap"][name] = {"n_pairs": int(pos.sum()), "n_drug_pairs": int(len(set(zip(d[i][pos], d[j][pos])))),
+                                      "mean_corr": float(c[pos].mean()) if pos.any() else None,
+                                      "auroc_vs_no_shared": auroc(c[m], pos[m])}
 enr, hit, base = knn_enrichment(d)
 res["knn"] = {"k": args.k, "enrichment": enr, "frac_sharing_target": hit, "expected": base}
 
