@@ -60,7 +60,9 @@ scored, and every metric is also reported on the active ones (test_per_*_active)
 into K folds, each fold is the test set once (validation drugs drawn from the other folds), each fold goes to
 <out-dir>/fold<i>/, and the pooled out-of-fold ranks to <out-dir>/cv_metrics.json, cv_drug_ranks.tsv and
 cv_drug_ranks_per_drug.tsv. --fold i runs one fold (SLURM arrays); the job that completes the last fold pools them,
-or run --aggregate-only.
+or run --aggregate-only. --shuffle-signatures is the negative control: each labelled perturbation gets the
+signature of another one (of the same activity class), so whatever survives it does not come from what the
+signature says about the drug.
 
 A multinomial logistic regression on the standardised base features (no polynomial, no VAE) is always fitted on the
 same rows and sample weights as the FNNs and scored the same way (rank_logreg): the reference the deep model has to
@@ -946,6 +948,9 @@ def main():
                     help="active perturbations: >= this many DE genes. Only active ones are used for training, "
                          "validation and --predict-unlabeled; all are scored, metrics are reported for all and "
                          "for the active ones (*_active)")
+    fe.add_argument("--shuffle-signatures", action="store_true",
+                    help="control: permute the signatures among the labelled perturbations (within active / "
+                         "inactive with --de-counts); dose and time stay with the perturbation")
     fe.add_argument("--alpha", action="append", default=[], metavar="REL=W",
                     help="relation mixing weight (defaults: build_network.SUGGESTED_ALPHA)")
     fe.add_argument("--activity-floor", type=float, default=0.0)
@@ -1045,6 +1050,20 @@ def main():
     perts = perts[labeled].reset_index(drop=True)
     if args.max_perts:
         perts = perts.sample(min(args.max_perts, len(perts)), random_state=args.seed).reset_index(drop=True)
+    if args.shuffle_signatures:  # each perturbation gets another one's signature, of the same activity class
+        srng = np.random.default_rng([args.seed, 1])
+        strata = perts.active.to_numpy() if args.de_counts else np.ones(len(perts), bool)
+        shuffled, same_drug = {}, 0
+        drug_of = dict(zip(perts.pert, perts.drug.str.lower()))
+        for s in np.unique(strata):
+            src = perts.pert[strata == s].to_numpy()
+            for p, q in zip(src, srng.permutation(src)):
+                shuffled[p] = sigs[q]
+                same_drug += drug_of[p] == drug_of[q]
+        sigs.update(shuffled)
+        perts["n_sig"] = perts.pert.map(lambda p: len(sigs[p][0]))
+        log(f"shuffle-signatures: {len(shuffled):,} signatures permuted within {len(np.unique(strata))} "
+            f"activity class(es); {same_drug:,} got one of the same drug")
     globals_ = pert_globals(perts)
     splits = drug_splits(perts.drug.unique(), args)
 
