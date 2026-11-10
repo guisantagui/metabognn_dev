@@ -7,7 +7,9 @@ control name ("DMSO_nan_<time>") sorted first in the R session's locale. Where t
 limma returned log2FC = control - treated and basal = the treated mean. p- and q-values are unaffected
 (two-sided), so the fix is: log2FC -> -log2FC and basal -> basal + log2FC (the control mean).
 
-Which perturbations were affected is decided from the data, not from the name (the collation of the locale the job
+With --name-flips (limma_reference_order.R run in the limma jobs' environment) R's own level order decides every
+perturbation, which is exactly what limma did, and the data below is only a check. Without it, which
+perturbations were affected is decided from the data, not from the name (the collation of the locale the job
 ran in is unknown here): for each perturbation the two candidates for its control mean, basal (not flipped) and
 basal + log2FC (flipped), are compared with a reference control profile (per time point, the feature-wise median
 of the current control estimates, refined twice). Perturbations whose two candidates are about as close to the
@@ -90,14 +92,20 @@ else:
 ratio = np.maximum(dA, dB) / np.maximum(np.minimum(dA, dB), 1e-12)
 clear = ratio >= args.min_ratio
 agree = (flip == name_rule)[clear].mean() if clear.any() else float("nan")
-final = np.where(clear, flip, name_rule)
 print(f"clear cases: {clear.sum():,} of {len(flip):,} (distance ratio >= {args.min_ratio}); "
       f"flipped among them {flip[clear].sum():,}; name rule agrees on {agree:.2%}")
-print(f"undecidable from the data (no effect): {(~clear).sum():,}, set by the name rule "
-      f"({name_rule[~clear].sum():,} flipped)")
+if args.name_flips:
+    # R's level order is what limma did: it decides every perturbation, the data is only a check
+    final = name_rule
+    print(f"decision: R's level order for all perturbations; the data disagrees on {(flip != name_rule)[clear].sum():,} "
+          f"clear cases (listed in flipped.tsv: clear & flipped_by_data != flipped)")
+else:
+    final = np.where(clear, flip, name_rule)
+    print(f"undecidable from the data (no effect): {(~clear).sum():,}, set by the name rule "
+          f"({name_rule[~clear].sum():,} flipped)")
+    if agree < 0.98:
+        print("WARNING: the name rule disagrees with the data on clear cases; check flipped.tsv before using the output")
 print(f"total flipped: {final.sum():,} ({final.mean():.1%})")
-if agree < 0.98:
-    print("WARNING: the name rule disagrees with the data on clear cases; check flipped.tsv before using the output")
 
 pd.DataFrame({"perturbation": cols, "flipped": final, "flipped_by_data": flip, "clear": clear,
               "distance_ratio": ratio, "name_rule": name_rule}).to_csv(

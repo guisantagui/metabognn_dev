@@ -46,6 +46,9 @@ parser <- add_argument(parser = parser, arg = "--reader", default = "fread",
                        help = paste("How the matrix is read: fread (fast) or lines (line by line,",
                                     "for files that crash fread, e.g. ~150k columns of MetChange)."))
 
+parser <- add_argument(parser = parser, arg = "--perts", default = NA,
+                       help = "file with one perturbation per line: fit only these (e.g. to check a subset)")
+
 parsed <- parse_args(parser)
 
 # Directory stuff
@@ -165,6 +168,13 @@ if (!identical(mdat$id, colnames(expr))) {
 #)
 
 perts <- unique(mdat$perturbation[mdat$exper_group != "ctrl"])
+if (!is.na(parsed$perts)) {
+    wanted <- readLines(parsed$perts)
+    if (length(setdiff(wanted, perts))) stop(sprintf("%d perturbations of --perts not in the metadata",
+                                                     length(setdiff(wanted, perts))))
+    perts <- wanted
+    message(sprintf("--perts: fitting %d perturbations", length(perts)))
+}
 genes_all <- rownames(expr)
 
 # Samples of one perturbation's model: its own samples and the controls of the
