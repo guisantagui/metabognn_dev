@@ -65,6 +65,7 @@ python metabolic_target_prediction.py \
         --min-de-genes 200 \
         --ignore-qvalue --top-n 100 \
         --n-folds 5 \
+        --no-vae \
         --out-dir "${out_dir}"
 
 conda deactivate
