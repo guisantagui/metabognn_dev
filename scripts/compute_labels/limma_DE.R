@@ -270,7 +270,11 @@ fit_one <- function(pert) {
                  n_batches = length(unique(mdat_filt$batch)), correlation = NA_real_)
     if (length(unique(mdat_filt$perturbation)) < 2) return(list(out = NULL, info = info))
     dat_filt <- expr[, sel, drop = FALSE]
-    design <- model.matrix(~ perturbation, data = mdat_filt)
+    # Controls are the reference level explicitly: with ~ perturbation the reference is whichever name sorts
+    # first, which depends on the locale (en_US: "dacinostat_..." < "DMSO_..." < "vorinostat_..."), and
+    # perturbations sorting before the controls got control - treated as log2FC and their own mean as basal.
+    group <- factor(ifelse(mdat_filt$exper_group == "ctrl", "ctrl", "pert"), levels = c("ctrl", "pert"))
+    design <- model.matrix(~ group)
 
     if (info$n_batches > 1) {
         corfit <- dup_cor_fast(dat_filt, design, block = mdat_filt$batch)
