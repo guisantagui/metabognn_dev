@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #Usage # sbatch [this script]
 #Name of the job
-#SBATCH --job-name=predict_targets_A549
+#SBATCH --job-name=predict_targets_A549_mc
 #SBATCH -N 1
 #SBATCH --mail-user=guillem.santamaria@uni.lu
 #SBATCH --mail-type=begin,end,fail
@@ -10,9 +10,9 @@
 #SBATCH --mem=96GB
 #SBATCH --time=0-12:00:00
 #Define sdout path
-#SBATCH --output=./predict_targets_A549.out
+#SBATCH --output=./predict_targets_A549_mc.out
 #Define sderr path
-#SBATCH --error=./predict_targets_A549.err
+#SBATCH --error=./predict_targets_A549_mc.err
 # GPU partition and request: adjust to the cluster (iris: -p gpu with -G 1)
 #SBATCH -p gpu
 #SBATCH -G 1
@@ -63,6 +63,7 @@ python metabolic_target_prediction.py \
         --predict-unlabeled \
         --de-counts "${labels_dir_expr}/fit_info_nsig.csv" \
         --min-de-genes 200 \
+        --score-active-only \
         --ignore-qvalue --top-n 100 \
         --n-folds 5 \
         --no-vae \

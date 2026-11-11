@@ -56,7 +56,8 @@ the model and the target-frequency baseline have seen as positives, which pushes
 ranking; the held-out ranking has no such bias (random: median_percentile 0.5; topX_pct X / 100, top1_pct being the
 closest to the top-1st-percentile recall of Menacho et al.). With --de-counts / --min-de-genes, perturbations with
 fewer DE genes (no transcriptional response to learn from) are left out of training and validation but still
-scored, and every metric is also reported on the active ones (test_per_*_active). With --n-folds K the drugs are split
+scored, and every metric is also reported on the active ones (test_per_*_active); --score-active-only scores only
+the active ones (much faster; test_per_* then equals test_per_*_active). With --n-folds K the drugs are split
 into K folds, each fold is the test set once (validation drugs drawn from the other folds), each fold goes to
 <out-dir>/fold<i>/, and the pooled out-of-fold ranks to <out-dir>/cv_metrics.json, cv_drug_ranks.tsv and
 cv_drug_ranks_per_drug.tsv. --fold i runs one fold (SLURM arrays); the job that completes the last fold pools them,
@@ -969,6 +970,9 @@ def main():
     sa.add_argument("--aggregate-only", action="store_true", help="with --n-folds: only pool finished folds")
     sa.add_argument("--max-perts", type=int, default=0, help="subsample perturbations (smoke tests)")
     sa.add_argument("--max-test-perts", type=int, default=0, help="cap full-proteome test scoring")
+    sa.add_argument("--score-active-only", action="store_true",
+                    help="with --min-de-genes: score only the active test perturbations (the inactive ones rank at "
+                         "chance and take most of the scoring time)")
     sa.add_argument("--predict-unlabeled", action="store_true", help="also score drugs without known targets")
     sa.add_argument("--report-top-k", type=int, default=200,
                     help="called targets written per perturbation (the drug ranking uses all of them)")
@@ -1014,6 +1018,8 @@ def main():
         ap.error(f"--mode {args.mode} needs --hgnc")
     if args.min_de_genes and not args.de_counts:
         ap.error("--min-de-genes needs --de-counts")
+    if args.score_active_only and not args.min_de_genes:
+        ap.error("--score-active-only needs --de-counts and --min-de-genes")
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "config.json" if args.fold is None else f"config_fold{args.fold}.json"),
               "w") as fh:
@@ -1134,6 +1140,9 @@ def main():
 
         # ---- full-proteome scoring of held-out drugs
         test = perts[split == "test"]
+        if args.score_active_only:
+            log(f"score-active-only: {int(test.active.sum()):,} of {len(test):,} test perturbations scored")
+            test = test[test.active]
         if args.max_test_perts:
             test = test.sample(min(args.max_test_perts, len(test)), random_state=args.seed)
         # candidates: all labelled A549 drugs, and the held-out drugs of this split only
