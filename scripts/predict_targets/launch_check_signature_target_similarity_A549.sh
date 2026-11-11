@@ -42,3 +42,4 @@ python check_signature_target_similarity.py \
     --drug-targets ${project_dir}/data/drug_targets/combined/drug_targets.tsv \
     --de-counts ${labels_dir}/fit_info_nsig.csv --min-de-genes "$min_de_genes" \
     --out-dir "$out_dir_cell"
+python plot_signature_target_similarity.py --dir "$out_dir_cell" --title "$cell"

@@ -21,6 +21,9 @@ vs pairs where only one does (and they share no target): which target classes le
 correlation overall, at the same and at different time points, shared targets), largest first.
 <out-dir>/top_pairs_different_drugs.tsv: the 300 most correlated perturbation pairs of different drugs, to spot
 the same compound listed under two names.
+For plot_signature_target_similarity.py: <out-dir>/pairs_sample.tsv.gz (correlations of up to --plot-pairs pairs per
+class: same drug, shared target, no shared target) and example_targets_corr.tsv.gz (perturbation x perturbation
+correlations of the drugs of up to --plot-targets well-recognised targets, each drug under one target only).
 """
 import argparse
 import json
@@ -42,6 +45,9 @@ ap.add_argument("--k", type=int, default=10)
 ap.add_argument("--min-drugs", type=int, default=5, help="per_target.tsv: targets of at least this many drugs")
 ap.add_argument("--n-perm", type=int, default=3)
 ap.add_argument("--seed", type=int, default=0)
+ap.add_argument("--plot-pairs", type=int, default=50000, help="pairs_sample.tsv.gz: pairs per class")
+ap.add_argument("--plot-targets", type=int, default=6, help="example_targets_corr.tsv.gz: number of targets")
+ap.add_argument("--plot-perts-per-target", type=int, default=40)
 ap.add_argument("--out-dir", required=True)
 args = ap.parse_args()
 os.makedirs(args.out_dir, exist_ok=True)
@@ -204,8 +210,39 @@ per_target.to_csv(os.path.join(args.out_dir, "per_target.tsv"), sep="\t", index=
 with open(os.path.join(args.out_dir, "summary.json"), "w") as fh:
     json.dump(res, fh, indent=2)
 
+# ---- for plot_signature_target_similarity.py
+samp = []
+for name, m in (("same drug", same), ("shared target", shr), ("no shared target", none)):
+    idx = np.flatnonzero(m)
+    if len(idx) > args.plot_pairs:
+        idx = np.sort(rng.choice(idx, args.plot_pairs, replace=False))
+    samp.append(pd.DataFrame({"pair_class": name, "corr": c[idx], "target_jaccard": jp[idx], "same_time": same_t[idx]}))
+pd.concat(samp).to_csv(os.path.join(args.out_dir, "pairs_sample.tsv.gz"), sep="\t", index=False, float_format="%.4g")
+
+# example block: the best-recognised targets (per_target order), each drug shown under the first target it falls in
+ex, used = [], set()
+for t in per_target.target if len(per_target) else []:
+    if len(ex) == args.plot_targets:
+        break
+    tdrugs = [q for q in np.flatnonzero(T[:, gpos[t]].toarray().ravel()) if q not in used]
+    if len(tdrugs) < args.min_drugs:
+        continue
+    used.update(tdrugs)
+    p = np.flatnonzero(np.isin(d, tdrugs))
+    if len(p) > args.plot_perts_per_target:
+        p = np.sort(rng.choice(p, args.plot_perts_per_target, replace=False))
+    hours = pd.to_numeric(pd.Series(time[p]).str.extract(r"([\d.]+)")[0], errors="coerce").to_numpy()
+    ex.append(pd.DataFrame({"target": t, "drug": drug[p], "timepoint": time[p], "perturbation": np.array(cols)[p],
+                            "_h": hours, "_k": p}).sort_values(["drug", "_h"]))
+if ex:
+    ex = pd.concat(ex, ignore_index=True)
+    block = pd.DataFrame(C[np.ix_(ex._k, ex._k)], columns=ex.perturbation)
+    pd.concat([ex.drop(columns=["_h", "_k"]), block], axis=1).to_csv(
+        os.path.join(args.out_dir, "example_targets_corr.tsv.gz"), sep="\t", index=False, float_format="%.3g")
+
 print(json.dumps(res, indent=2))
 if len(per_target):
     print(f"\nper target (>= {args.min_drugs} drugs), top and bottom by AUROC:")
     print(pd.concat([per_target.head(15), per_target.tail(5)]).to_string(index=False, float_format="%.3f"))
-print(f"\nsaved {args.out_dir}/summary.json and per_target.tsv")
+print(f"\nsaved {args.out_dir}/summary.json, per_target.tsv, pairs_sample.tsv.gz, example_targets_corr.tsv.gz; "
+      f"plots: python plot_signature_target_similarity.py --dir {args.out_dir}")
