@@ -32,12 +32,16 @@ ap.add_argument("--out-dir", required=True)
 ap.add_argument("--control", default="DMSO_nan", help="control name without the time point")
 ap.add_argument("--min-ratio", type=float, default=1.5,
                 help="clear case: the farther candidate is at least this many times farther from the reference")
+ap.add_argument("--force", action="store_true",
+                help="apply --name-flips even when the data says the outputs are not flipped")
 ap.add_argument("--block", type=int, default=500, help="features per block when deciding the flips")
 ap.add_argument("--name-flips", help="limma_reference_order.R output (perturbation, flipped_R): R's own level order "
                                      "in the limma jobs' environment, used instead of the approximate name rule")
 args = ap.parse_args()
 if os.path.abspath(args.out_dir) == os.path.abspath(args.dir):
     ap.error("--out-dir must differ from --dir (the originals are kept)")
+if os.path.exists(os.path.join(args.dir, "reference_level.txt")):
+    raise SystemExit(f"{args.dir} was written by the fixed limma_DE.R (reference_level.txt): nothing to correct")
 os.makedirs(args.out_dir, exist_ok=True)
 
 def read(name):
@@ -94,6 +98,12 @@ clear = ratio >= args.min_ratio
 agree = (flip == name_rule)[clear].mean() if clear.any() else float("nan")
 print(f"clear cases: {clear.sum():,} of {len(flip):,} (distance ratio >= {args.min_ratio}); "
       f"flipped among them {flip[clear].sum():,}; name rule agrees on {agree:.2%}")
+if args.name_flips and clear.sum() >= 100 and flip[clear].mean() < 0.05 and name_rule.mean() > 0.2 and not args.force:
+    # e.g. outputs of the fixed limma_DE.R written before the marker existed: applying R's (old) order would flip
+    # correct signatures
+    raise SystemExit(f"the data finds almost no flipped perturbation ({flip[clear].mean():.1%} of the clear cases) "
+                     f"while R's level order would flip {name_rule.mean():.1%}: these outputs look already correct "
+                     f"(fixed limma_DE.R). Nothing written; --force to apply anyway")
 if args.name_flips:
     # R's level order is what limma did: it decides every perturbation, the data is only a check
     final = name_rule

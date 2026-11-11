@@ -406,6 +406,8 @@ write_table_fast(log2FCs, f = file.path(out_dir, "log2FC.csv"))
 write_table_fast(pvals, f = file.path(out_dir, "pvals.csv"))
 write_table_fast(qvals, f = file.path(out_dir, "qvals.csv"))
 fwrite(rbindlist(info), file.path(out_dir, "fit_info.csv"))
+# marker: these outputs use the controls as the reference level (fix_limma_reference_sign.py refuses to touch them)
+writeLines("reference level: ctrl (explicit)", file.path(out_dir, "reference_level.txt"))
 
 message(sprintf("basal.csv, log2FC.csv, pvals.csv, qvals.csv and fit_info.csv saved at %s", out_dir))
 message(sprintf("The checkpoints in %s can be deleted.", ckpt_dir))
