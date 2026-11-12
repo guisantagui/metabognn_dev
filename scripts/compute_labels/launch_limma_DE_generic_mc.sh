@@ -61,10 +61,12 @@ mkdir -p "$out_dir"
 if [ "$mode" == "mc" ]; then
     medium=$(basename "${medium_f%.json}")
     expr="${mc_dir}/${cell}/${penalty}_concat/expr_ensembl_${penalty}_metChange_${medium}_concat.csv"
-    out_dir_cell="${out_dir}/${cell}/metchange/"
+    out_dir_cell="${out_dir}/${cell}/metchange/${penalty}/"
+    reader="lines"   # fread segfaults on the MetChange matrix (~150k columns)
 elif [ "$mode" == "expr" ]; then
     expr="${cell_mat_dir}/${cell}/expr_ensembl.csv"
     out_dir_cell="${out_dir}/${cell}/expr/"
+    reader="fread"
 else
     echo "ERROR: Unknown mode '$mode'. Use 'mc' or 'expr'."
     exit 1
@@ -79,6 +81,7 @@ if [[ -f "$mdat" && -f "$expr" ]]; then
     Rscript limma_DE.R --expr "$expr" \
         --mdat "$mdat" \
         --workers "$workers" \
+        --reader "$reader" \
         --out_dir "$out_dir_cell" \
         || { echo "limma failed or stopped for ${cell}: resubmit to resume from checkpoints"; exit 1; }
 else
