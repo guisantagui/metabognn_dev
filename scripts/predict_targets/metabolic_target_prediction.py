@@ -65,6 +65,14 @@ or run --aggregate-only. --shuffle-signatures is the negative control: each labe
 signature of another one (of the same activity class), so whatever survives it does not come from what the
 signature says about the drug.
 
+Prior-free metrics (held-out drugs, compared within the activity class): the scores above can rank a drug well
+whatever the signature (a per-drug prior learnt from the protein features). spec_*_heldout asks instead whether a
+perturbation scores its own drug higher than the other drugs' test perturbations score that drug (rank among them,
+n_spec_heldout; per drug, the drug's mean probabilities against the other test drugs'), and rank_*c_heldout ranks the
+held-out drugs after standardising each drug's scores over the test perturbations. Both give 0.5 for a pure prior.
+Every test perturbation's score for every held-out drug is saved in test_scores_heldout.npz. --no-static /
+--no-globals drop the features that do not depend on the signature (ablations).
+
 A multinomial logistic regression on the standardised base features (no polynomial, no VAE) is always fitted on the
 same rows and sample weights as the FNNs and scored the same way (rank_logreg): the reference the deep model has to
 beat. --linear-only fits only that model (minutes instead of hours).
@@ -80,7 +88,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 from scipy.sparse import csgraph
-from scipy.stats import hypergeom, norm
+from scipy.stats import hypergeom, norm, rankdata
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, f1_score
@@ -411,8 +419,12 @@ class FeatureBuilder:
         slog = [f"{d}_{c}_slog_last" for d in ("down", "up") for c in ("inc", "dec")]
         stats = [f"dyn_{s}" for s in ("sum", "mean", "max", "min", "median", "std", "q25", "q75")]
         dist = [f"{d}_dist_{s}" for d in ("up", "down") for s in ("min", "mean", "frac_within_K")]
-        self.names = (dyn + diff + slog + stats + self.static_names + dist
-                      + ["shared_subsystems_with_sources", "rel_log_dose", "log_time", "log_n_sig"])
+        # --no-static / --no-globals: ablations, the per-protein features that do not depend on the signature (they
+        # let the model learn a target prior per protein) and the per-perturbation dose, time and signature size
+        self.use_static, self.use_globals = not args.no_static, not args.no_globals
+        self.names = (dyn + diff + slog + stats + (self.static_names if self.use_static else []) + dist
+                      + ["shared_subsystems_with_sources"]
+                      + (["rel_log_dose", "log_time", "log_n_sig"] if self.use_globals else []))
 
     def _static(self, act):
         g = self.g
@@ -477,9 +489,13 @@ class FeatureBuilder:
                 dist[j, :, o + 1] = rows.mean(0)
                 dist[j, :, o + 2] = (rows <= K).mean(0)
         shared = np.asarray(self.Mprot @ (self.M.T @ np.abs(S).sum(-1))).T[..., None]
-        X = np.concatenate([flat, diff.reshape(P, n, -1), slog.reshape(P, n, -1), stats,
-                            np.broadcast_to(self.static, (P,) + self.static.shape), dist, shared,
-                            np.broadcast_to(globals_[:, None, :], (P, n, globals_.shape[1]))], -1)
+        parts = [flat, diff.reshape(P, n, -1), slog.reshape(P, n, -1), stats]
+        if self.use_static:
+            parts.append(np.broadcast_to(self.static, (P,) + self.static.shape))
+        parts += [dist, shared]
+        if self.use_globals:
+            parts.append(np.broadcast_to(globals_[:, None, :], (P, n, globals_.shape[1])))
+        X = np.concatenate(parts, -1)
         return np.ascontiguousarray(X.reshape(P * n, -1), dtype=np.float32)
 
 
@@ -860,7 +876,37 @@ def rank_summary(ranks, n):
             **{f"top{q}_pct": float((pct <= q / 100).mean()) for q in (1, 5, 10, 25)}}
 
 
-RANK_COLS = ("rank_bes", "rank_prob", "rank_logreg", "rank_baseline")
+RANK_COLS = ("rank_bes", "rank_prob", "rank_logreg", "rank_baseline", "rank_probc", "rank_logregc")
+SPEC_COLS = ("spec_prob", "spec_logreg")
+
+
+def signature_specificity(S, drugs, col, groups):
+    """S: (units, held-out drugs) scores, units being perturbations or drugs; drugs[i]: unit i's drug; col: drug ->
+    column of S; groups[i]: units are compared within their group only (activity class). Per unit: the rank of the
+    score its own drug gets from it among the scores the same drug gets from the units of the other drugs (1: higher
+    than all), and the number of units ranked. A per-drug prior (the same scores whatever the signature) ranks at
+    random: chance median percentile 0.5, topX_pct X / 100."""
+    drugs, groups = np.asarray(drugs), np.asarray(groups)
+    rank, n = np.full(len(S), np.nan), np.full(len(S), np.nan)
+    for i in range(len(S)):
+        c = col[drugs[i]]
+        ref = S[(drugs != drugs[i]) & (groups == groups[i]), c]
+        if len(ref):
+            rank[i] = 1 + (ref > S[i, c]).sum() + 0.5 * (ref == S[i, c]).sum()
+            n[i] = len(ref) + 1
+    return rank, n
+
+
+def centered_ranks(S, drugs, col, groups):
+    """Each candidate drug's scores standardised over the units of the same group (removes the per-drug prior), then
+    the drugs ranked within each unit: the rank of the unit's own drug."""
+    groups = np.asarray(groups)
+    Z = np.empty_like(S, dtype=float)
+    for g in np.unique(groups):
+        m = groups == g
+        Z[m] = (S[m] - S[m].mean(0)) / (S[m].std(0) + 1e-12)
+    R = rankdata(-Z, axis=1, method="average")
+    return R[np.arange(len(S)), [col[d] for d in drugs]]
 
 
 def summarise_ranks(per_pert, per_drug):
@@ -876,6 +922,12 @@ def summarise_ranks(per_pert, per_drug):
             if len(df):
                 m[name + suffix] = {k + s: rank_summary(df[k + s], df["n_candidates" + s])
                                     for s in ("", "_heldout") for k in RANK_COLS if k + s in df}
+                for k in SPEC_COLS:  # NaN: no unit of another drug to compare with
+                    if k + "_heldout" in df:
+                        ok = df[k + "_heldout"].notna()
+                        if ok.any():
+                            m[name + suffix][k + "_heldout"] = rank_summary(df[k + "_heldout"][ok],
+                                                                            df["n_spec_heldout"][ok])
     return m
 
 
@@ -952,6 +1004,12 @@ def main():
     fe.add_argument("--shuffle-signatures", action="store_true",
                     help="control: permute the signatures among the labelled perturbations (within active / "
                          "inactive with --de-counts); dose and time stay with the perturbation")
+    fe.add_argument("--no-static", action="store_true",
+                    help="ablation: drop the per-protein static features (baseline activity and its propagation, "
+                         "degree, strength), which do not depend on the signature and let the model learn a target "
+                         "prior per protein")
+    fe.add_argument("--no-globals", action="store_true",
+                    help="ablation: drop the per-perturbation features (relative dose, time, signature size)")
     fe.add_argument("--alpha", action="append", default=[], metavar="REL=W",
                     help="relation mixing weight (defaults: build_network.SUGGESTED_ALPHA)")
     fe.add_argument("--activity-floor", type=float, default=0.0)
@@ -1160,6 +1218,8 @@ def main():
         prior_scores = {s: rk.prob_scores(prior) for s, rk in rankers.items()}
 
         rank_rows, pred_rows, ys_all, probs_all, lin_all, drug_prob, lin_prob, drug_act = [], [], [], [], [], {}, {}, {}
+        rk_h = rankers["_heldout"]
+        scores_h = {"logreg": [], "prob": []}  # per test perturbation, every held-out drug's score
         for chunk, X, y in iter_chunks(fb, test, sigs, fmap, targets, drug_mets, globals_, args):
             PL = logreg_proba(lin, X)
             lin_all.append(PL)
@@ -1175,6 +1235,9 @@ def main():
                 key = d.lower()
                 known = targets[key]
                 lin_prob.setdefault(key, []).append(PL[j])
+                scores_h["logreg"].append(rk_h.prob_scores(PL[j]))
+                if models:
+                    scores_h["prob"].append(rk_h.prob_scores(mean_p[j]))
                 drug_act.setdefault(key, []).append(bool(active[chunk.index[j]]))
                 row = dict(pert=p, drug=d, n_true_targets=len(known))
                 if has_active:
@@ -1195,26 +1258,50 @@ def main():
             log(f"test scoring: {len(rank_rows)}/{len(test)} perturbations")
 
         ranks = pd.DataFrame(rank_rows)
+        # signature specificity: does a perturbation score its own drug higher than the other drugs' perturbations
+        # score it (spec_*), and the held-out ranking with each drug's scores standardised over the test
+        # perturbations (rank_*c): both blind to a per-drug prior; compared within the activity class
+        keys, groups = ranks.drug.str.lower().to_numpy(), (ranks.active if has_active else np.ones(len(ranks), bool))
+        for name, sc in scores_h.items():
+            if sc:
+                S = np.asarray(sc)
+                ranks[f"spec_{name}_heldout"], ranks["n_spec_heldout"] = signature_specificity(S, keys, rk_h.col, groups)
+                ranks[f"rank_{name}c_heldout"] = centered_ranks(S, keys, rk_h.col, groups)
+                scores_h[name] = S.astype(np.float32)
+        np.savez_compressed(os.path.join(out_dir, "test_scores_heldout.npz"), pert=ranks.pert.to_numpy(),
+                            drug=np.array(rk_h.drugs), **{k: v for k, v in scores_h.items() if len(v)})
         ranks.to_csv(os.path.join(out_dir, "test_drug_ranks.tsv"), sep="\t", index=False)
         if models:
             pd.DataFrame(pred_rows).to_csv(os.path.join(out_dir, "test_predicted_targets.tsv"), sep="\t", index=False)
         # per drug: probabilities averaged over all its perturbations, and (--de-counts) over its active ones
         drug_rows = []
         for subset in ("all", "active") if has_active else ("all",):
+            sub_rows, sub_scores = [], {"logreg": [], "prob": []}
             for key, ps in lin_prob.items():
                 sel = np.ones(len(ps), bool) if subset == "all" else np.array(drug_act[key])
                 if not sel.any():
                     continue
                 row = dict(drug=key, subset=subset, n_perturbations=int(sel.sum()))
+                PLd = np.mean(np.asarray(ps)[sel], 0)
+                sub_scores["logreg"].append(rk_h.prob_scores(PLd))
+                if models:
+                    Pd = np.mean(np.asarray(drug_prob[key])[sel], 0)
+                    sub_scores["prob"].append(rk_h.prob_scores(Pd))
                 for s, rk in rankers.items():
                     row["n_candidates" + s] = len(rk.drugs)
-                    row["rank_logreg" + s] = rk.rank_of(rk.prob_scores(np.mean(np.asarray(ps)[sel], 0)), key)
+                    row["rank_logreg" + s] = rk.rank_of(rk.prob_scores(PLd), key)
                     row["rank_baseline" + s] = rk.rank_of(prior_scores[s], key)
                     if models:
-                        row["rank_prob" + s] = rk.rank_of(
-                            rk.prob_scores(np.mean(np.asarray(drug_prob[key])[sel], 0)), key)
-                drug_rows.append(row)
-        drug_ranks = pd.DataFrame(drug_rows)
+                        row["rank_prob" + s] = rk.rank_of(rk.prob_scores(Pd), key)
+                sub_rows.append(row)
+            sub = pd.DataFrame(sub_rows)
+            for name, sc in sub_scores.items():  # per drug: a test drug against the other test drugs
+                if sc and len(sub):
+                    S, k, grp = np.asarray(sc), sub.drug.to_numpy(), np.ones(len(sub), bool)
+                    sub[f"spec_{name}_heldout"], sub["n_spec_heldout"] = signature_specificity(S, k, rk_h.col, grp)
+                    sub[f"rank_{name}c_heldout"] = centered_ranks(S, k, rk_h.col, grp)
+            drug_rows.append(sub)
+        drug_ranks = pd.concat(drug_rows, ignore_index=True)
         drug_ranks.to_csv(os.path.join(out_dir, "test_drug_ranks_per_drug.tsv"), sep="\t", index=False)
         yt = np.concatenate(ys_all)
         metrics["test_full_proteome_nodes"] = {"logreg": node_metrics(yt, np.concatenate(lin_all))}

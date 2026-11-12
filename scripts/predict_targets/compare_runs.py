@@ -15,6 +15,9 @@ are comparable. Writes to --out-dir (default: <first run>/compare_<names>):
   paired.tsv       each run against --control, per drug (drugs are the independent units): median of the paired
                    percentile differences, fraction of drugs ranked better, Wilcoxon signed-rank p-value
   ecdf_<rank>.png  cumulative fraction of drugs vs percentile, one line per run (diagonal: chance)
+spec_*_heldout (does a perturbation score its own drug above how the other drugs' perturbations score it) and
+rank_*c_heldout (held-out ranking after removing each drug's average score) are blind to a per-drug prior: 0.5 for
+a model that ignores the signature.
 """
 import argparse
 import os
@@ -28,8 +31,10 @@ ap.add_argument("--run", action="append", required=True, metavar="NAME=DIR",
 ap.add_argument("--control", help="name of the run the others are tested against (default: the last --run)")
 ap.add_argument("--subset", choices=["active", "all"], default="active")
 ap.add_argument("--ranks", nargs="+",
-                default=["rank_prob_heldout", "rank_bes_heldout", "rank_logreg_heldout", "rank_baseline_heldout"],
-                help="rank columns to compare (those missing from a run are skipped)")
+                default=["rank_prob_heldout", "rank_bes_heldout", "rank_logreg_heldout", "rank_baseline_heldout",
+                         "spec_prob_heldout", "spec_logreg_heldout", "rank_probc_heldout", "rank_logregc_heldout"],
+                help="rank columns to compare (those missing from a run are skipped; spec_* and rank_*c are the "
+                     "prior-free metrics, only in runs made after they were added)")
 ap.add_argument("--out-dir")
 args = ap.parse_args()
 
@@ -80,7 +85,8 @@ ranks = [r for r in args.ranks if any(r in data[n]["drug"] for n in names)]
 
 def pct(df, r):
     s = r[r.index("_heldout"):] if r.endswith("_heldout") else ""
-    return df[r] / df["n_candidates" + s]
+    p = df[r] / df[("n_spec" if r.startswith("spec_") else "n_candidates") + s]
+    return p.dropna()  # spec_*: NaN when no unit of another drug to compare with
 
 
 def summary(p):
@@ -110,11 +116,11 @@ except ImportError:
 for r in ranks:
     if r not in data[control]["drug"]:
         continue
-    c = data[control]["drug"].assign(p=lambda d: pct(d, r)).set_index("drug").p
+    c = data[control]["drug"].assign(p=lambda d: pct(d, r)).set_index("drug").p.dropna()
     for n in names:
         if n == control or r not in data[n]["drug"]:
             continue
-        x = data[n]["drug"].assign(p=lambda d: pct(d, r)).set_index("drug").p
+        x = data[n]["drug"].assign(p=lambda d: pct(d, r)).set_index("drug").p.dropna()
         both = x.index.intersection(c.index)
         diff = (x[both] - c[both]).to_numpy()  # negative: ranked higher than in the control
         pval = float(wilcoxon(diff).pvalue) if wilcoxon is not None and np.any(diff != 0) else np.nan
