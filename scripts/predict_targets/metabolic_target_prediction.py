@@ -73,6 +73,16 @@ held-out drugs after standardising each drug's scores over the test perturbation
 Every test perturbation's score for every held-out drug is saved in test_scores_heldout.npz. --no-static /
 --no-globals drop the features that do not depend on the signature (ablations).
 
+Forcing the model onto the signature: --matched-negatives K adds, for each target row (perturbation p, protein g), up
+to K negatives (q, g), the same protein in other perturbations of the chunk whose drug does not target g (the
+perturbations are shuffled before chunking so chunks mix drugs). Every per-protein feature is identical within such
+a group, so protein identity cannot separate them; the random negatives are kept so the model still learns which
+proteins are plausible targets, and --matched-weight sets the share of the negative class's weight that goes to the
+matched ones. --select-metric spec keeps, per FNN, the epoch with the best validation specificity (spec of the
+validation drugs, as spec_*_heldout) instead of the best AUPRC, which rewards the prior; auprc_matched selects on the
+AUPRC of target rows against their matched negatives. Both are logged every epoch whatever is selected on, and
+metrics.json records each model's kept epoch and history (epoch_selection).
+
 A multinomial logistic regression on the standardised base features (no polynomial, no VAE) is always fitted on the
 same rows and sample weights as the FNNs and scored the same way (rank_logreg): the reference the deep model has to
 beat. --linear-only fits only that model (minutes instead of hours).
@@ -536,10 +546,29 @@ def iter_chunks(fb, perts, sigs, fmap, targets, drug_mets, globals_, args):
         yield chunk, X, y
 
 
+def matched_negatives(y, n_perts, k, rng):
+    """Rows (j', g) for the target rows (j, g) of classes 1 / 2: up to k other perturbations j' of the chunk in which
+    g is not a target (label 0, so other doses of the same drug, drugs sharing g and unknown-direction targets are
+    excluded). Within such a group every per-protein feature is identical, so only the signature separates them.
+    X / y are perturbation-major, (j, g) -> j * n_prot + g. Rows picked by several positives are kept once."""
+    n_prot = len(y) // n_perts
+    Y = y.reshape(n_perts, n_prot)
+    out = []
+    for j, gn in zip(*np.nonzero((Y == 1) | (Y == 2))):
+        cand = np.nonzero(Y[:, gn] == 0)[0]
+        if len(cand):
+            out.append(rng.choice(cand, min(k, len(cand)), replace=False) * n_prot + gn)
+    return np.unique(np.concatenate(out)) if out else np.empty(0, np.int64)
+
+
 def sample_rows(X, y, n_perts, args, rng):
-    """All target rows + cluster-stratified negatives (MiniBatchKMeans, equal number per cluster)."""
+    """All target rows + cluster-stratified negatives (MiniBatchKMeans, equal number per cluster), + with
+    --matched-negatives K the matched negatives of each target row. Returns the row indices and a mask of the
+    matched ones (taken out of the random-negative pool, so a row is either)."""
     pos = np.where(y > 0)[0]
-    neg = np.where(y == 0)[0]
+    matched = matched_negatives(y, n_perts, args.matched_negatives, rng) if args.matched_negatives else \
+        np.empty(0, np.int64)
+    neg = np.setdiff1d(np.where(y == 0)[0], matched, assume_unique=True)
     n_take = min(args.neg_per_pert * n_perts, len(neg))
     sub = rng.choice(neg, min(len(neg), 50000), replace=False)
     n_clusters = min(args.kmeans_clusters, len(sub))
@@ -554,7 +583,10 @@ def sample_rows(X, y, n_perts, args, rng):
     if len(chosen) < n_take:  # top up from what the small clusters left
         rest = np.setdiff1d(neg, chosen)
         chosen = np.concatenate([chosen, rng.choice(rest, n_take - len(chosen), replace=False)])
-    return np.concatenate([pos, chosen[:n_take]])
+    keep = np.concatenate([pos, chosen[:n_take], matched])
+    is_matched = np.zeros(len(keep), bool)
+    is_matched[len(keep) - len(matched):] = True
+    return keep, is_matched
 
 
 # --------------------------------------------------------------------------------------
@@ -769,7 +801,8 @@ def logreg_proba(model, X, batch=262144):
                            for s in range(0, len(X), batch)]).astype(np.float32)
 
 
-def train_ffn(cfg, pre, in_dim, Xtr, ytr, wtr, Xva, yva, args, device, seed):
+def train_ffn(cfg, pre, in_dim, Xtr, ytr, wtr, val_eval, args, device, seed):
+    """Returns the model at its best validation epoch (val_eval.select) and a record of the selection."""
     torch.manual_seed(seed)
     model = FFN_decay(in_dim, args.hidden, 3, args.layers, args.dropout, args.decay).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=cfg["l2"])
@@ -778,7 +811,7 @@ def train_ffn(cfg, pre, in_dim, Xtr, ytr, wtr, Xva, yva, args, device, seed):
                                     generator=torch.Generator().manual_seed(seed))
     loader = DataLoader(TensorDataset(torch.from_numpy(Xtr), torch.from_numpy(ytr)),
                         batch_size=cfg["batch_size"], sampler=sampler, drop_last=True)
-    best, best_state, bad = -1.0, None, 0
+    best, best_state, best_epoch, bad, history = -np.inf, None, 0, 0, []
     for epoch in range(args.ffn_epochs):
         model.train()
         tot = 0.0
@@ -793,20 +826,22 @@ def train_ffn(cfg, pre, in_dim, Xtr, ytr, wtr, Xva, yva, args, device, seed):
             tot += loss.item()
         sched.step()
         model.eval()
-        m = node_metrics(yva, predict_proba([model], pre, Xva, device)[0])
+        m = val_eval(lambda X: predict_proba([model], pre, X, device)[0])
+        history.append(dict(epoch=epoch + 1, loss=tot / max(len(loader), 1), **m))
         log(f"  FFN {cfg} epoch {epoch + 1}: loss {tot / max(len(loader), 1):.4f} | val "
             + ", ".join(f"{k} {v:.4f}" for k, v in m.items() if v is not None))
-        score = m["auprc_target_vs_none"] if args.select_metric == "auprc" else m["macro_f1_targets"]
-        score = -1.0 if score is None else score
-        if score > best:
-            best, bad = score, 0
+        score = val_eval.select(m)
+        if best_state is None or score > best:
+            best, best_epoch, bad = score, epoch + 1, 0
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         else:
             bad += 1
             if bad >= args.patience:
                 break
     model.load_state_dict(best_state)
-    return model.eval()
+    log(f"  FFN {cfg}: epoch {best_epoch} kept ({args.select_metric} {best:.4f})")
+    return model.eval(), dict(select_metric=args.select_metric, best_epoch=best_epoch, best_score=float(best),
+                              history=history)
 
 
 # --------------------------------------------------------------------------------------
@@ -909,6 +944,53 @@ def centered_ranks(S, drugs, col, groups):
     return R[np.arange(len(S)), [col[d] for d in drugs]]
 
 
+class ValEvaluator:
+    """Validation metrics of one model, given as proba(X) -> (n, 3), computed each epoch for early stopping:
+      node_metrics on the sampled rows (matched negatives left out, so that these stay comparable with runs
+        without them),
+      auprc_matched: target vs none over the target rows and their matched negatives only (protein identity
+        carries no information there; None without --matched-negatives),
+      spec_val: signature specificity of the validation drugs, the mean over drugs of the mean percentile of
+        spec (signature_specificity, per perturbation): lower is better, 0.5 for a model that ignores the
+        signature. Scored on the rows (validation perturbation, target of any validation drug) only, which is
+        all prob_scores reads.
+    select(m) turns the --select-metric into a higher-is-better score."""
+
+    def __init__(self, Xva, yva, mva, spec_X, spec_drugs, spec_targets, n_prot, metric):
+        self.Xva, self.yva, self.mva, self.metric = Xva, yva, mva, metric
+        self.spec_X, self.spec_drugs = spec_X, np.asarray(spec_drugs)
+        self.matched_rows = (yva > 0) | mva
+        if not spec_targets:
+            self.spec_drugs = np.empty(0, str)
+            return
+        rk = DrugRanker(spec_targets, n_prot)
+        self.union = np.unique(np.concatenate([list(t) for t in spec_targets.values()]))
+        tok = np.stack([2 * self.union, 2 * self.union + 1], 1).ravel()  # (act, inh) per gene, as in prob_scores
+        self.D = (rk.DM[tok] @ sp.diags(1.0 / rk.m)).tocsr()
+        self.col = rk.col
+
+    def __call__(self, proba):
+        P = proba(self.Xva)
+        m = node_metrics(self.yva[~self.mva], P[~self.mva])
+        ym = self.yva[self.matched_rows]
+        m["auprc_matched"] = float(average_precision_score(ym > 0, 1 - P[self.matched_rows, 0])) \
+            if self.mva.any() and (ym > 0).any() else None
+        m["spec_val"] = None
+        if len(self.spec_drugs) and len(np.unique(self.spec_drugs)) > 1:
+            Q = proba(self.spec_X).reshape(len(self.spec_drugs), len(self.union), 3)[:, :, 1:]
+            S = np.asarray(self.D.T @ Q.reshape(len(Q), -1).T).T  # (perturbations, validation drugs)
+            r, n = signature_specificity(S, self.spec_drugs, self.col, np.ones(len(S), bool))
+            pct = pd.Series(r / n).groupby(self.spec_drugs).mean()
+            m["spec_val"] = float(pct.mean())
+        return m
+
+    def select(self, m):
+        v = {"auprc": m["auprc_target_vs_none"], "macro_f1": m["macro_f1_targets"],
+             "auprc_matched": m["auprc_matched"],
+             "spec": None if m["spec_val"] is None else 1 - m["spec_val"]}[self.metric]
+        return -np.inf if v is None else v
+
+
 def summarise_ranks(per_pert, per_drug):
     """All test perturbations, and with --de-counts also the active ones (*_active: perturbations with
     >= --min-de-genes DE genes; per drug, the probabilities averaged over its active perturbations only)."""
@@ -948,6 +1030,12 @@ def aggregate_folds(out_dir, n_folds):
         part: {model: [f[part][model]["auprc_target_vs_none"] for f in folds] for model in folds[0][part]
                if "auprc_target_vs_none" in folds[0][part][model]}
         for part in ("val_sampled_rows", "test_full_proteome_nodes")}
+    for key in ("spec_val", "auprc_matched"):
+        m[f"per_fold_{key}"] = {model: [f["val_sampled_rows"].get(model, {}).get(key) for f in folds]
+                                for model in folds[0]["val_sampled_rows"] if key in folds[0]["val_sampled_rows"][model]}
+    if "epoch_selection" in folds[0]:
+        m["per_fold_best_epoch"] = {model: [f.get("epoch_selection", {}).get(model, {}).get("best_epoch") for f in folds]
+                                    for model in folds[0]["epoch_selection"]}
     pp.to_csv(os.path.join(out_dir, "cv_drug_ranks.tsv"), sep="\t", index=False)
     pdr.to_csv(os.path.join(out_dir, "cv_drug_ranks_per_drug.tsv"), sep="\t", index=False)
     with open(os.path.join(out_dir, "cv_metrics.json"), "w") as fh:
@@ -1019,6 +1107,14 @@ def main():
     fe.add_argument("--no-poly", action="store_true")
     sa = ap.add_argument_group("sampling / split")
     sa.add_argument("--neg-per-pert", type=int, default=200)
+    sa.add_argument("--matched-negatives", type=int, default=0, metavar="K",
+                    help="for each target row (p, g), add up to K negatives (q, g): the same protein in other "
+                         "perturbations of the chunk whose drug does not target g (0: off). Perturbations are then "
+                         "shuffled before chunking so that chunks mix drugs")
+    sa.add_argument("--matched-weight", type=float, default=0.5,
+                    help="with --matched-negatives: share of the negative class's total sample weight given to the "
+                         "matched negatives (the rest to the --neg-per-pert random ones); the knob between learning "
+                         "the per-protein prior (0) and the signature (1)")
     sa.add_argument("--kmeans-clusters", type=int, default=50)
     sa.add_argument("--chunk", type=int, default=32, help="perturbations per feature batch")
     sa.add_argument("--val-frac", type=float, default=0.1)
@@ -1054,9 +1150,11 @@ def main():
     mo.add_argument("--lr", type=float, default=0.005)
     mo.add_argument("--ffn-epochs", type=int, default=30)
     mo.add_argument("--patience", type=int, default=5)
-    mo.add_argument("--select-metric", choices=["auprc", "macro_f1"], default="auprc",
-                    help="validation metric for early stopping: auprc (target vs none, threshold-free) or "
-                         "macro_f1 (argmax classes 1/2, as in Menacho et al.)")
+    mo.add_argument("--select-metric", choices=["auprc", "macro_f1", "spec", "auprc_matched"], default="auprc",
+                    help="validation metric for early stopping: auprc (target vs none, threshold-free), "
+                         "macro_f1 (argmax classes 1/2, as in Menacho et al.), spec (signature specificity of the "
+                         "validation drugs, blind to the per-protein prior) or auprc_matched (target rows vs their "
+                         "matched negatives; needs --matched-negatives)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="auto", help="auto (cuda > mps > cpu), cuda, mps or cpu")
     args = ap.parse_args()
@@ -1078,6 +1176,10 @@ def main():
         ap.error("--min-de-genes needs --de-counts")
     if args.score_active_only and not args.min_de_genes:
         ap.error("--score-active-only needs --de-counts and --min-de-genes")
+    if args.select_metric == "auprc_matched" and not args.matched_negatives:
+        ap.error("--select-metric auprc_matched needs --matched-negatives")
+    if not 0 <= args.matched_weight <= 1:
+        ap.error("--matched-weight must be in [0, 1]")
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "config.json" if args.fold is None else f"config_fold{args.fold}.json"),
               "w") as fh:
@@ -1147,19 +1249,33 @@ def main():
             log(f"active (used for training / validation): {split[active].value_counts().to_dict()}")
 
         # ---- sampled training / validation rows
+        # validation specificity (ValEvaluator): every validation perturbation x the targets of the validation drugs
+        n_prot = len(g.prot)
+        va_sub = perts[(split == "val") & active]
+        spec_targets = {d: targets[d] for d in sorted(va_sub.drug.str.lower().unique())}
+        spec_genes = np.unique(np.concatenate([list(t) for t in spec_targets.values()])) if spec_targets else \
+            np.empty(0, np.int64)
+        spec_X, spec_drugs = [], []
         data = {}
         for part in ("train", "val"):
             sub = perts[(split == part) & active]
-            Xs, ys, ps = [], [], []
+            if args.matched_negatives:  # the table groups doses of a drug together: mix drugs within chunks
+                sub = sub.iloc[rng.permutation(len(sub))]
+            Xs, ys, ps, ms = [], [], [], []
             for chunk, X, y in iter_chunks(fb, sub, sigs, fmap, targets, drug_mets, globals_, args):
-                keep = sample_rows(X, y, len(chunk), args, rng)
+                keep, is_matched = sample_rows(X, y, len(chunk), args, rng)
                 Xs.append(X[keep])
                 ys.append(y[keep])
-                ps.append(chunk.index.to_numpy()[keep // len(g.prot)])
-            data[part] = (np.concatenate(Xs), np.concatenate(ys), np.concatenate(ps))
-            log(f"{part}: {len(data[part][1]):,} rows, class counts {np.bincount(data[part][1], minlength=4).tolist()}")
+                ps.append(chunk.index.to_numpy()[keep // n_prot])
+                ms.append(is_matched)
+                if part == "val" and len(spec_genes):
+                    spec_X.append(X[(np.arange(len(chunk))[:, None] * n_prot + spec_genes).ravel()])
+                    spec_drugs += list(chunk.drug.str.lower())
+            data[part] = (np.concatenate(Xs), np.concatenate(ys), np.concatenate(ps), np.concatenate(ms))
+            log(f"{part}: {len(data[part][1]):,} rows, class counts {np.bincount(data[part][1], minlength=4).tolist()}"
+                + (f", of which {data[part][3].sum():,} matched negatives" if args.matched_negatives else ""))
 
-        Xtr, ytr, ptr = data["train"]
+        Xtr, ytr, ptr, mtr = data["train"]
         if not args.linear_only:
             poly = PolyMinMax(Xtr.shape[1], poly=not args.no_poly).to(device).fit(Xtr, device)
             vae = None if args.no_vae else train_vae(poly, Xtr, args, device, rng)
@@ -1169,15 +1285,26 @@ def main():
         # class 3 is not trained on; the sampler balances classes and drugs (many doses of one drug should not
         # outweigh a drug measured once)
         trainable = ytr < 3
-        Xtr, ytr, ptr = Xtr[trainable], ytr[trainable], ptr[trainable]
+        # (--matched-negatives: the negative class's weight is split between random and matched negatives,
+        # --matched-weight going to the matched ones)
+        Xtr, ytr, ptr, mtr = Xtr[trainable], ytr[trainable], ptr[trainable], mtr[trainable]
         class_w = 1.0 / np.bincount(ytr, minlength=3).clip(min=1)
+        row_w = class_w[ytr]
+        n_match, n_rand = int(mtr.sum()), int(((ytr == 0) & ~mtr).sum())
+        if n_match:
+            share = args.matched_weight if n_rand else 1.0
+            row_w = np.where(mtr, share / n_match, np.where(ytr == 0, (1 - share) / max(n_rand, 1), row_w))
         drug_n = perts.drug.map(perts.drug[active].value_counts()).fillna(1).to_numpy()
-        w = (class_w[ytr] / drug_n[ptr]).astype(np.float64)
-        Xva, yva, _ = data["val"]
+        w = (row_w / drug_n[ptr]).astype(np.float64)
+        if not w.any():
+            raise ValueError("all training sample weights are zero (--matched-weight 1 without matched negatives?)")
+        Xva, yva, _, mva = data["val"]
+        val_eval = ValEvaluator(Xva, yva, mva, np.concatenate(spec_X) if spec_X else Xva[:0], spec_drugs,
+                                spec_targets, n_prot, args.select_metric)
 
         t0 = time.time()
         lin = fit_logreg(Xtr, ytr, w, args.logreg_c, args.seed)
-        metrics = {"val_sampled_rows": {"logreg": node_metrics(yva, logreg_proba(lin, Xva))}}
+        metrics = {"val_sampled_rows": {"logreg": val_eval(lambda X: logreg_proba(lin, X))}}
         log(f"logistic regression ({time.time() - t0:.0f}s) | val " + ", ".join(
             f"{k} {v:.4f}" for k, v in metrics["val_sampled_rows"]["logreg"].items() if v is not None))
         coef = pd.DataFrame(lin[1].coef_.T, index=fb.names, columns=[f"class{c}" for c in lin[1].classes_])
@@ -1187,11 +1314,16 @@ def main():
 
         models = []
         if not args.linear_only:
-            models = [train_ffn(cfg, pre, in_dim, Xtr, ytr, w, Xva, yva, args, device, args.seed + i)
+            fitted = [train_ffn(cfg, pre, in_dim, Xtr, ytr, w, val_eval, args, device, args.seed + i)
                       for i, cfg in enumerate(ENSEMBLE_CONFIGS)]
-            probs_va = predict_proba(models, pre, Xva, device)
-            metrics["val_sampled_rows"].update({f"model{i + 1}": node_metrics(yva, probs_va[i]) for i in range(len(models))})
-            metrics["val_sampled_rows"]["ensemble_vote"] = evaluate_ffn(yva, majority_vote(probs_va))
+            models = [m for m, _ in fitted]
+            metrics["epoch_selection"] = {f"model{i + 1}": sel for i, (_, sel) in enumerate(fitted)}
+            for i, m in enumerate(models):
+                metrics["val_sampled_rows"][f"model{i + 1}"] = val_eval(
+                    lambda X, m=m: predict_proba([m], pre, X, device)[0])
+            metrics["val_sampled_rows"]["ensemble"] = val_eval(lambda X: predict_proba(models, pre, X, device).mean(0))
+            probs_va = predict_proba(models, pre, Xva[~mva], device)
+            metrics["val_sampled_rows"]["ensemble_vote"] = evaluate_ffn(yva[~mva], majority_vote(probs_va))
             torch.save({"poly": poly.state_dict(), "vae": None if vae is None else vae.state_dict(),
                         "ffns": [m.state_dict() for m in models], "feature_names": fb.names, "args": vars(args)},
                        os.path.join(out_dir, "models.pt"))
