@@ -18,6 +18,13 @@ are comparable. Writes to --out-dir (default: <first run>/compare_<names>):
 spec_*_heldout (does a perturbation score its own drug above how the other drugs' perturbations score it) and
 rank_*c_heldout (held-out ranking after removing each drug's average score) are blind to a per-drug prior: 0.5 for
 a model that ignores the signature.
+
+They are not blind to dose / time: if the experimental design (time point, dose series) differs between drug classes,
+a model can recognise drugs through it without the signature. When the runs have fold*/test_scores_heldout.npz,
+spec is therefore also recomputed within strata: spec_<prob|logreg>_time_heldout compares each perturbation only with
+other drugs' perturbations at the same time point, spec_<prob|logreg>_timedose_heldout at the same time and relative
+dose (log10 of dose / the drug's highest dose, from the '<drug>_<dose>_<time>' perturbation names). Per drug: the
+mean over the drug's perturbations. These are added to the comparison automatically.
 """
 import argparse
 import os
@@ -61,9 +68,66 @@ def load(d):
             pd.concat([read(f, "test_drug_ranks_per_drug.tsv") for f in folds], ignore_index=True))
 
 
+STRATA = {"time": ["time"], "timedose": ["time", "rel_dose"]}
+PCT_COLS = set()  # columns that already hold percentiles (the stratified spec_*)
+UNIT_UM = {"pm": 1e-6, "nm": 1e-3, "um": 1.0, "µm": 1.0, "mm": 1e3, "m": 1e6}
+
+
+def design(pp):
+    """Time and relative dose of each perturbation, from LINCS names '<drug>_<dose>_<time>' (NaN if unparsable).
+    Relative dose: log10(dose / the drug's highest scored dose), rounded to 0.1, as the model's rel_log_dose."""
+    parts = pp.pert.str.rsplit("_", n=2, expand=True).reindex(columns=[0, 1, 2])
+    m = parts[1].str.extract(r"([\d.]+)\s*([a-zA-Zµ]+)")
+    dose = pd.to_numeric(m[0], errors="coerce") * m[1].str.lower().map(UNIT_UM)
+    rel = np.log10(dose / dose.groupby([pp.fold, pp.drug.str.lower()]).transform("max")).round(1)
+    return pd.DataFrame({"time": parts[2], "rel_dose": rel}, index=pp.index)
+
+
+def stratified_spec(d, pp, min_ref=5):
+    """spec_<model>_<stratum>_heldout per perturbation: spec_*_heldout recomputed from fold*/test_scores_heldout.npz
+    with each perturbation compared only to other drugs' perturbations of the same activity class AND the same
+    stratum (time, or time x relative dose), so dose / time design cannot carry drug identity. Percentile (lower is
+    better, chance 0.5); NaN with fewer than min_ref perturbations to compare with. Runs without the score files
+    get no columns."""
+    if any(not os.path.exists(os.path.join(d, f"fold{f}", "test_scores_heldout.npz")) for f in pp.fold.unique()):
+        print(f"{d}: no test_scores_heldout.npz in every fold, stratified spec skipped")
+        return pp
+    pp = pp.copy()
+    des = design(pp)
+    active = pp.active.astype(str).str.upper() == "TRUE" if "active" in pp else pd.Series(True, index=pp.index)
+    for f in pp.fold.unique():
+        z = np.load(os.path.join(d, f"fold{f}", "test_scores_heldout.npz"), allow_pickle=True)
+        sub = pp.index[pp.fold == f]
+        row = pd.Index(z["pert"]).get_indexer(pp.pert[sub])
+        if (row < 0).any():
+            raise SystemExit(f"{d} fold {f}: perturbations of test_drug_ranks.tsv missing from the score file")
+        col = {k: j for j, k in enumerate(z["drug"])}
+        drugs = pp.drug[sub].str.lower().to_numpy()
+        c = np.array([col[k] for k in drugs])
+        for model in ("prob", "logreg"):
+            if model not in z.files or not len(z[model]):
+                continue
+            S = z[model][row]
+            own = S[np.arange(len(S)), c]
+            for name, cols in STRATA.items():
+                key = (active[sub].astype(str) + "|" + des.loc[sub, cols].astype(str).agg("|".join, axis=1)).to_numpy()
+                ok = des.loc[sub, cols].notna().all(axis=1).to_numpy()
+                p = np.full(len(S), np.nan)
+                for i in np.where(ok)[0]:
+                    ref = S[(drugs != drugs[i]) & (key == key[i]) & ok, c[i]]
+                    if len(ref) >= min_ref:  # mid-rank percentile: exactly 0.5 on average under chance, whatever
+                        # len(ref) (rank / (len + 1) averages (1 + len / 2) / (len + 1), 0.58 for len 5)
+                        p[i] = ((ref > own[i]).sum() + 0.5 * (ref == own[i]).sum() + 0.5) / (len(ref) + 1)
+                name_col = f"spec_{model}_{name}_heldout"
+                pp.loc[sub, name_col] = p
+                PCT_COLS.add(name_col)
+    return pp
+
+
 data = {}
 for n, d in runs.items():
     pp, pdr = load(d)
+    pp = stratified_spec(d, pp)
     if args.subset == "active":
         if "active" not in pp:
             raise SystemExit(f"{n}: no activity information (run without --de-counts); use --subset all")
@@ -71,6 +135,10 @@ for n, d in runs.items():
         pdr = pdr[pdr.subset == "active"]
     elif "subset" in pdr:
         pdr = pdr[pdr.subset == "all"]
+    pdr = pdr.copy()
+    for c in PCT_COLS & set(pp):  # per drug: mean over its (active) perturbations
+        m = pp.groupby([pp.fold, pp.drug.str.lower()])[c].mean()
+        pdr[c] = pd.MultiIndex.from_arrays([pdr.fold, pdr.drug.str.lower()]).map(m.to_dict().get)
     data[n] = {"perturbation": pp, "drug": pdr}
 common = set.intersection(*(set(v["drug"].fold) for v in data.values()))
 for n, v in data.items():
@@ -80,10 +148,12 @@ for n, v in data.items():
     for lvl in v:
         v[lvl] = v[lvl][v[lvl].fold.isin(common)].copy()
 print(f"comparing {len(common)} fold(s) {sorted(common)}, {args.subset} perturbations; control: {control}")
-ranks = [r for r in args.ranks if any(r in data[n]["drug"] for n in names)]
+ranks = [r for r in args.ranks + sorted(PCT_COLS - set(args.ranks)) if any(r in data[n]["drug"] for n in names)]
 
 
 def pct(df, r):
+    if r in PCT_COLS:
+        return df[r].dropna().astype(float)
     s = r[r.index("_heldout"):] if r.endswith("_heldout") else ""
     p = df[r] / df[("n_spec" if r.startswith("spec_") else "n_candidates") + s]
     return p.dropna()  # spec_*: NaN when no unit of another drug to compare with
