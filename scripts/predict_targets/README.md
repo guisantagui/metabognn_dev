@@ -38,10 +38,11 @@ bash ≥ 4 (`declare -A`), which the cluster has and macOS does not.
 | `mc_noGlobals` | `--no-globals`: no per-perturbation features (relative dose, time, signature size) | `metchange_rank_noGlobals` | `submit_train_w_shuff_mc_noGlobals_matched_auprc.sh` |
 | `mc_matched` | `--matched-negatives 4 --matched-weight 0.5 --select-metric spec` | `metchange_rank_matched` | `submit_train_w_shuff_mc_matched.sh` |
 | `mc_matched_auprc` | as `mc_matched` but `--select-metric auprc` | `metchange_rank_matched_auprc` | `submit_train_w_shuff_mc_noGlobals_matched_auprc.sh` |
+| `mc_matched_noGlobals` | as `mc_matched` plus `--no-globals` | `metchange_rank_matched_noGlobals` | `submit_train_w_shuff_mc_matched_noGlobals.sh` |
 
 Note: `--no-static` and `--no-globals` are different ablations. `noStatic` keeps dose, time and signature size.
 
-### Why the `mc_noGlobals` and `mc_matched_auprc` pairs
+### Why the `mc_noGlobals`, `mc_matched_auprc` and `mc_matched_noGlobals` pairs
 
 Results so far are in `reports/2026-11-13_A549_matched_negatives.md`.
 
@@ -57,6 +58,10 @@ Results so far are in `reports/2026-11-13_A549_matched_negatives.md`.
 
   Compare each run with its own shuffled control first. A direct comparison between two real runs can mislead,
   because their controls differ.
+- **`mc_matched_noGlobals`**: `mc_noGlobals` showed that the dose/time shortcut goes through the dose/time inputs
+  (without them the shuffled control's `spec` is 0.50 unstratified; report section 5.5). This pair measures the
+  matched model's specificity without that shortcut, so its plain `spec` is leak-free. It also makes the
+  validation `spec` used for epoch selection unable to reward dose / time through the inputs.
 
 ## Matched negatives (`--matched-negatives`, `--matched-weight`, `--select-metric`)
 

@@ -4,7 +4,8 @@
 # Usage (from this folder, on the login node): bash submit_with_shuffle_control.sh <variant> [<variant> ...]
 #        bash submit_with_shuffle_control.sh all   (tf, expr, mc)
 #        bash submit_with_shuffle_control.sh <variant> --real-job <jobid>
-#   variants: tf expr mc mc_matched mc_matched_auprc mc_noGlobals (launch_predict_targets_A549_<variant>[_shuff].sh)
+#   variants: tf expr mc mc_matched mc_matched_auprc mc_matched_noGlobals mc_noGlobals
+#   (launch_predict_targets_A549_<variant>[_shuff].sh)
 #   --real-job: the real run is already queued or running as <jobid> (or finished: give 0); only the control and the
 #   comparison are submitted (resubmitting the real launcher would overwrite its out_dir)
 # The comparison is written to <real out_dir>/compare_real_vs_shuffled/ and compare_runs_<jobid>.out.
@@ -15,6 +16,7 @@ results="/home/users/gsantamaria/projects/metabognn_dev/results/predict_targets/
 declare -A real_dir=([tf]="${results}/tf_active200" [expr]="${results}/expr" [mc]="${results}/metchange_rank"
                     [mc_matched]="${results}/metchange_rank_matched"
                     [mc_matched_auprc]="${results}/metchange_rank_matched_auprc"
+                    [mc_matched_noGlobals]="${results}/metchange_rank_matched_noGlobals"
                     [mc_noGlobals]="${results}/metchange_rank_noGlobals")
 
 out_dir_of() {  # the last out_dir= assignment of a launcher (must match real_dir / real_dir + _shuff)
