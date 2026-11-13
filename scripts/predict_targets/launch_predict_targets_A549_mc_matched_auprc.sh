@@ -1,0 +1,79 @@
+#!/bin/bash -l
+#Usage # sbatch [this script]
+#Name of the job
+#SBATCH --job-name=predict_targets_A549_mc_matched_auprc
+#SBATCH -N 1
+#SBATCH --mail-user=guillem.santamaria@uni.lu
+#SBATCH --mail-type=begin,end,fail
+#SBATCH --ntasks-per-node=1
+#SBATCH -c 16
+#SBATCH --mem=96GB
+#SBATCH --time=0-12:00:00
+#Define sdout path
+#SBATCH --output=./predict_targets_A549_mc_matched_auprc.out
+#Define sderr path
+#SBATCH --error=./predict_targets_A549_mc_matched_auprc.err
+# GPU partition and request: adjust to the cluster (iris: -p gpu with -G 1)
+#SBATCH -p gpu
+#SBATCH -G 1
+#SBATCH --qos=normal
+
+# Python env with torch (CUDA), numpy, pandas, scipy, scikit-learn, networkx
+#conda activate torch_gnn
+conda activate metabolic_drug_repurposing
+
+project_dir="/home/users/gsantamaria/projects/metabognn_dev"
+project_dir_scratch="/scratch/users/gsantamaria/test_large_files/metabognn_dev"
+cell="A549"
+penalty="rank"
+net_dir="${project_dir}/data/networks/combined"
+cell_dir="${project_dir_scratch}/data/perturbation/lincs/cell_matrices/${cell}"   # as in the other launchers
+hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
+labels_dir="${project_dir}/results/labels/${cell}/metchange/${penalty}"   # rerun limma_DE.R (fixed) first
+labels_dir_expr="${project_dir_scratch}/results/labels/${cell}/expr"
+out_dir="${project_dir}/results/predict_targets/${cell}/metchange_${penalty}_matched_auprc"
+device="cuda" # cpu, cuda
+
+# Control baseline (baseline_ctrl.tsv) and perturbation table (perturbations.tsv), derived from expr.csv and
+# mdat.csv: (re)computed when missing or older than their inputs
+if [ ! -f "${cell_dir}/baseline_ctrl.tsv" ] || [ ! -f "${cell_dir}/perturbations.tsv" ] \
+   || [ "${cell_dir}/expr.csv" -nt "${cell_dir}/baseline_ctrl.tsv" ] \
+   || [ "${cell_dir}/mdat.csv" -nt "${cell_dir}/perturbations.tsv" ]; then
+        python prepare_inputs.py --cell-dir "$cell_dir" --hgnc "$hgnc_f"
+fi
+
+# MetChange inconsistency is sign-flipped so that positive = more production (Schuhknecht benchmark convention).
+# Relation weights default to build_network.SUGGESTED_ALPHA; ablations: --alpha grn_binding=0,
+# --alpha second_messenger=0, --no-vae.
+# Cross-validation by drug: --n-folds 5 runs all folds in this job; or submit as an array (#SBATCH --array=0-4)
+# with --n-folds 5 --fold "$SLURM_ARRAY_TASK_ID" (the job that completes the last fold pools them).
+# --linear-only: logistic regression only, minutes instead of hours.
+# --matched-negatives K: for each target row (p, g), K negatives (q, g) of other drugs (same protein), so only the
+# signature separates them; --matched-weight: their share of the negative weight. --select-metric auprc (not spec, as in
+# launch_predict_targets_A549_mc_matched.sh): same epoch selection as the unmatched run, so that comparing the two runs
+# isolates the effect of the matched sampling; with spec, sampling and selection change together.
+# (spec keeps the epoch with the best validation signature specificity; auprc rewards the per-protein prior.)
+python metabolic_target_prediction.py \
+        --nodes "${net_dir}/nodes.tsv" \
+        --edges "${net_dir}/edges.tsv" \
+        --baseline "${cell_dir}/baseline_ctrl.tsv" \
+        --perturbations "${cell_dir}/perturbations.tsv" \
+        --signatures "${labels_dir}/log2FC.csv" \
+        --qvalues "${labels_dir}/qvals.csv" \
+        --signature-sign -1 \
+        --mode metchange \
+        --drug-targets "${project_dir}/data/drug_targets/combined/drug_targets.tsv" \
+        --drug-metabolites "${net_dir}/drug_metabolite_matches.tsv" \
+        --device "$device" \
+        --predict-unlabeled \
+        --de-counts "${labels_dir_expr}/fit_info_nsig.csv" \
+        --min-de-genes 200 \
+        --score-active-only \
+        --ignore-qvalue --top-n 100 \
+        --n-folds 5 \
+        --no-vae \
+        --matched-negatives 4 --matched-weight 0.5 \
+        --select-metric auprc \
+        --out-dir "${out_dir}"
+
+conda deactivate
