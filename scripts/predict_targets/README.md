@@ -39,8 +39,12 @@ bash ≥ 4 (`declare -A`), which the cluster has and macOS does not.
 | `mc_matched` | `--matched-negatives 4 --matched-weight 0.5 --select-metric spec` | `metchange_rank_matched` | `submit_train_w_shuff_mc_matched.sh` |
 | `mc_matched_auprc` | as `mc_matched` but `--select-metric auprc` | `metchange_rank_matched_auprc` | `submit_train_w_shuff_mc_noGlobals_matched_auprc.sh` |
 | `mc_matched_noGlobals` | as `mc_matched` plus `--no-globals` | `metchange_rank_matched_noGlobals` | `submit_train_w_shuff_mc_matched_noGlobals.sh` |
+| `mc_noGlobals_lr1e-3` | as `mc_noGlobals` plus `--lr 0.001 --patience 10 --ffn-epochs 60`; array job | `metchange_rank_noGlobals_lr1e-3` | `submit_train_w_shuff_mc_noGlobals_lr1e-3.sh` |
+| `mc_matched_noGlobals_lr1e-3` | as `mc_matched_noGlobals` plus the same training settings; array job | `metchange_rank_matched_noGlobals_lr1e-3` | `submit_train_w_shuff_mc_noGlobals_lr1e-3.sh` |
 
 Note: `--no-static` and `--no-globals` are different ablations. `noStatic` keeps dose, time and signature size.
+
+**Array jobs.** The `_lr1e-3` launchers run one fold per task (`#SBATCH --array=0-4`, `--fold "$SLURM_ARRAY_TASK_ID"`, 4 h each instead of 12 h for all folds). Each task uses the same split and seed as the sequential run. Short GPU requests usually start sooner through backfill; check with `sbatch --test-only <launcher>`, which prints the estimated start time without submitting. Logs are `<job name>_<task>.out/.err`. The task that finishes last pools the folds (`cv_*`); if one task failed and was resubmitted alone (`sbatch --array=<i> <launcher>`), pool with `--aggregate-only --n-folds 5 --out-dir <out_dir>` (the comparison does not need it). A comparison submitted by the submit script waits for all tasks of both arrays.
 
 ### Why the `mc_noGlobals`, `mc_matched_auprc` and `mc_matched_noGlobals` pairs
 
@@ -62,6 +66,7 @@ Results so far are in `reports/2026-11-13_A549_matched_negatives.md`.
   (without them the shuffled control's `spec` is 0.50 unstratified; report section 5.5). This pair measures the
   matched model's specificity without that shortcut, so its plain `spec` is leak-free. It also makes the
   validation `spec` used for epoch selection unable to reward dose / time through the inputs.
+- **`mc_noGlobals_lr1e-3`, `mc_matched_noGlobals_lr1e-3`**: in `mc_noGlobals` training stopped after 1–3 epochs in several folds, and the signature effect appeared only in the folds that trained longer (report section 5.5). A lower learning rate with more patience and a higher epoch cap tests whether stable training gives a larger, more consistent effect.
 
 ## Matched negatives (`--matched-negatives`, `--matched-weight`, `--select-metric`)
 

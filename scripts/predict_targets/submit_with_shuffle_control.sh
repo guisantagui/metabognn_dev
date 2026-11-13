@@ -1,10 +1,12 @@
 #!/bin/bash
 # Submit a prediction run and its --shuffle-signatures control in parallel, and a comparison job that starts when
-# both have ended (afterany: it also runs if one fails, comparing the folds finished in both).
+# both have ended (afterany: it also runs if one fails, comparing the folds finished in both). For array launchers
+# (#SBATCH --array) the dependency on the array job id waits for all its tasks.
 # Usage (from this folder, on the login node): bash submit_with_shuffle_control.sh <variant> [<variant> ...]
 #        bash submit_with_shuffle_control.sh all   (tf, expr, mc)
 #        bash submit_with_shuffle_control.sh <variant> --real-job <jobid>
 #   variants: tf expr mc mc_matched mc_matched_auprc mc_matched_noGlobals mc_noGlobals
+#             mc_noGlobals_lr1e-3 mc_matched_noGlobals_lr1e-3 (array jobs, one fold per task)
 #   (launch_predict_targets_A549_<variant>[_shuff].sh)
 #   --real-job: the real run is already queued or running as <jobid> (or finished: give 0); only the control and the
 #   comparison are submitted (resubmitting the real launcher would overwrite its out_dir)
@@ -17,6 +19,8 @@ declare -A real_dir=([tf]="${results}/tf_active200" [expr]="${results}/expr" [mc
                     [mc_matched]="${results}/metchange_rank_matched"
                     [mc_matched_auprc]="${results}/metchange_rank_matched_auprc"
                     [mc_matched_noGlobals]="${results}/metchange_rank_matched_noGlobals"
+                    [mc_matched_noGlobals_lr1e-3]="${results}/metchange_rank_matched_noGlobals_lr1e-3"
+                    [mc_noGlobals_lr1e-3]="${results}/metchange_rank_noGlobals_lr1e-3"
                     [mc_noGlobals]="${results}/metchange_rank_noGlobals")
 
 out_dir_of() {  # the last out_dir= assignment of a launcher (must match real_dir / real_dir + _shuff)
