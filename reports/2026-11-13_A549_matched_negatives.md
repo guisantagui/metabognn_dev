@@ -1,7 +1,8 @@
 # Report 01 — Matched negatives on A549 MetChange, and a dose/time leak
 
-*2026-11-13. Runs: `results/predict_targets/A549/metchange_rank{,_shuff,_matched}` (5-fold CV by drug, active
-perturbations, MetChange `rank` signatures, FNN ensemble without VAE).*
+*2026-11-13. Runs: `results/predict_targets/A549/metchange_rank{,_matched,_noStatic,_noGlobals}{,_shuff}` (5-fold CV
+by drug, active perturbations, MetChange `rank` signatures, FNN ensemble without VAE). Section 5.5 (`--no-globals`)
+added after the first version.*
 
 ## 1. The question
 
@@ -26,7 +27,11 @@ Two questions:
 | unmatched, shuffled | `metchange_rank_shuff` | 0 | validation AUPRC | shuffled |
 | matched | `metchange_rank_matched` | K = 4, weight 0.5 | validation `spec` | real |
 | matched, shuffled | `metchange_rank_matched_shuff` (on the cluster) | K = 4, weight 0.5 | validation `spec` | shuffled |
+| noGlobals (5.5) | `metchange_rank_noGlobals` | 0 | validation AUPRC | real |
+| noGlobals, shuffled | `metchange_rank_noGlobals_shuff` | 0 | validation AUPRC | shuffled |
 
+The noGlobals pair is the unmatched pair with `--no-globals`: the per-perturbation inputs (relative dose, time,
+signature size) are removed. The noStatic pair in 5.4 (`--no-static`) removes the per-protein features instead.
 Same seed, folds, drugs, network and features otherwise. Note that the matched runs change **two** things at once
 (sampling and epoch selection); section 7 comes back to this.
 
@@ -190,11 +195,81 @@ Results, each run against its own shuffled control:
   signature helps rank drugs in a way that is the same for every perturbation (e.g. strong signatures pointing to
   drug classes with many targets), not in a way specific to the drug.
 
+### 5.5 Removing dose and time from the inputs (`--no-globals`)
+
+Section 5.3 showed that the unmatched model's scores carry drug identity through dose and time. That can happen in
+two ways: through the dose/time **inputs** (`rel_log_dose`, `log_time`, and their products with protein features), or
+through the **signature itself**, which differs between designs (24 h vs 6 h, strong high-dose signatures). The
+noGlobals pair removes the inputs. If the shuffled control's `spec` returns to 0.5 *without stratifying*, the inputs
+were the route.
+
+Comparison output: `results/predict_targets/A549/metchange_rank_noGlobals/compare_real_vs_shuffled/` (run on the
+cluster with the current `compare_runs.py`, so it includes the stratified `spec`).
+
+**The leak is gone.** Unstratified `spec`, per perturbation:
+
+| run | pooled | per fold | `spec(dose/time only)` per fold | variance explained by dose/time |
+|---|---|---|---|---|
+| unmatched shuffled (5.3) | 0.464 | 0.487 0.462 0.477 0.446 0.455 | 0.443 0.495 0.441 0.432 0.433 | 0.18–0.26 |
+| noGlobals shuffled | **0.501** | 0.517 0.489 0.501 0.477 0.518 | 0.501 0.517 0.430 0.471 0.505 | **0.07–0.09** |
+| unmatched (5.3) | 0.447 | 0.472 0.418 0.441 0.484 0.414 | 0.437 0.422 0.449 0.515 0.424 | 0.16–0.27 |
+| noGlobals | 0.481 | 0.415 0.514 0.450 0.507 0.512 | 0.503 0.457 0.492 0.506 0.521 | 0.09–0.12 |
+
+Without the dose/time inputs the shuffled control sits at 0.50, and dose/time groups explain about a third as much of
+the score variance as before. So the model was using the dose/time **inputs**: the route through the signature is
+small. The dose/time-only predictor still reaches 0.43–0.47 in two folds of the shuffled run; in the shuffled run the
+signature a perturbation receives comes from another perturbation, whose design it partly reflects, so this is
+probably noise plus a faint remainder. It does not move the model's own `spec`.
+
+**Is there signature specificity?** Each run against its own control:
+
+| stratum | per perturbation, real / shuffled | folds real better | per drug, real / shuffled | per-drug p |
+|---|---|---|---|---|
+| none | 0.481 / 0.501 | 3/5 | 0.498 / 0.512 | 0.094 |
+| time | 0.480 / 0.498 | 3/5 | 0.484 / 0.495 | **0.036** |
+| time × dose | 0.480 / 0.500 | 3/5 | 0.486 / 0.498 | 0.057 |
+
+For comparison, the unmatched model within time × dose: 0.467 / 0.497 per perturbation, per drug p = 0.60; the
+matched model: 0.457 / 0.504, p = 0.16 (5.4).
+
+- **Since the control is now at 0.5, the unstratified and stratified `spec` agree** (0.481 vs 0.480): for this run
+  the plain `spec` measures signature use without the dose/time inflation.
+- **A small signature effect, about 2 points per perturbation**, borderline per drug (p = 0.04–0.09). It is as large
+  as the unmatched model's stratified effect (3 points), with somewhat stronger per-drug evidence. Removing dose and
+  time did not take away signature use.
+- **It comes from two folds.** Within time × dose, folds 0 and 2 are clearly better than their controls (0.409 vs
+  0.534, 0.460 vs 0.500); folds 1, 3 and 4 are at chance or worse.
+
+**Training failed in some folds.** The folds without specificity are the ones where training stopped almost at once:
+
+| fold | 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|
+| epochs kept (models 1, 2, 3) | 15, 7, **22** | 3, 5, 2 | 2, 1, **16** | 1, 1, 1 | 1, 8, 3 |
+| best validation AUPRC among members | 0.295 | 0.142 | 0.193 | 0.105 | 0.144 |
+| `rank_prob` real / shuffled (per perturbation) | 0.329 / 0.305 | **0.546** / 0.316 | 0.279 / 0.290 | 0.392 / 0.277 | **0.497** / 0.290 |
+| `spec_prob_timedose` real / shuffled | **0.409** / 0.534 | 0.541 / 0.513 | **0.460** / 0.500 | 0.526 / 0.469 | 0.488 / 0.500 |
+
+(Epoch 1 kept with 6 epochs run = no improvement in the 5 epochs after the first; training stopped there.) In folds
+1 and 4 the real model did not even learn the protein prior (`rank_prob` ≈ 0.5), which the shuffled model learned in
+every fold (0.28–0.32). The specificity appears in the two folds where at least one ensemble member trained for
+15–22 epochs. With five folds this is suggestive, not proof, but it says the size of the effect is limited by
+training rather than by the data. It also explains the plain-ranking numbers: `rank_prob` 0.389 per perturbation
+against 0.305 for the unmatched run, but the shuffled noGlobals run (0.293) is as good as the unmatched shuffled one
+(0.317). Removing dose and time does not cost the prior; the failed folds do. Per drug, real vs own control on
+`rank_prob`: p = 0.51.
+
+The logistic regression shows no specificity in any form (`spec_logreg` 0.50–0.51, per-drug p ≥ 0.38), as in all
+other runs.
+
 ## 6. Interpretation
 
 1. **The unmatched model's apparent specificity is mostly dose/time, not signature.** Its `spec` (0.447) is no
    better than its own shuffled control (0.464), and a dose/time-only predictor matches it. Within dose / time
-   strata a small signature effect appears (3 points per perturbation, 5.4), not significant per drug.
+   strata a small signature effect appears (3 points per perturbation, 5.4), not significant per drug. The route is
+   the dose/time **inputs**: with `--no-globals` the shuffled control is at 0.50 without any stratification, and a
+   signature effect of the same size remains (2 points, per drug p = 0.04–0.09; 5.5). The dose/time inputs give the
+   model a shortcut and nothing it needs to use the signature, so they should be left out (or stratified for) in
+   any run meant to measure specificity.
 2. **The matched model does use the signature, but the evidence is per perturbation more than per drug.** It is
    better than its own control on `spec` (−4.5 points per drug, p = 0.001) and `rank_probc` (p = 0.0005), in all
    five folds, and its shuffled control sits at 0.50. Within time × dose strata it keeps 4.7 points per perturbation
@@ -223,7 +298,10 @@ Results, each run against its own shuffled control:
 - **Per-drug results are unstable** (correlation 0.23 between runs). The signature effect is real on average but
   should not yet be read drug by drug.
 - **Training is still erratic.** Kept epochs range from 1 to 26 across folds and ensemble members in both runs;
-  validation `spec` per member varies from 0.40 to 0.49.
+  validation `spec` per member varies from 0.40 to 0.49. In the noGlobals run training stopped after the first
+  epoch in some folds, and the real model did not even learn the protein prior in two of them (5.5); the signature
+  effect is only seen where training ran longer. Training stability now limits what any of these comparisons can
+  show.
 - **Leak-robust evaluation** is now in `compare_runs.py` (5.4). The training script's own `spec` (and the validation
   `spec` used for epoch selection) is still unstratified, so it still rewards dose / time.
 - **Relative dose is approximate.** It is computed from the perturbation names, against the drug's highest *scored*
@@ -234,13 +312,16 @@ Results, each run against its own shuffled control:
 
 1. ~~Run `check_dose_time_leak.py` on `metchange_rank_matched_shuff`~~ (done, section 5.3: no exploited leak).
 2. ~~Add the dose/time-stratified `spec` to the evaluation~~ (done, 5.4; `results/.../A549/stratified_spec/`).
-3. On the cluster: the unmatched pair with `--no-globals` (real + shuffled). Note: `--no-static` (the noStatic runs)
-   removes the per-protein features, not dose / time; no `--no-globals` run exists yet. If its shuffled `spec`
-   returns to 0.5 unstratified, the model was using the dose / time *inputs*; if not, the design also reaches it
-   through the signature itself.
-4. Separate the two changes of the matched runs: matched with `--select-metric auprc`, and/or unmatched with
-   `--select-metric spec`, each with its shuffled control.
-5. Then version (b): keep the cross-entropy on the original sampling (the prior stays intact) and add the
+3. ~~The unmatched pair with `--no-globals`~~ (done, 5.5: the shuffled `spec` returns to 0.50 unstratified, so the
+   model was using the dose / time inputs; a small signature effect remains).
+4. Separate the two changes of the matched runs: matched with `--select-metric auprc` (launchers
+   `launch_predict_targets_A549_mc_matched_auprc{,_shuff}.sh`; submitted together with noGlobals, pending), and/or
+   unmatched with `--select-metric spec`, each with its shuffled control.
+5. Matched negatives **with** `--no-globals` (real + shuffled): the matched model's specificity without the dose/time
+   inputs, so that its plain `spec` is leak-free too. No launcher yet.
+6. Training stability (5.5): more patience before early stopping, and the lower learning rate
+   (`launch_predict_targets_A549_tf_lr1e-3.sh` exists for TF, unrun), so that no fold stops after one epoch.
+7. Then version (b): keep the cross-entropy on the original sampling (the prior stays intact) and add the
    specificity loss on matched groups, weighted by λ.
 
 ## Glossary (DL concepts that came up)
