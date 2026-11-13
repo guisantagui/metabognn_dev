@@ -18,7 +18,8 @@ out_dir_of() {  # the last out_dir= assignment of a launcher (must match real_di
 }
 
 submit() {
-    local v=$1 real_job=${2:-} real="launch_predict_targets_A549_${v}.sh" shuff="launch_predict_targets_A549_${v}_shuff.sh"
+    local v=$1 real_job=${2:-}  # separate statement: bash expands all of a `local` line before assigning any of it
+    local real="launch_predict_targets_A549_${v}.sh" shuff="launch_predict_targets_A549_${v}_shuff.sh"
     echo "== ${v}: $(out_dir_of "$real") | $(out_dir_of "$shuff")"
     local j1 j2 j3
     if [ -n "$real_job" ]; then j1=$real_job; else j1=$(sbatch --parsable "$real"); fi
