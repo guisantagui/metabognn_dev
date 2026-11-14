@@ -1,7 +1,7 @@
 # Project state — 2026-11-14
 
 Handoff note for continuing in a new session. Everything described here is committed up to
-HEAD `a53a99c`, except the files listed in section 8.
+HEAD `0bff707`, except the files listed in section 8.
 
 **Read first:** `reports/2026-11-14_seed_tf_expr.md` (report 03 — second seed, MetChange vs expr
 vs TF, why FNNs keep epoch 1), then `reports/2026-11-14_lr_noglobals_matched.md` (report 02 —
@@ -92,6 +92,10 @@ Per-drug gap (points), p — real vs own control (report 03):
   after the first lr halvings; patience 10 stops before the recovery. About half of the TF /
   expr members keep epoch 1–2; expr folds 0–1 collapsed (fold 1 `rank_prob` 0.689) while its
   folds 2 and 4 are as strong as TF. Fix: `--min-epochs` (section 4), runs in 6.1.
+- **The StepLR schedule, not convergence, decides when MetChange stops** (report 03, 8.1):
+  29/60 MetChange FNNs kept the first epoch after an lr halving (11, 21, 31, ...), 52/60 stopped
+  by patience (patience 10 = step size). `--min-epochs` barely matters for MetChange (3/15
+  seed-0 members kept an epoch < 15). Tests: patience 25, and `ReduceLROnPlateau` (6.1).
 
 **Matched negatives are superseded.** With dose/time inputs gone and training to convergence,
 matched sampling is worse on both metrics (report 02, section 4). What looked like
@@ -118,6 +122,11 @@ real 0.247 per perturbation; different network, so compare gaps, not absolute va
 - `--min-epochs N` (default 1 = plain early stopping, previous behaviour; verified by replaying
   the 150 recorded member histories): epochs < N are trained and logged but can neither be kept
   nor stop training; `--patience` counts from N. Recorded as `min_epochs` in `epoch_selection`.
+- `--lr-schedule {step,plateau}` (default `step` = `StepLR`, `--lr-step-size 10 --lr-gamma 0.5`,
+  as before); `plateau` = `ReduceLROnPlateau` on the validation selection score from epoch 1,
+  `--plateau-patience` (3, must be < `--patience`), `--min-lr` (1e-6). Each epoch's lr is in
+  `history`. Checked with a stub-torch test of `train_ffn` only; first real run is on the
+  cluster (report 03, 8.2).
 - `--fold i` with `--n-folds 5` for array jobs; the last task pools (`--aggregate-only` to pool
   by hand).
 
@@ -137,15 +146,18 @@ Tooling:
   `submit_train_w_shuff_mc_noGlobals_lr1e-3.sh`,
   `submit_train_w_shuff_mc_noGlobals_lr1e-3_ep100_seed1.sh` (done, report 03),
   `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3.sh` (done, report 03),
-  `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh` (6.1).
+  `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh`,
+  `submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh`,
+  `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` (6.1).
 - Variants registered in the submit script: `tf`, `expr`, `mc`, `mc_matched`,
   `mc_matched_auprc`, `mc_matched_noGlobals`, `mc_noGlobals`, `mc_noGlobals_lr1e-3`,
   `mc_matched_noGlobals_lr1e-3`, `mc_noGlobals_lr1e-3_ep100`, `mc_noGlobals_lr1e-3_seed1`,
   `tf_noGlobals_lr1e-3`, `expr_noGlobals_lr1e-3`, `mc_noGlobals_lr1e-3_min15`,
-  `tf_noGlobals_lr1e-3_min15`, `expr_noGlobals_lr1e-3_min15`. `mc_noStatic` is not registered
+  `tf_noGlobals_lr1e-3_min15`, `expr_noGlobals_lr1e-3_min15`, `mc_noGlobals_lr1e-3_min15_pat25`,
+  `{mc,tf,expr}_noGlobals_lr1e-3_plateau`. `mc_noStatic` is not registered
   (launch both by hand).
 - The `_lr1e-3` launchers are **array jobs** (`--array=0-4`; 4 h per task, 6 h for `_ep100` and
-  the `tf` / `expr` ones, 8 h for `_min15`). `sbatch --test-only` prints the estimated start time without
+  the `tf` / `expr` ones, 8 h for `_min15`, `_min15_pat25`, `_plateau`). `sbatch --test-only` prints the estimated start time without
   submitting.
 
 ## 5. Runs in `results/predict_targets/A549/`
@@ -163,21 +175,30 @@ Not on the laptop: `metchange_rank_matched_auprc_shuff` (its comparison ran on t
 and `metchange_rank_matched_noGlobals{,_shuff}` (plain, lr 0.005) — launched 2026-11-13, not
 yet synced or analysed. It is now of low value: report 02 supersedes it.
 
-Launchers written 2026-11-14, **not yet submitted**: `metchange_rank_noGlobals_lr1e-3_min15`,
-`expr_noGlobals_lr1e-3_min15`, `tf_active200_noGlobals_lr1e-3_min15`, each with `_shuff` (6.1).
+**Running** (submitted 2026-11-14): `metchange_rank_noGlobals_lr1e-3_min15`,
+`expr_noGlobals_lr1e-3_min15`, `tf_active200_noGlobals_lr1e-3_min15`, each with `_shuff`.
+**To submit** (launchers ready 2026-11-15): `metchange_rank_noGlobals_lr1e-3_min15_pat25`,
+`{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_plateau`, each with `_shuff`.
+All seed 0, same splits as `*_noGlobals_lr1e-3` (report 03, 8.3).
 
 Pre-dating the current metrics, cannot be re-checked (no `test_scores_heldout.npz`, no FNN
 shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
 
 ## 6. Next steps, in priority order
 
-**6.1 Fix early stopping** (GPU) — launchers ready, submit with
-`bash submit_train_w_shuff_noGlobals_lr1e-3_min15.sh` (MetChange, expr, TF + controls, with
-`--min-epochs 15 --patience 15 --ffn-epochs 80`). Check: no member keeps epoch 1–2; expr folds
-0–1 recover; whether MetChange's gap to TF narrows or TF's grows. If expr recovers, MetChange vs
-expr (the expression it is computed from) is the comparison that matters for the paper. Then a
-second seed of the winning recipe before building on it (report 03, section 3: the seed spread
-is about as large as the differences between signature types).
+**6.1 Fix early stopping and the schedule** (GPU; report 03, section 8):
+- running: `_min15` (MetChange, expr, TF) — warm-up of 15 epochs, patience 15, StepLR;
+- to submit: `bash submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh` (MetChange
+  patience 25; MetChange plateau) and `bash submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh`
+  (expr, TF plateau). Check the first `_plateau` task's log: it is the first real-torch run of
+  `--lr-schedule plateau`.
+
+Read (8.4): per-drug `median_diff` / p vs own control, folds better, kept epochs, history length
+(patience vs cap), lr at the kept epoch; compare with `*_noGlobals_lr1e-3` (same seed and
+splits). Questions: do expr folds 0–1 recover; does MetChange gain from more halvings or from
+plateau, or is its training done and the gap to TF the signature itself. If expr recovers,
+MetChange vs expr is the comparison that matters for the paper. Then a second seed of the
+winning recipe (seed spread ~1.3 points of per-drug gap).
 
 **6.2 Prototype path** (no GPU; this is what "working prototype" needs):
 1. **Query path** — nothing yet turns a user's metabolic query into a ranked drug list. With
@@ -205,8 +226,8 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 
 - **Per-drug plain ranking is still prior-dominated** (section 3). This is the main scientific
   gap for the tool, not a bug.
-- **Early stopping keeps epoch 1 in many FNN members** (report 03, section 5); `--min-epochs`
-  added, runs pending (6.1). The old-recipe `expr` / `tf` runs still lack FNN controls, but are
+- **Early stopping keeps epoch 1 in many FNN members, and StepLR decides when MetChange stops**
+  (report 03, sections 5 and 8); `--min-epochs` and `--lr-schedule plateau` added, runs in 6.1. The old-recipe `expr` / `tf` runs still lack FNN controls, but are
   superseded by the `*_noGlobals_lr1e-3` pairs.
 - **MetChange similarity-check anomaly, unresolved.** TOP1 / JAK1 / XIAP shared-target pairs are
   anticorrelated (mean r -0.24 / -0.23 / -0.35) and the split matches flip status exactly,
@@ -227,12 +248,15 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 
 ## 8. Uncommitted
 
-- `reports/2026-11-14_seed_tf_expr.md` (report 03, new); correction note in report 02 (its
-  "points" were differences of medians).
-- `metabolic_target_prediction.py`: `--min-epochs`.
-- New launchers `launch_predict_targets_A549_{mc,tf,expr}_noGlobals_lr1e-3_min15{,_shuff}.sh` and
-  wrapper `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh`; `submit_with_shuffle_control.sh`
-  (three variants registered) and `README.md` (variants table, `--min-epochs`).
+- `metabolic_target_prediction.py`: `--lr-schedule {step,plateau}`, `--lr-step-size`,
+  `--lr-gamma`, `--plateau-patience`, `--min-lr`; lr recorded per epoch in `history`.
+- Launchers `launch_predict_targets_A549_mc_noGlobals_lr1e-3_min15_pat25{,_shuff}.sh`,
+  `launch_predict_targets_A549_{mc,tf,expr}_noGlobals_lr1e-3_plateau{,_shuff}.sh`; wrappers
+  `submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh`,
+  `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh`; `submit_with_shuffle_control.sh`
+  (four variants registered); `README.md` (variants table, lr schedule).
+- Report 03, section 8 (follow-up runs, code additions; results pending) and the 31 → 29/60
+  correction in the launcher notes.
 - This `STATUS.md` update.
 
 ## 9. Working notes

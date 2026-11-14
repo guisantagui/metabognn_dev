@@ -48,6 +48,18 @@ bash ≥ 4 (`declare -A`), which the cluster has and macOS does not.
 | `tf_noGlobals_lr1e-3_min15` | as `tf_noGlobals_lr1e-3` but `--min-epochs 15 --patience 15 --ffn-epochs 80`; array job, 8 h per task | `tf_active200_noGlobals_lr1e-3_min15` | `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh` |
 | `expr_noGlobals_lr1e-3_min15` | as `expr_noGlobals_lr1e-3` with the same training settings | `expr_noGlobals_lr1e-3_min15` | `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh` |
 | `mc_noGlobals_lr1e-3_min15` | as `mc_noGlobals_lr1e-3` with the same training settings | `metchange_rank_noGlobals_lr1e-3_min15` | `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh` |
+| `mc_noGlobals_lr1e-3_min15_pat25` | as `mc_noGlobals_lr1e-3_min15` but `--patience 25`; array job, 8 h per task | `metchange_rank_noGlobals_lr1e-3_min15_pat25` | `submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh` |
+| `mc_noGlobals_lr1e-3_plateau` | as `mc_noGlobals_lr1e-3` but `--lr-schedule plateau --plateau-patience 3 --patience 20 --min-epochs 15 --ffn-epochs 80`; array job, 8 h per task | `metchange_rank_noGlobals_lr1e-3_plateau` | `submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh` |
+| `tf_noGlobals_lr1e-3_plateau` | as `tf_noGlobals_lr1e-3` with the same plateau settings | `tf_active200_noGlobals_lr1e-3_plateau` | `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` |
+| `expr_noGlobals_lr1e-3_plateau` | as `expr_noGlobals_lr1e-3` with the same plateau settings | `expr_noGlobals_lr1e-3_plateau` | `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` |
+
+**Learning-rate schedule** (defaults reproduce every earlier run): `--lr-schedule step` multiplies the lr by
+`--lr-gamma` (0.5) every `--lr-step-size` (10) epochs (`StepLR`); `--lr-schedule plateau` multiplies it by `--lr-gamma`
+when the validation selection score has not improved for `--plateau-patience` (3) epochs (`ReduceLROnPlateau`, from
+epoch 1, independent of `--min-epochs`, floor `--min-lr` 1e-6); it needs `--plateau-patience` < `--patience`. Each
+epoch's lr is recorded in the `history` of `metrics.json`. Why: under `StepLR`, 29/60 MetChange FNNs kept the first
+epoch after a halving and 52/60 stopped by patience, so the schedule rather than convergence decided when validation
+improved and when training stopped (report 03, section 8).
 
 **`--min-epochs N`** (default 1 = plain early stopping, so older launchers behave exactly as before): epochs before N
 are trained and logged but can neither be kept nor stop training; `--patience` counts from epoch N. Why: validation
@@ -57,7 +69,7 @@ nothing for those (and little in general: after 60 epochs the lr is 1/64 of its 
 
 Note: `--no-static` and `--no-globals` are different ablations. `noStatic` keeps dose, time and signature size.
 
-**Array jobs.** The `_lr1e-3` launchers run one fold per task (`#SBATCH --array=0-4`, `--fold "$SLURM_ARRAY_TASK_ID"`, 4 h each instead of 12 h for all folds; 6 h for `_ep100` and the `tf` / `expr` ones, 8 h for `_min15`). Each task uses the same split and seed as the sequential run. Short GPU requests usually start sooner through backfill; check with `sbatch --test-only <launcher>`, which prints the estimated start time without submitting. Logs are `<job name>_<task>.out/.err`. The task that finishes last pools the folds (`cv_*`); if one task failed and was resubmitted alone (`sbatch --array=<i> <launcher>`), pool with `--aggregate-only --n-folds 5 --out-dir <out_dir>` (the comparison does not need it). A comparison submitted by the submit script waits for all tasks of both arrays.
+**Array jobs.** The `_lr1e-3` launchers run one fold per task (`#SBATCH --array=0-4`, `--fold "$SLURM_ARRAY_TASK_ID"`, 4 h each instead of 12 h for all folds; 6 h for `_ep100` and the `tf` / `expr` ones, 8 h for `_min15`, `_min15_pat25` and `_plateau`). Each task uses the same split and seed as the sequential run. Short GPU requests usually start sooner through backfill; check with `sbatch --test-only <launcher>`, which prints the estimated start time without submitting. Logs are `<job name>_<task>.out/.err`. The task that finishes last pools the folds (`cv_*`); if one task failed and was resubmitted alone (`sbatch --array=<i> <launcher>`), pool with `--aggregate-only --n-folds 5 --out-dir <out_dir>` (the comparison does not need it). A comparison submitted by the submit script waits for all tasks of both arrays.
 
 ### Why the `mc_noGlobals`, `mc_matched_auprc` and `mc_matched_noGlobals` pairs
 

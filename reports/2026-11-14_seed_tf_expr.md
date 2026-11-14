@@ -110,12 +110,81 @@ logged but can neither be kept nor stop training; patience counts from N.
 
 ## 7. Next steps
 
-1. `--min-epochs 15 --patience 15 --ffn-epochs 80` on MetChange (priority), expr and TF, each with its control:
-   `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh`. Check that members no longer keep epoch 1–2, that expr folds 0–1
-   recover, and whether MetChange's gap to TF narrows or TF's grows.
+1. The early-stopping and schedule runs of section 8 (`_min15`, `_min15_pat25`, `_plateau`). Check that members no
+   longer keep epoch 1–2, that expr folds 0–1 recover, and whether MetChange's gap to TF narrows or TF's grows.
 2. If expr recovers, it becomes the comparison that matters for the paper: MetChange vs the expression it is computed
    from, both against their own controls.
 3. A second seed for whichever recipe wins, before building on it (section 3 shows the seed-to-seed spread is about as
    large as the differences between signature types).
 4. The prototype path of `STATUS.md` section 6.2 (query path, signature-similarity baseline, Schuhknecht benchmark) is
    unchanged and does not need the GPU.
+
+## 8. Follow-up runs (launched 2026-11-14/15, results pending)
+
+### 8.1 What the kept epochs say about the schedule
+
+`train_ffn` used `StepLR(step_size=10, gamma=0.5)`: the lr halves every 10 epochs. Over the four MetChange runs of this
+report (seeds 0 and 1, real and control; 60 FNN members):
+
+- **29/60 kept the first epoch after a halving** (11, 21, 31, 41 or 51; chance ~5/60). Validation AUPRC improves in a
+  jump when the lr drops and not in the following nine epochs.
+- **52/60 stopped by patience**, not at the cap. With patience 10 = the step size, a member whose best epoch is 21
+  stops at 31, the first epoch of the next lr level, if that epoch does not beat it.
+- Only 3/15 seed-0 real members (1/15 seed 1) kept an epoch before 15, so `--min-epochs 15` barely affects MetChange;
+  it is aimed at TF / expr (7/15 and 8/15 members at epoch 1–2).
+
+So the schedule, not convergence, decides when MetChange training stops. A larger step size would keep the lr high
+(and validation noisy) for longer; a larger gamma makes each jump smaller. Neither addresses that coupling, hence two
+other tests.
+
+### 8.2 Code additions (`metabolic_target_prediction.py`)
+
+All defaults reproduce the earlier runs.
+
+| option | default | effect |
+|---|---|---|
+| `--min-epochs N` | 1 | epochs < N are trained and logged but can neither be kept nor stop training; `--patience` counts from N |
+| `--lr-schedule {step,plateau}` | `step` | `step`: `StepLR`; `plateau`: `ReduceLROnPlateau` on the validation selection score, stepped from epoch 1 (independent of `--min-epochs`) |
+| `--lr-step-size`, `--lr-gamma` | 10, 0.5 | `StepLR` step and factor; `--lr-gamma` is also the plateau factor |
+| `--plateau-patience` | 3 | epochs without improvement before a reduction (the lr drops after the 4th); must be < `--patience` |
+| `--min-lr` | 1e-6 | floor of the plateau schedule |
+
+`metrics.json` now records each epoch's lr in `history`, and `min_epochs` / `lr_schedule` in `epoch_selection`.
+
+Checks (no torch on the laptop): with the defaults, replaying the recorded validation histories of all 150
+AUPRC-selected members on the laptop reproduces every kept epoch and stopping point; a stub-torch test of `train_ffn`
+confirms the scheduler calls (`StepLR` halving after epoch 10 by default, plateau reduction after 4 non-improving
+epochs from epoch 1, `--min-epochs` ignoring the epoch-1 peak, custom step size / gamma passed through). Not yet run
+end to end with real torch: the first cluster task of each `_plateau` run is the first real test.
+
+### 8.3 Runs
+
+All seed 0 (same folds and splits as `*_noGlobals_lr1e-3`), `--no-globals --lr 0.001`, array jobs, each with its
+shuffled control and comparison.
+
+| run (`results/predict_targets/A549/`) | schedule | early stopping | wrapper |
+|---|---|---|---|
+| `metchange_rank_noGlobals_lr1e-3_min15` | StepLR | min 15, patience 15, cap 80 | `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh` |
+| `expr_noGlobals_lr1e-3_min15` | StepLR | same | same |
+| `tf_active200_noGlobals_lr1e-3_min15` | StepLR | same | same |
+| `metchange_rank_noGlobals_lr1e-3_min15_pat25` | StepLR | min 15, **patience 25**, cap 80 | `submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh` |
+| `metchange_rank_noGlobals_lr1e-3_plateau` | **plateau** (patience 3) | min 15, patience 20, cap 80 | same |
+| `expr_noGlobals_lr1e-3_plateau` | **plateau** | same | `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` |
+| `tf_active200_noGlobals_lr1e-3_plateau` | **plateau** | same | same |
+
+What each answers:
+
+- **`_min15` (TF, expr):** does a warm-up stop members keeping epoch 1–2, and do expr folds 0–1 recover?
+  For MetChange it mainly tests patience 15 vs 10 (expected: little change, see 8.1).
+- **`_min15_pat25` (MetChange):** does seeing two more halvings after the best epoch help? If members keep later
+  epochs and the per-drug gap grows, the schedule was limiting; if not, MetChange training is done and its gap to TF
+  is the signature.
+- **`_plateau` (all three):** does tying lr reductions to validation do better than a fixed schedule? Compare each with
+  its `_min15` run (same warm-up, StepLR).
+
+### 8.4 What to read from the results
+
+For each run, against its own control: per-drug `median_diff` and p for `spec_prob_timedose`, `rank_probc`,
+`rank_prob`; folds better; and from `metrics.json`: kept epochs, history length (patience vs cap), and the lr at the
+kept epoch. Compare with `*_noGlobals_lr1e-3` (same seed and splits, so fold-by-fold comparisons are valid within
+seed 0). Any winner still needs a second seed (section 3: the seed spread is ~1.3 points of per-drug gap).
