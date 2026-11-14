@@ -4,6 +4,12 @@
 by drug, active perturbations, MetChange `rank` signatures, FNN ensemble without VAE). Section 5.5 (`--no-globals`)
 added after the first version.*
 
+> **Superseded in part by report 02** (`2026-11-14_lr_noglobals_matched.md`): once the dose/time inputs are
+> removed *and* training runs to convergence (lr 0.001, patience 10), the unmatched model shows a much larger
+> signature effect than anything here, and matched negatives no longer help. The metric definitions, the
+> reading checklist (section 4) and the leak analysis (5.3–5.5) remain valid; the conclusions about matched
+> negatives apply only to runs that keep the dose/time inputs.
+
 ## 1. The question
 
 The FNN ranks a drug's targets well, but almost as well when every perturbation's signature is replaced by another
@@ -314,14 +320,12 @@ other runs.
 2. ~~Add the dose/time-stratified `spec` to the evaluation~~ (done, 5.4; `results/.../A549/stratified_spec/`).
 3. ~~The unmatched pair with `--no-globals`~~ (done, 5.5: the shuffled `spec` returns to 0.50 unstratified, so the
    model was using the dose / time inputs; a small signature effect remains).
-4. Separate the two changes of the matched runs: matched with `--select-metric auprc` (launchers
-   `launch_predict_targets_A549_mc_matched_auprc{,_shuff}.sh`; submitted together with noGlobals, pending), and/or
-   unmatched with `--select-metric spec`, each with its shuffled control.
-5. Matched negatives **with** `--no-globals` (real + shuffled): the matched model's specificity without the dose/time
-   inputs, so that its plain `spec` is leak-free too. No launcher yet.
-6. Training stability (5.5): more patience before early stopping, and the lower learning rate
-   (`launch_predict_targets_A549_tf_lr1e-3.sh` exists for TF, unrun), so that no fold stops after one epoch.
-7. Then version (b): keep the cross-entropy on the original sampling (the prior stays intact) and add the
+4. ~~Matched with `--select-metric auprc`~~ (done, report 02 section 4: stratified `spec` 0.450 / 0.497, per-drug
+   p = 0.45 — most of the apparent matched specificity here was the dose/time shortcut plus `spec`-based selection).
+5. ~~Matched negatives **with** `--no-globals`~~ (done at lr 0.001, report 02: works, but worse than unmatched).
+6. ~~Training stability (5.5)~~ (done, report 02: this was the bottleneck — lr 0.001 / patience 10 / cap 60 turned a
+   2-point effect into 8.6 points per perturbation, 5/5 folds, per-drug p = 4.5e-5).
+7. ~~Then version (b)~~ — demoted, see report 02 section 7. Original plan: keep the cross-entropy on the original sampling (the prior stays intact) and add the
    specificity loss on matched groups, weighted by λ.
 
 ## Glossary (DL concepts that came up)
