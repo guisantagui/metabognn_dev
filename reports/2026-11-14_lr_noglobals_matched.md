@@ -5,6 +5,12 @@ and their `_shuff` controls (5-fold CV by drug, active perturbations, MetChange 
 without VAE). Follows report 01 (`2026-11-13_A549_matched_negatives.md`), whose metric definitions and reading
 checklist apply here unchanged.*
 
+> **Correction (report 03, `2026-11-14_seed_tf_expr.md`).** The "points" quoted below (8.6 per perturbation, 5.6 per
+> drug) are differences between the medians of the real and shuffled runs. The per-drug Wilcoxon p-values test the
+> paired per-drug differences, whose median (`median_diff` in `paired.tsv`) is **4.2 points** for `spec_prob_timedose`
+> (p = 4.5e-5), 6.8 for `rank_probc` and 1.1 for `rank_prob`. Conclusions unchanged. Report 03 also shows that a second
+> seed gives a smaller effect (2.9 points, p = 0.047) and that the 60-epoch cap did not bind.
+
 ## 1. The question
 
 Report 01 left three things open:
@@ -96,7 +102,7 @@ dose/time shortcut, and the rest came from selecting epochs on `spec`.
 ## 5. What this means
 
 1. **The model does read the signature.** On the leak-free metric, with drugs as the unit, `mc_noGlobals_lr1e-3` is
-   5.6 points better than its own shuffled control (p = 4.5e-5), in every fold. This is the first result in the
+   5.6 points better than its own shuffled control (difference of medians; paired median difference 4.2 points, p = 4.5e-5), in every fold. This is the first result in the
    project where per-drug evidence is strong on a metric that cannot be explained by the per-protein prior or by the
    dose/time design.
 2. **The recipe is: drop the dose/time inputs, train to convergence.** Not matched negatives, not `spec`-based

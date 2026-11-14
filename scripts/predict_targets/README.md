@@ -45,10 +45,19 @@ bash ≥ 4 (`declare -A`), which the cluster has and macOS does not.
 | `mc_noGlobals_lr1e-3_seed1` | as `mc_noGlobals_lr1e-3` plus `--seed 1` (new folds, init and permutation: a full replicate); array job | `metchange_rank_noGlobals_lr1e-3_seed1` | `submit_train_w_shuff_mc_noGlobals_lr1e-3_ep100_seed1.sh` |
 | `tf_noGlobals_lr1e-3` | as `tf` plus the reference recipe (`--no-globals --lr 0.001 --patience 10 --ffn-epochs 60`); array job, 6 h per task | `tf_active200_noGlobals_lr1e-3` | `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3.sh` |
 | `expr_noGlobals_lr1e-3` | as `expr` plus the reference recipe; array job, 6 h per task | `expr_noGlobals_lr1e-3` | `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3.sh` |
+| `tf_noGlobals_lr1e-3_min15` | as `tf_noGlobals_lr1e-3` but `--min-epochs 15 --patience 15 --ffn-epochs 80`; array job, 8 h per task | `tf_active200_noGlobals_lr1e-3_min15` | `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh` |
+| `expr_noGlobals_lr1e-3_min15` | as `expr_noGlobals_lr1e-3` with the same training settings | `expr_noGlobals_lr1e-3_min15` | `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh` |
+| `mc_noGlobals_lr1e-3_min15` | as `mc_noGlobals_lr1e-3` with the same training settings | `metchange_rank_noGlobals_lr1e-3_min15` | `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh` |
+
+**`--min-epochs N`** (default 1 = plain early stopping, so older launchers behave exactly as before): epochs before N
+are trained and logged but can neither be kept nor stop training; `--patience` counts from epoch N. Why: validation
+AUPRC often peaks at epoch 1, dips, and recovers after the first learning-rate halvings (`StepLR` halves the lr every
+10 epochs), so with patience 10 about half of the `tf` / `expr` FNNs kept epoch 1–2. Raising `--ffn-epochs` alone does
+nothing for those (and little in general: after 60 epochs the lr is 1/64 of its start value).
 
 Note: `--no-static` and `--no-globals` are different ablations. `noStatic` keeps dose, time and signature size.
 
-**Array jobs.** The `_lr1e-3` launchers run one fold per task (`#SBATCH --array=0-4`, `--fold "$SLURM_ARRAY_TASK_ID"`, 4 h each instead of 12 h for all folds; 6 h for `_ep100` and the `tf` / `expr` ones). Each task uses the same split and seed as the sequential run. Short GPU requests usually start sooner through backfill; check with `sbatch --test-only <launcher>`, which prints the estimated start time without submitting. Logs are `<job name>_<task>.out/.err`. The task that finishes last pools the folds (`cv_*`); if one task failed and was resubmitted alone (`sbatch --array=<i> <launcher>`), pool with `--aggregate-only --n-folds 5 --out-dir <out_dir>` (the comparison does not need it). A comparison submitted by the submit script waits for all tasks of both arrays.
+**Array jobs.** The `_lr1e-3` launchers run one fold per task (`#SBATCH --array=0-4`, `--fold "$SLURM_ARRAY_TASK_ID"`, 4 h each instead of 12 h for all folds; 6 h for `_ep100` and the `tf` / `expr` ones, 8 h for `_min15`). Each task uses the same split and seed as the sequential run. Short GPU requests usually start sooner through backfill; check with `sbatch --test-only <launcher>`, which prints the estimated start time without submitting. Logs are `<job name>_<task>.out/.err`. The task that finishes last pools the folds (`cv_*`); if one task failed and was resubmitted alone (`sbatch --array=<i> <launcher>`), pool with `--aggregate-only --n-folds 5 --out-dir <out_dir>` (the comparison does not need it). A comparison submitted by the submit script waits for all tasks of both arrays.
 
 ### Why the `mc_noGlobals`, `mc_matched_auprc` and `mc_matched_noGlobals` pairs
 

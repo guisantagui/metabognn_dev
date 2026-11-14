@@ -82,6 +82,9 @@ matched ones. --select-metric spec keeps, per FNN, the epoch with the best valid
 validation drugs, as spec_*_heldout) instead of the best AUPRC, which rewards the prior; auprc_matched selects on the
 AUPRC of target rows against their matched negatives. Both are logged every epoch whatever is selected on, and
 metrics.json records each model's kept epoch and history (epoch_selection).
+--min-epochs N: epochs before N are trained and logged but can neither be kept nor stop training (patience counts from
+epoch N). Validation AUPRC is noisy in the first epochs (often an early peak, a dip, and a recovery after the first
+learning-rate halvings), so with plain early stopping many FNNs keep epoch 1. The default (1) changes nothing.
 
 A multinomial logistic regression on the standardised base features (no polynomial, no VAE) is always fitted on the
 same rows and sample weights as the FNNs and scored the same way (rank_logreg): the reference the deep model has to
@@ -830,6 +833,8 @@ def train_ffn(cfg, pre, in_dim, Xtr, ytr, wtr, val_eval, args, device, seed):
         history.append(dict(epoch=epoch + 1, loss=tot / max(len(loader), 1), **m))
         log(f"  FFN {cfg} epoch {epoch + 1}: loss {tot / max(len(loader), 1):.4f} | val "
             + ", ".join(f"{k} {v:.4f}" for k, v in m.items() if v is not None))
+        if epoch + 1 < args.min_epochs:  # warm-up: neither kept nor counted for patience
+            continue
         score = val_eval.select(m)
         if best_state is None or score > best:
             best, best_epoch, bad = score, epoch + 1, 0
@@ -840,8 +845,8 @@ def train_ffn(cfg, pre, in_dim, Xtr, ytr, wtr, val_eval, args, device, seed):
                 break
     model.load_state_dict(best_state)
     log(f"  FFN {cfg}: epoch {best_epoch} kept ({args.select_metric} {best:.4f})")
-    return model.eval(), dict(select_metric=args.select_metric, best_epoch=best_epoch, best_score=float(best),
-                              history=history)
+    return model.eval(), dict(select_metric=args.select_metric, min_epochs=args.min_epochs, best_epoch=best_epoch,
+                              best_score=float(best), history=history)
 
 
 # --------------------------------------------------------------------------------------
@@ -1150,6 +1155,9 @@ def main():
     mo.add_argument("--lr", type=float, default=0.005)
     mo.add_argument("--ffn-epochs", type=int, default=30)
     mo.add_argument("--patience", type=int, default=5)
+    mo.add_argument("--min-epochs", type=int, default=1,
+                    help="first epoch that can be kept or count towards --patience (earlier epochs are trained and "
+                         "logged only); 1 = plain early stopping")
     mo.add_argument("--select-metric", choices=["auprc", "macro_f1", "spec", "auprc_matched"], default="auprc",
                     help="validation metric for early stopping: auprc (target vs none, threshold-free), "
                          "macro_f1 (argmax classes 1/2, as in Menacho et al.), spec (signature specificity of the "
@@ -1176,6 +1184,8 @@ def main():
         ap.error("--min-de-genes needs --de-counts")
     if args.score_active_only and not args.min_de_genes:
         ap.error("--score-active-only needs --de-counts and --min-de-genes")
+    if not 1 <= args.min_epochs <= args.ffn_epochs:
+        ap.error("--min-epochs must be between 1 and --ffn-epochs")
     if args.select_metric == "auprc_matched" and not args.matched_negatives:
         ap.error("--select-metric auprc_matched needs --matched-negatives")
     if not 0 <= args.matched_weight <= 1:
