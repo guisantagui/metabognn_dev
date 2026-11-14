@@ -1,7 +1,7 @@
 # Project state — 2026-11-14
 
 Handoff note for continuing in a new session. Everything described here is committed up to
-HEAD `c1ca923`, except the files listed in section 8.
+HEAD `85ce09b` (reports 01–02 included), except the files listed in section 8.
 
 **Read first:** `reports/2026-11-14_lr_noglobals_matched.md` (report 02 — current best recipe
 and the main result), then `reports/2026-11-13_A549_matched_negatives.md` (report 01 — metric
@@ -111,12 +111,17 @@ Tooling:
 - Wrappers: `submit_train_w_shuff_mc_matched.sh`,
   `submit_train_w_shuff_mc_noGlobals_matched_auprc.sh`,
   `submit_train_w_shuff_mc_matched_noGlobals.sh`,
-  `submit_train_w_shuff_mc_noGlobals_lr1e-3.sh`.
+  `submit_train_w_shuff_mc_noGlobals_lr1e-3.sh`,
+  `submit_train_w_shuff_mc_noGlobals_lr1e-3_ep100_seed1.sh` (6.1),
+  `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3.sh` (6.4).
 - Variants registered in the submit script: `tf`, `expr`, `mc`, `mc_matched`,
   `mc_matched_auprc`, `mc_matched_noGlobals`, `mc_noGlobals`, `mc_noGlobals_lr1e-3`,
-  `mc_matched_noGlobals_lr1e-3`. `mc_noStatic` is not registered (launch both by hand).
-- The `_lr1e-3` launchers are **array jobs** (`--array=0-4`, 4 h per task). `sbatch --test-only`
-  prints the estimated start time without submitting.
+  `mc_matched_noGlobals_lr1e-3`, `mc_noGlobals_lr1e-3_ep100`, `mc_noGlobals_lr1e-3_seed1`,
+  `tf_noGlobals_lr1e-3`, `expr_noGlobals_lr1e-3`. `mc_noStatic` is not registered (launch both
+  by hand).
+- The `_lr1e-3` launchers are **array jobs** (`--array=0-4`; 4 h per task, 6 h for `_ep100` and
+  the `tf` / `expr` ones). `sbatch --test-only` prints the estimated start time without
+  submitting.
 
 ## 5. Runs in `results/predict_targets/A549/`
 
@@ -131,14 +136,22 @@ Not on the laptop: `metchange_rank_matched_auprc_shuff` (its comparison ran on t
 and `metchange_rank_matched_noGlobals{,_shuff}` (plain, lr 0.005) — launched 2026-11-13, not
 yet synced or analysed. It is now of low value: report 02 supersedes it.
 
+Launchers written 2026-11-14, **not yet submitted**: `metchange_rank_noGlobals_lr1e-3_ep100`,
+`metchange_rank_noGlobals_lr1e-3_seed1`, `tf_active200_noGlobals_lr1e-3`,
+`expr_noGlobals_lr1e-3`, each with `_shuff` (sections 6.1, 6.4).
+
 Pre-dating the current metrics, cannot be re-checked (no `test_scores_heldout.npz`, no FNN
 shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
 
 ## 6. Next steps, in priority order
 
-**6.1 Confirm the new result is solid** (cheap, GPU):
+**6.1 Confirm the new result is solid** (cheap, GPU) — launchers ready, submit with
+`bash submit_train_w_shuff_mc_noGlobals_lr1e-3_ep100_seed1.sh`:
 1. `--ffn-epochs 100` on `mc_noGlobals_lr1e-3` + control — one member kept epoch 53 of 60.
-2. A second seed of the same pair, to size run-to-run variability before building on it.
+   Check the kept epochs: if none approaches 100 and the metrics match, the 60 cap is fine.
+2. A second seed (`--seed 1`) of the same pair, to size run-to-run variability before building
+   on it. The seed also redraws the drug folds, so compare per-perturbation / per-drug metrics
+   and the real − shuffled gap with seed 0, not fold by fold.
 
 **6.2 Prototype path** (no GPU; this is what "working prototype" needs):
 1. **Query path** — nothing yet turns a user's metabolic query into a ranked drug list. With
@@ -159,15 +172,19 @@ shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
    inferred, the metabolic labels are a smooth function of the 978 landmarks.
 
 **6.4 Then** freeze the recipe and port it to `tf` and `expr` with controls (first
-interpretable cross-signature comparison), and only after that revisit version (b), the
-prior + residual model, or per-protein standardisation of the dynamic features.
+interpretable cross-signature comparison) — launchers ready (`tf_noGlobals_lr1e-3`,
+`expr_noGlobals_lr1e-3`), submit with `bash submit_train_w_shuff_tf_expr_noGlobals_lr1e-3.sh`.
+Can go in parallel with 6.1, but read them against 6.1's seed-to-seed spread. Only after that
+revisit version (b), the prior + residual model, or per-protein standardisation of the dynamic
+features.
 
 ## 7. Open issues
 
 - **Per-drug plain ranking is still prior-dominated** (section 3). This is the main scientific
   gap for the tool, not a bug.
-- **Expression and TF FNN shuffle controls are missing** (`expr_shuff`, `tf_shuff` launchers
-  exist). Without them, cross-signature comparison says nothing.
+- **Expression and TF FNN shuffle controls are missing** for the old recipe (`expr_shuff`,
+  `tf_shuff` launchers exist). Superseded by the `*_noGlobals_lr1e-3` pairs (6.4), which come
+  with their controls; without those, cross-signature comparison says nothing.
 - **MetChange similarity-check anomaly, unresolved.** TOP1 / JAK1 / XIAP shared-target pairs are
   anticorrelated (mean r -0.24 / -0.23 / -0.35) and the split matches flip status exactly,
   although ATP1A1 drugs are mixed-flip yet r = +0.92. Checks: confirm `labels_dir`; grep
@@ -187,8 +204,11 @@ prior + residual model, or per-protein standardisation of the dynamic features.
 
 ## 8. Uncommitted
 
-- `reports/2026-11-14_lr_noglobals_matched.md` (report 02, new).
-- This `STATUS.md` rewrite.
+- New launchers in `scripts/predict_targets/`: `launch_predict_targets_A549_{mc_noGlobals_lr1e-3_ep100,
+  mc_noGlobals_lr1e-3_seed1,tf_noGlobals_lr1e-3,expr_noGlobals_lr1e-3}{,_shuff}.sh` and the two
+  wrappers above.
+- `submit_with_shuffle_control.sh` (four variants registered) and `README.md` (variants table).
+- This `STATUS.md` update.
 
 ## 9. Working notes
 
