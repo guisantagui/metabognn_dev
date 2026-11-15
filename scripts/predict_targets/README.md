@@ -1,7 +1,9 @@
 # Instructions for launching training scripts
 
 All commands are run from this folder, on the cluster login node. Each run writes to
-`/home/users/gsantamaria/projects/metabognn_dev/results/predict_targets/A549/<out_dir>`. Pull the repository on the
+`/scratch/users/gsantamaria/test_large_files/metabognn_dev/results/predict_targets/A549/<out_dir>`
+(`${project_dir_scratch}` in the launchers; runs before 2026-11-15 wrote to
+`/home/users/gsantamaria/projects/metabognn_dev/results/predict_targets/A549/`). Pull the repository on the
 cluster before submitting, so that the jobs (and the comparison jobs) use the current scripts.
 
 ## Training scripts with shuffle controls

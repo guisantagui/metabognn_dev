@@ -151,6 +151,21 @@ Tooling:
   read) and the run's spec split by it, vs its control (report 03, 10.2–10.3).
 - `check_dose_time_leak.py` — `spec` of the model vs `spec` of a dose/time-only predictor, and
   the score variance explained by dose/time groups.
+- **Labels (2026-11-15):** every training launcher reads its labels from scratch,
+  `${project_dir_scratch}/results/labels/<cell>/{expr,metchange/rank}` (MetChange used the home
+  copy until then). The scratch copy is the rerun of the fixed `limma_DE.R`; the home copy was
+  corrected with `fix_limma_reference_sign.py`, which is exact for what training reads (swapping
+  the reference only negates log2FC; p / q unchanged), so both give the same signatures. Only a
+  different input matrix to the rerun could change them; a spot check of `log2FC.csv` /
+  `qvals.csv` between the two copies confirms it.
+  Label pipeline, all writing to scratch: `parse_lincs_data/launch_get_lincs_celllist.sh`
+  (expression limma) → `metchange/metchange_list_launcher.sh` → `metchange/mc_res_concat_list_launcher.sh`
+  → `compute_labels/launch_limma_mc_celllist.sh`.
+- **Output location (2026-11-15):** every launcher writes to
+  `/scratch/users/gsantamaria/test_large_files/metabognn_dev/results/predict_targets/A549/<out_dir>`
+  (`${project_dir_scratch}`), and `submit_with_shuffle_control.sh` /
+  `compare_runs_mc_vs_shuffled_A549.sh` read from there. Earlier runs are in the same folders
+  under `/home/users/gsantamaria/projects/metabognn_dev/results/predict_targets/A549/`.
 - `submit_with_shuffle_control.sh` — submits a variant's real run, its shuffled control and a
   dependent comparison; takes several variants in one call, validates names first, `--real-job`
   for an already-queued real run. Needs bash ≥ 4 (cluster yes, macOS no).
@@ -273,6 +288,12 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 - Launchers `launch_predict_targets_A549_expr_combined_noGlobals_lr1e-3_min15{,_shuff}.sh`,
   wrapper `submit_train_w_shuff_expr_combined_noGlobals_lr1e-3_min15.sh`; variant registered in
   `submit_with_shuffle_control.sh`; README variants table.
+- All 55 `launch_predict_targets_A549_*.sh`: `out_dir` on scratch (`small` also gains the
+  `project_dir_scratch` variable); `submit_with_shuffle_control.sh`,
+  `compare_runs_mc_vs_shuffled_A549.sh` and the README point to scratch.
+- The 30 MetChange `launch_predict_targets_A549_*.sh`: `labels_dir` on scratch;
+  `compute_labels/launch_limma_DE_A549_mc.sh`: `out_dir` on scratch;
+  `metpath/launch_metpath_A549.sh`: input labels and output on scratch.
 - This `STATUS.md` update.
 
 ## 9. Working notes

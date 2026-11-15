@@ -35,12 +35,13 @@ eval "$(micromamba shell hook --shell bash)"
 micromamba activate metabolic_drug_repurposing
 
 project_dir="/home/users/gsantamaria/projects/metabognn_dev"
+project_dir_scratch="/scratch/users/gsantamaria/test_large_files/metabognn_dev"   # results (labels in, metpath out)
 cell="A549"
 gem_f="/home/users/gsantamaria/projects/metabo_pert/data/GEMs/Human2/Human-GEM/model/Human-GEM.xml"
 medium_f="/home/users/gsantamaria/projects/metabo_pert/data/GEMs/gem_mediums/Human2-GEM/rpmi_medium.json"
 hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
 baseline_f="/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cell_matrices/${cell}/baseline_ctrl.tsv"
-de_f="${project_dir}/results/labels/${cell}/expr/log2FC.csv"
+de_f="${project_dir_scratch}/results/labels/${cell}/expr/log2FC.csv"
 # metaflux: METAFlux on the controls' mean expression (cell-line specific, ~2 CPU-hours of pathways);
 # fba: maximal biomass with minimal norm, as in MetPath (not cell-specific, ~45 CPU-hours).
 flux_state="metaflux"
@@ -48,7 +49,7 @@ mras_floor=0.25
 distance=2
 cutoff_fraction=0.05
 fc_scale="ratio"     # ratio: MetPath's scores (1 = unchanged); log2: mean log2FC (0 = unchanged)
-out_dir="${project_dir}/results/metpath/${cell}/${flux_state}_d${distance}/"
+out_dir="${project_dir_scratch}/results/metpath/${cell}/${flux_state}_d${distance}/"
 paths_dir="${out_dir}/pathways"
 scores_dir="${out_dir}/scores_${fc_scale}"
 

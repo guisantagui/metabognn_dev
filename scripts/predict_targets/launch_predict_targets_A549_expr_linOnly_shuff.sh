@@ -27,7 +27,7 @@ net_dir="${project_dir}/data/networks/gene"
 cell_dir="${project_dir_scratch}/data/perturbation/lincs/cell_matrices/${cell}"   # as in the other launchers
 hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
 labels_dir="${project_dir_scratch}/results/labels/${cell}/expr"
-out_dir="${project_dir}/results/predict_targets/${cell}/expr_linOnly_shuff/"
+out_dir="${project_dir_scratch}/results/predict_targets/${cell}/expr_linOnly_shuff/"
 device="cpu" # cpu, cuda
 
 # Control baseline (baseline_ctrl.tsv) and perturbation table (perturbations.tsv), derived from expr.csv and

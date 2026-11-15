@@ -19,7 +19,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-results="/home/users/gsantamaria/projects/metabognn_dev/results/predict_targets/A549"
+results="/scratch/users/gsantamaria/test_large_files/metabognn_dev/results/predict_targets/A549"
 declare -A real_dir=([tf]="${results}/tf_active200" [expr]="${results}/expr" [mc]="${results}/metchange_rank"
                     [mc_matched]="${results}/metchange_rank_matched"
                     [mc_matched_auprc]="${results}/metchange_rank_matched_auprc"

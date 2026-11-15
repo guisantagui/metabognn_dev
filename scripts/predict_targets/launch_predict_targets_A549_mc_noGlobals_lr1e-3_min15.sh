@@ -31,9 +31,9 @@ penalty="rank"
 net_dir="${project_dir}/data/networks/combined"
 cell_dir="${project_dir_scratch}/data/perturbation/lincs/cell_matrices/${cell}"   # as in the other launchers
 hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
-labels_dir="${project_dir}/results/labels/${cell}/metchange/${penalty}"   # rerun limma_DE.R (fixed) first
+labels_dir="${project_dir_scratch}/results/labels/${cell}/metchange/${penalty}"
 labels_dir_expr="${project_dir_scratch}/results/labels/${cell}/expr"
-out_dir="${project_dir}/results/predict_targets/${cell}/metchange_${penalty}_noGlobals_lr1e-3_min15"
+out_dir="${project_dir_scratch}/results/predict_targets/${cell}/metchange_${penalty}_noGlobals_lr1e-3_min15"
 device="cuda" # cpu, cuda
 
 # Control baseline (baseline_ctrl.tsv) and perturbation table (perturbations.tsv), derived from expr.csv and

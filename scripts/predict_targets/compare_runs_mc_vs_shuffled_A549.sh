@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cell_dir="/home/users/gsantamaria/projects/metabognn_dev/results/predict_targets/A549/"
+cell_dir="/scratch/users/gsantamaria/test_large_files/metabognn_dev/results/predict_targets/A549/"
 real="${cell_dir}/metchange_rank/"
 lin_shuf="${cell_dir}/metchange_rank_linOnly_shuff"
 shuf="${cell_dir}/metchange_rank_shuff/"

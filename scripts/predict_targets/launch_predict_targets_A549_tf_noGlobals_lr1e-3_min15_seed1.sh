@@ -32,7 +32,7 @@ cell_dir="${project_dir_scratch}/data/perturbation/lincs/cell_matrices/${cell}" 
 hgnc_f="${project_dir}/data/utilities/hgnc_complete_set.txt"
 #labels_dir="${project_dir}/results/labels/${cell}/expr"   # limma_DE.R on the expression
 labels_dir="${project_dir_scratch}/results/labels/${cell}/expr"
-out_dir="${project_dir}/results/predict_targets/${cell}/tf_active200_noGlobals_lr1e-3_min15_seed1"
+out_dir="${project_dir_scratch}/results/predict_targets/${cell}/tf_active200_noGlobals_lr1e-3_min15_seed1"
 device="cuda" # cpu, cuda
 
 
