@@ -99,10 +99,12 @@ Paired by drug, expr and TF each beat MetChange in both seeds (expr: p = 0.023 /
   `gene`), CycleGAN-inferred GPR genes (6.3).
 - **Robust across two seeds: expr ≈ TF > MetChange.** Seed spread is 1.5 points for MetChange
   and 2.6 for expr; MetChange's paired deficit (4.8–6.9 points) is larger.
-- **Coverage hypothesis not supported so far** (report 03, 10.2): every active perturbation has
-  ~14–15% of its DE genes in Human-GEM (the background share); metabolic and total DE counts are
-  the same variable (Spearman 0.99). Only on 699 perturbations: the laptop's expression labels
-  are an old partial set; the full check runs on the cluster.
+- **Metabolic coverage** (report 03, 10.2–10.4; local subset of ~600 perturbations only):
+  in DE terms it is not the issue (every active perturbation has ~14–15% of its DE genes in
+  Human-GEM, the background share). In MetChange's own output it is: ≥ 25% of active
+  perturbations have no significant feature among the 100 MetChange features the model reads,
+  half have < 17. Whether that explains the deficit against expr is unclear on the subset;
+  the full check runs on the cluster.
 - The epoch cap does not bind for MetChange; for TF / expr 8–12/15 members reach epoch 80, but
   at an lr ≤ 1.6e-5, where more epochs change little.
 
@@ -144,6 +146,9 @@ Tooling:
 - `compare_runs.py` — summary / per fold / paired per-drug Wilcoxon / ECDFs, plus `spec`
   **stratified** by time and by time × dose, with mid-rank percentiles (unbiased for small
   strata; the plain formula averages 0.58 at n = 5 — report 01, section 5.4).
+- `check_metabolic_coverage.py` — per-perturbation metabolic coverage (expression DE in
+  Human-GEM; MetChange's own significant features and significant features among the top-n
+  read) and the run's spec split by it, vs its control (report 03, 10.2–10.3).
 - `check_dose_time_leak.py` — `spec` of the model vs `spec` of a dose/time-only predictor, and
   the score variance explained by dose/time groups.
 - `submit_with_shuffle_control.sh` — submits a variant's real run, its shuffled control and a
@@ -158,13 +163,15 @@ Tooling:
   `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh`,
   `submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh`,
   `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` (done, report 03),
-  `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh` (done, report 03 section 10).
+  `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh` (done, report 03 section 10),
+  `submit_train_w_shuff_expr_combined_noGlobals_lr1e-3_min15.sh` (6.1).
 - Variants registered in the submit script: `tf`, `expr`, `mc`, `mc_matched`,
   `mc_matched_auprc`, `mc_matched_noGlobals`, `mc_noGlobals`, `mc_noGlobals_lr1e-3`,
   `mc_matched_noGlobals_lr1e-3`, `mc_noGlobals_lr1e-3_ep100`, `mc_noGlobals_lr1e-3_seed1`,
   `tf_noGlobals_lr1e-3`, `expr_noGlobals_lr1e-3`, `mc_noGlobals_lr1e-3_min15`,
   `tf_noGlobals_lr1e-3_min15`, `expr_noGlobals_lr1e-3_min15`, `mc_noGlobals_lr1e-3_min15_pat25`,
-  `{mc,tf,expr}_noGlobals_lr1e-3_plateau`, `{mc,tf,expr}_noGlobals_lr1e-3_min15_seed1`.
+  `{mc,tf,expr}_noGlobals_lr1e-3_plateau`, `{mc,tf,expr}_noGlobals_lr1e-3_min15_seed1`,
+  `expr_combined_noGlobals_lr1e-3_min15`.
   `mc_noStatic` is not registered
   (launch both by hand).
 - The `_lr1e-3` launchers are **array jobs** (`--array=0-4`; 4 h per task, 6 h for `_ep100` and
@@ -197,12 +204,15 @@ shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
 
 ## 6. Next steps, in priority order
 
-**6.1 Locate the MetChange-vs-expr gap** (report 03, 10.4). Second seed: done, the gap is real.
+**6.1 Locate the MetChange-vs-expr gap** (report 03, 10.5). Second seed: done, the gap is real.
 1. Full-data coverage check on the cluster (no GPU): `check_metabolic_coverage.py` with the
-   scratch expression labels (command in `scripts/predict_targets/README.md`); add MetChange's
-   own count of significant features per perturbation as a second coverage measure.
-2. Network vs signature (GPU): expr signatures on the `combined` network, with control. If expr
-   keeps its 8–10 points there, the network is not the cause.
+   labels the runs used and both coverage sources (expression DE and MetChange's own `n_sig_mc`
+   / `n_sig_topn`; command in `scripts/predict_targets/README.md`). If MetChange's gap grows
+   with `n_sig_topn` and matches expr on well-covered perturbations, the deficit is mostly
+   coverage; then an activity filter for MetChange from its own output.
+2. Network vs signature (GPU) — launchers ready: `bash submit_train_w_shuff_expr_combined_noGlobals_lr1e-3_min15.sh`
+   (expr signatures on `networks/combined`, seed 0, with control). If expr keeps its ~8 points
+   there, the network is not the cause.
 3. Representation (code + GPU): continuous MetChange values or a larger `--top-n` instead of the
    top-100 signs (`--signature-weights`, section 7).
 
@@ -257,9 +267,12 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 
 ## 8. Uncommitted
 
-- Report 03, section 10 (seed 1 of the current recipe, paired signature comparison, coverage
-  check).
+- Report 03, section 10 (seed 1, paired signature comparison, coverage check from expression
+  and from MetChange's own output, expr-on-combined launchers).
 - `scripts/predict_targets/check_metabolic_coverage.py` (new) and its README section.
+- Launchers `launch_predict_targets_A549_expr_combined_noGlobals_lr1e-3_min15{,_shuff}.sh`,
+  wrapper `submit_train_w_shuff_expr_combined_noGlobals_lr1e-3_min15.sh`; variant registered in
+  `submit_with_shuffle_control.sh`; README variants table.
 - This `STATUS.md` update.
 
 ## 9. Working notes

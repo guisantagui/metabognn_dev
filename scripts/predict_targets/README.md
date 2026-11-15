@@ -29,16 +29,25 @@ bash ≥ 4 (`declare -A`), which the cluster has and macOS does not.
 
 ### Metabolic coverage check
 
-`check_metabolic_coverage.py` counts, per perturbation, DE genes (q < 0.05) overall and among the Human-GEM genes,
-and splits each run's leak-free `spec_prob_timedose_heldout` and its shuffled control's by that coverage (drugs as
-units, paired gap, Wilcoxon). It reuses `compare_runs.py`'s own spec code. Run it with the expression labels the
-runs used (the scratch copy on the cluster):
+`check_metabolic_coverage.py` measures, per perturbation, how much metabolic change it has, and splits each run's
+leak-free `spec_prob_timedose_heldout` and its shuffled control's by it (drugs as units, paired gap, Wilcoxon). It
+reuses `compare_runs.py`'s own spec code. Coverage variables: from the expression labels, DE genes (q < 0.05) overall
+(`n_de`), among the Human-GEM genes (`n_de_gem`) and their share (`frac_gem`); from MetChange's own labels, significant
+features (`n_sig_mc`) and how many of the top-100 features the model reads are significant (`n_sig_topn`). Run it
+with the labels the runs used (on the cluster; the laptop copies are an old partial set):
 
 ```
-python check_metabolic_coverage.py --qvals <scratch>/results/labels/A549/expr/qvals.csv \
+python check_metabolic_coverage.py \
+    --qvals <scratch>/results/labels/A549/expr/qvals.csv \
     --gem-genes <project>/data/GEMs/Human-GEM/model/genes.tsv \
+    --mc-qvals <project>/results/labels/A549/metchange/rank/qvals.csv \
+    --mc-log2fc <project>/results/labels/A549/metchange/rank/log2FC.csv \
+    --mc-nodes <project>/data/networks/combined/nodes.tsv \
     --run mc=<results>/metchange_rank_noGlobals_lr1e-3_min15 --run expr=<results>/expr_noGlobals_lr1e-3_min15
 ```
+
+Either source can be given alone. Output: `coverage.tsv`, `spec_by_coverage.tsv`, `spearman.tsv` in `--out-dir`
+(default `<results>/metabolic_coverage`).
 
 ### Variants
 
@@ -66,6 +75,7 @@ python check_metabolic_coverage.py --qvals <scratch>/results/labels/A549/expr/qv
 | `tf_noGlobals_lr1e-3_plateau` | as `tf_noGlobals_lr1e-3` with the same plateau settings | `tf_active200_noGlobals_lr1e-3_plateau` | `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` |
 | `expr_noGlobals_lr1e-3_plateau` | as `expr_noGlobals_lr1e-3` with the same plateau settings | `expr_noGlobals_lr1e-3_plateau` | `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` |
 | `{mc,expr,tf}_noGlobals_lr1e-3_min15_seed1` | the current recipe (`_min15`) with `--seed 1` (new folds, init and permutation: a full replicate); array job, 8 h per task | `{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_min15_seed1` | `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh` |
+| `expr_combined_noGlobals_lr1e-3_min15` | as `expr_noGlobals_lr1e-3_min15` but on `networks/combined` (the MetChange network); array job, 8 h per task | `expr_combined_noGlobals_lr1e-3_min15` | `submit_train_w_shuff_expr_combined_noGlobals_lr1e-3_min15.sh` |
 
 **Learning-rate schedule** (defaults reproduce every earlier run): `--lr-schedule step` multiplies the lr by
 `--lr-gamma` (0.5) every `--lr-step-size` (10) epochs (`StepLR`); `--lr-schedule plateau` multiplies it by `--lr-gamma`

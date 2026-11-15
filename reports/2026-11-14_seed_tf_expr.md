@@ -338,31 +338,63 @@ Coverage on the subset (607 active perturbations):
   Human-GEM is ~14–15% for almost all of them, the share expected if DE genes were spread at random (13.9%); only 9 of
   607 have fewer than 20 DE genes in the GEM. Metabolic DE count and total DE count are essentially the same variable
   (Spearman 0.99).
-- **So there is no subset of active perturbations without metabolic change** to drop, in this subset. MetChange's
-  inputs are not starved relative to expr's; coverage here is just signature strength.
+- **So, in DE terms, there is no subset of active perturbations without metabolic change**: the GEM's genes change
+  in proportion, and DE coverage is just signature strength. MetChange's own output tells a different story (10.3).
 - **Split by coverage**, both MetChange and expr gain more on stronger perturbations, noisily (per-bin p mostly >
   0.05 with ~100–160 drugs per bin); the per-perturbation Spearman between coverage and gain is 0.03–0.09 for both.
   MetChange does not fail specifically on low-coverage perturbations.
 
 **Caveat on the measure itself.** Most genes are CycleGAN-inferred from the 978 landmarks, and imputation spreads a
 change smoothly over genes, which by itself pushes the DE share towards the background 14%. DE counts therefore
-cannot show whether metabolism specifically responds. A sharper measure is MetChange's own output: the number of
-reactions / metabolites with a significant MetChange score per perturbation (`labels/<cell>/metchange/rank/qvals.csv`;
-the local copy is the same partial set).
+cannot show whether metabolism specifically responds. A sharper measure is MetChange's own output (10.3).
 
-### 10.3 What this means
+### 10.3 Coverage measured on MetChange's own output
 
-- The coverage hypothesis, in the form "active perturbations with few metabolic DE genes", is **not supported** on the
-  subset available: every active perturbation changes GEM genes in proportion. Pending the full-data run.
-- The MetChange deficit therefore points at the transformation or its use rather than at which perturbations are
-  scored: what MetChange computes from the GEM's genes, how it is represented (top-100 reactions, `np.sign`), and the
-  network it propagates on (`combined` vs `gene`).
+DE counts only say whether the GEM's genes change. MetChange then propagates those changes through the GEM, so whether
+a perturbation changes *metabolite scores* can differ. `check_metabolic_coverage.py` also counts, from the MetChange
+labels (`metchange/rank/qvals.csv`, `log2FC.csv`; 4,086 features, 3,747 mapping to metabolite nodes of `combined`):
 
-### 10.4 Next steps
+- `n_sig_mc`: MetChange features with q < 0.05;
+- `n_sig_topn`: of the 100 features with the largest |log2FC|, the ones the model reads under `--ignore-qvalue
+  --top-n 100`, how many have q < 0.05.
 
-1. Run `check_metabolic_coverage.py` on the cluster with the full labels (all 3,970 perturbations); add a second
-   coverage measure from MetChange's own significant features.
+Same local subset as 10.2 (607 active perturbations; the local MetChange labels are the same old partial set):
+
+| | 5% | 25% | median | 75% | 95% |
+|---|---|---|---|---|---|
+| `n_sig_mc` (of 3,747) | 0 | 2 | 315 | 2,049 | 3,216 |
+| `n_sig_topn` (of the 100 read) | 0 | 0 | 17 | 100 | 100 |
+
+Spearman with the DE count: 0.64 (`n_sig_mc`), 0.60 (`n_sig_topn`), against 0.99 for the GEM DE count.
+
+- **Here the coverage problem is real.** At least a quarter of the active perturbations have no significant feature
+  among the 100 MetChange features the model reads, and half have fewer than 17. The activity filter (≥ 200 DE genes)
+  lets them in; for them the MetChange signature is the 100 largest values of noise. Expr and TF signatures of the
+  same perturbations rest on hundreds to thousands of DE genes.
+- **What it does to the gap is not clear on this subset.** Split by `n_sig_topn` (all 100 significant vs fewer), the
+  MetChange gap is larger on fully significant perturbations in seed 0 (9.4 vs 1.5 points, p = 0.026 vs 0.92) but
+  not in seed 1 (−3.9 vs 4.3); ~115–250 drugs per bin. Expr gains more on the same perturbations in both seeds (12.9
+  vs 1.9; 9.1 vs 3.4): perturbations with a strong MetChange response are strong perturbations in general.
+- Per perturbation, the Spearman between MetChange's gain over control and `n_sig_topn` is 0.05 / −0.02 (seeds 0 / 1);
+  for expr 0.10 / 0.09.
+
+### 10.4 What this means
+
+- **Coverage in the DE sense is not the issue** (10.2): every active perturbation changes GEM genes in proportion.
+- **Coverage in MetChange's own output is** (10.3): many perturbations active by expression have no significant
+  MetChange response, so MetChange is evaluated on (and trained with) perturbations it has nothing to read. That
+  dilutes its average by construction; whether it explains the whole deficit against expr needs the full data.
+- The remaining candidates stay open: the network (`combined` vs `gene`) and the representation (top-100 signs).
+
+### 10.5 Next steps
+
+1. Run `check_metabolic_coverage.py` on the cluster with the full labels (all 3,970 perturbations), both coverage
+   sources (command in `scripts/predict_targets/README.md`). If MetChange's gap grows with `n_sig_topn` and matches
+   expr on well-covered perturbations, the deficit is mostly coverage. Then consider an activity filter for MetChange
+   from its own output (e.g. a minimum `n_sig_topn`), evaluated on the same perturbations for expr.
 2. Separate the network from the signature: expr signatures on the `combined` network (with control). If expr keeps
-   its 8–10 points there, the network is not the cause.
+   its 8–10 points there, the network is not the cause. Launchers:
+   `launch_predict_targets_A549_expr_combined_noGlobals_lr1e-3_min15{,_shuff}.sh`, wrapper
+   `submit_train_w_shuff_expr_combined_noGlobals_lr1e-3_min15.sh` (seed 0; written 2026-11-15).
 3. Representation: continuous MetChange values or a larger `--top-n` instead of the top-100 signs
    (`--signature-weights`, `STATUS.md` section 7).
