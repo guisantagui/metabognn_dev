@@ -48,6 +48,9 @@ python check_metabolic_coverage.py \
     --run mc=<results>/metchange_rank_noGlobals_lr1e-3_min15 --run expr=<results>/expr_noGlobals_lr1e-3_min15
 ```
 
+For A549 with the `_min15` runs of both seeds: `sbatch launch_check_metabolic_coverage_A549.sh [runs_dir] [out_dir]`
+(defaults: home results dir, `<runs_dir>/metabolic_coverage_full`; runs without a `_shuff` pair are skipped).
+
 Either source can be given alone. Output: `coverage.tsv`, `spec_by_coverage.tsv`, `spearman.tsv` in `--out-dir`
 (default `<results>/metabolic_coverage`).
 
