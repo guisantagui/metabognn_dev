@@ -250,6 +250,12 @@ Training (real runs; 15 FNN members each):
   carries. Candidate causes, none tested: the representation (`--ignore-qvalue --top-n 100`, then `np.sign`: 100
   discretised reactions), the network (MetChange uses `networks/combined`, expr `networks/gene`), and what MetChange
   computes (inconsistency over the GEM's GPR genes, many of them CycleGAN-inferred, `STATUS.md` 6.3).
+  A fourth, raised on 2026-11-15: **feature coverage and the activity filter.** MetChange only sees genes in
+  Human-GEM, while perturbations are called active from expression (`--min-de-genes 200` on the transcriptome-wide
+  limma counts). A perturbation can pass that filter with few or no DE genes in the GEM, so its MetChange signature is
+  near noise; expr and TF read the full signature and do not have this problem. Test: count DE genes among the GEM's
+  GPR genes per perturbation, and check whether MetChange's per-drug gap grows when the evaluation (or training) is
+  restricted to metabolically active perturbations.
 - **Caveats:** one seed for every run in this section (seed spread ~1.3 points, section 3). The MetChange `_min15`
   control is below 0.5 in folds 0–1 (0.453, 0.468 per perturbation), not seen in the base control; per drug the
   control is 0.504. Worth a look if it recurs.
@@ -257,8 +263,10 @@ Training (real runs; 15 FNN members each):
 ### 9.3 Next steps
 
 1. **Second seed of the new recipe** for MetChange, expr and TF, each with its control, to confirm the
-   MetChange-vs-expr gap is larger than the seed spread.
-2. **Locate where MetChange loses information** (no GPU first): the representation (top-n, signs vs continuous
+   MetChange-vs-expr gap is larger than the seed spread. Launchers: `launch_predict_targets_A549_{mc,expr,tf}_noGlobals_lr1e-3_min15_seed1{,_shuff}.sh`,
+   wrapper `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh` (written 2026-11-15).
+2. **Locate where MetChange loses information** (no GPU first): metabolic coverage of the active perturbations
+   (DE genes among the GEM's GPR genes, see 9.2), the representation (top-n, signs vs continuous
    values: the `--signature-weights` option proposed in `STATUS.md` section 7), expr on the `combined` network, and the
    landmark vs inferred share of the GPR genes (`STATUS.md` 6.3).
 3. The prototype path (`STATUS.md` 6.2) with expr as a second reference alongside MetChange.

@@ -151,13 +151,15 @@ Tooling:
   `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3.sh` (done, report 03),
   `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh`,
   `submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh`,
-  `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` (6.1).
+  `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` (done, report 03),
+  `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh` (6.1).
 - Variants registered in the submit script: `tf`, `expr`, `mc`, `mc_matched`,
   `mc_matched_auprc`, `mc_matched_noGlobals`, `mc_noGlobals`, `mc_noGlobals_lr1e-3`,
   `mc_matched_noGlobals_lr1e-3`, `mc_noGlobals_lr1e-3_ep100`, `mc_noGlobals_lr1e-3_seed1`,
   `tf_noGlobals_lr1e-3`, `expr_noGlobals_lr1e-3`, `mc_noGlobals_lr1e-3_min15`,
   `tf_noGlobals_lr1e-3_min15`, `expr_noGlobals_lr1e-3_min15`, `mc_noGlobals_lr1e-3_min15_pat25`,
-  `{mc,tf,expr}_noGlobals_lr1e-3_plateau`. `mc_noStatic` is not registered
+  `{mc,tf,expr}_noGlobals_lr1e-3_plateau`, `{mc,tf,expr}_noGlobals_lr1e-3_min15_seed1`.
+  `mc_noStatic` is not registered
   (launch both by hand).
 - The `_lr1e-3` launchers are **array jobs** (`--array=0-4`; 4 h per task, 6 h for `_ep100` and
   the `tf` / `expr` ones, 8 h for `_min15`, `_min15_pat25`, `_plateau`). `sbatch --test-only` prints the estimated start time without
@@ -190,9 +192,14 @@ shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
 
 **6.1 Confirm and locate the MetChange-vs-expr gap** (report 03, 9.3):
 1. Second seed of the current recipe (`_min15`) for MetChange, expr and TF, each with its
-   control (GPU; launchers to write: `--seed 1` on the `_min15` launchers), to check the
-   MetChange-vs-expr difference (3.6 points) is larger than the seed spread.
-2. Where MetChange loses information (no GPU first): the representation (top-n, signs vs
+   control — launchers ready, submit with `bash submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh`
+   (`*_noGlobals_lr1e-3_min15_seed1{,_shuff}`, 8 h per fold). Checks that the MetChange-vs-expr
+   difference (3.6 points) is larger than the seed spread.
+2. Where MetChange loses information (no GPU first): **metabolic coverage of the active
+   perturbations** — activity is called from transcriptome-wide DE counts (`--min-de-genes 200`),
+   but MetChange only sees Human-GEM genes, so some active perturbations may barely touch
+   metabolism; count DE genes among the GPR genes per perturbation and check whether
+   MetChange's gap grows on metabolically active ones. Then the representation (top-n, signs vs
    continuous values: `--signature-weights`, section 7), expr on the `combined` network, and the
    landmark vs inferred share of the GPR genes (6.3.2).
 
@@ -245,7 +252,11 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 
 ## 8. Uncommitted
 
-- Report 03, section 9 (results of the `_min15`, `_min15_pat25` and `_plateau` runs).
+- Report 03, section 9 (results of the `_min15`, `_min15_pat25` and `_plateau` runs; coverage
+  hypothesis; seed-1 launchers).
+- Launchers `launch_predict_targets_A549_{mc,expr,tf}_noGlobals_lr1e-3_min15_seed1{,_shuff}.sh`,
+  wrapper `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh`; three variants registered in
+  `submit_with_shuffle_control.sh`; `README.md` variants table.
 - This `STATUS.md` update.
 
 ## 9. Working notes

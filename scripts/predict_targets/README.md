@@ -52,6 +52,7 @@ bash ≥ 4 (`declare -A`), which the cluster has and macOS does not.
 | `mc_noGlobals_lr1e-3_plateau` | as `mc_noGlobals_lr1e-3` but `--lr-schedule plateau --plateau-patience 3 --patience 20 --min-epochs 15 --ffn-epochs 80`; array job, 8 h per task | `metchange_rank_noGlobals_lr1e-3_plateau` | `submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh` |
 | `tf_noGlobals_lr1e-3_plateau` | as `tf_noGlobals_lr1e-3` with the same plateau settings | `tf_active200_noGlobals_lr1e-3_plateau` | `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` |
 | `expr_noGlobals_lr1e-3_plateau` | as `expr_noGlobals_lr1e-3` with the same plateau settings | `expr_noGlobals_lr1e-3_plateau` | `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` |
+| `{mc,expr,tf}_noGlobals_lr1e-3_min15_seed1` | the current recipe (`_min15`) with `--seed 1` (new folds, init and permutation: a full replicate); array job, 8 h per task | `{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_min15_seed1` | `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh` |
 
 **Learning-rate schedule** (defaults reproduce every earlier run): `--lr-schedule step` multiplies the lr by
 `--lr-gamma` (0.5) every `--lr-step-size` (10) epochs (`StepLR`); `--lr-schedule plateau` multiplies it by `--lr-gamma`
