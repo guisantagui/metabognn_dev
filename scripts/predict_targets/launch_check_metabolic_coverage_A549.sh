@@ -18,7 +18,7 @@ project_dir="/home/users/gsantamaria/projects/metabognn_dev"
 project_dir_scratch="/scratch/users/gsantamaria/test_large_files/metabognn_dev"
 cell="A549"
 
-runs_dir="${1:-${project_dir}/results/predict_targets/${cell}}"
+runs_dir="${1:-${project_dir_scratch}/results/predict_targets/${cell}}"
 out_dir="${2:-${runs_dir}/metabolic_coverage_full}"
 
 # labels as the runs read them: expr always from scratch; MetChange runs up to d11744b from home (q-values are
