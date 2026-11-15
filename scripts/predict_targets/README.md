@@ -27,6 +27,19 @@ Every variant name is checked before anything is submitted, so a typo submits no
 real run is already queued, running or finished: resubmitting its launcher would overwrite its out_dir. The script needs
 bash ≥ 4 (`declare -A`), which the cluster has and macOS does not.
 
+### Metabolic coverage check
+
+`check_metabolic_coverage.py` counts, per perturbation, DE genes (q < 0.05) overall and among the Human-GEM genes,
+and splits each run's leak-free `spec_prob_timedose_heldout` and its shuffled control's by that coverage (drugs as
+units, paired gap, Wilcoxon). It reuses `compare_runs.py`'s own spec code. Run it with the expression labels the
+runs used (the scratch copy on the cluster):
+
+```
+python check_metabolic_coverage.py --qvals <scratch>/results/labels/A549/expr/qvals.csv \
+    --gem-genes <project>/data/GEMs/Human-GEM/model/genes.tsv \
+    --run mc=<results>/metchange_rank_noGlobals_lr1e-3_min15 --run expr=<results>/expr_noGlobals_lr1e-3_min15
+```
+
 ### Variants
 
 | variant | what changes (vs `mc` unless stated) | out_dir (real; control adds `_shuff`) | wrapper |

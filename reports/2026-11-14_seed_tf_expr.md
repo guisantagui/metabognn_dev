@@ -270,3 +270,99 @@ Training (real runs; 15 FNN members each):
    values: the `--signature-weights` option proposed in `STATUS.md` section 7), expr on the `combined` network, and the
    landmark vs inferred share of the GPR genes (`STATUS.md` 6.3).
 3. The prototype path (`STATUS.md` 6.2) with expr as a second reference alongside MetChange.
+
+## 10. Second seed of the current recipe, and the metabolic-coverage check (2026-11-15)
+
+### 10.1 Seed 1 of `_min15`
+
+Runs `{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_min15_seed1{,_shuff}` (`--seed 1`: new folds,
+initialisation and permutation). Per-drug gap over the run's own control (points), Wilcoxon p, folds where real beats
+control:
+
+| metric | MetChange s0 | MetChange s1 | expr s0 | expr s1 | TF s0 | TF s1 |
+|---|---|---|---|---|---|---|
+| `spec_prob_timedose` | 4.2, 1e-4, 5/5 | 2.7, 7e-3, 5/5 | 7.8, 2e-11, 5/5 | 10.4, 1e-14, 5/5 | 9.0, 8e-15, 5/5 | 9.3, 7e-15, 5/5 |
+| `rank_probc` | 6.4, 7e-9 | 4.4, 1e-3 | 8.0, 4e-16 | 11.5, 7e-18 | 10.4, 9e-20 | 10.3, 8e-20 |
+| `rank_prob` | 1.3, 1e-3, 4/5 | 0.7, 0.10, 3/5 | 3.3, 5e-15, 5/5 | 3.6, 8e-15, 5/5 | 3.3, 2e-14, 5/5 | 3.3, 9e-15, 4/5 |
+| `rank_prob` per drug, real / control | 0.396 / 0.407 | 0.400 / 0.409 | 0.381 / 0.437 | 0.390 / 0.441 | 0.397 / 0.445 | 0.383 / 0.452 |
+
+Training is healthy in every run (no member keeps an epoch < 15; median kept epoch MetChange ~41, expr ~71, TF ~76).
+The MetChange seed-0 control's low folds 0–1 (section 9.2) do not recur in seed 1 (0.48–0.50 in all folds).
+
+**Direct comparison between signatures.** Each drug is held out once per run, so the per-drug gaps (control − real,
+`spec_prob_timedose`) of two signatures can be paired by drug:
+
+| comparison | seed | median gap, A / B | median paired difference | drugs where A > B | p |
+|---|---|---|---|---|---|
+| expr vs MetChange | 0 | 7.8 / 4.2 | 4.8 | 54% | 0.023 |
+| expr vs MetChange | 1 | 10.4 / 2.7 | 6.7 | 55% | 6.9e-5 |
+| TF vs MetChange | 0 | 9.0 / 4.3 | 5.0 | 54% | 8.6e-4 |
+| TF vs MetChange | 1 | 9.3 / 2.7 | 6.9 | 56% | 6.7e-5 |
+| TF vs expr | 0 | 9.0 / 7.9 | 1.7 | 51% | 0.36 |
+| TF vs expr | 1 | 9.3 / 10.5 | −0.4 | 50% | 0.68 |
+
+(TF scores 1,349 drugs, MetChange and expr 1,358, so TF comparisons use the 1,349 in common.)
+
+Reading:
+
+1. **The ordering is robust across seeds: expr ≈ TF > MetChange.** MetChange reads the signature (gap 2.7–4.2, 5/5
+   folds in both seeds), but significantly less than expr and TF in both seeds, drug by drug. Expr and TF are
+   indistinguishable.
+2. **The seed spread is larger than estimated in section 3** for expr (7.8 vs 10.4) and MetChange (4.2 vs 2.7), but
+   the MetChange deficit (4.8–6.9 points paired) exceeds it in both seeds.
+3. **Plain ranking:** with expr and TF the signature moves per-drug `rank_prob` by 3.3–3.6 points in both seeds; with
+   MetChange by 0.7–1.3 (not significant in seed 1). MetChange queries remain mostly the per-protein prior.
+
+### 10.2 Metabolic coverage of the active perturbations
+
+Hypothesis (9.2): perturbations are called active from transcriptome-wide DE counts, but MetChange only sees Human-GEM
+genes, so some active perturbations may barely touch metabolism and dilute MetChange's average.
+`scripts/predict_targets/check_metabolic_coverage.py` counts DE genes (q < 0.05) overall and among the 2,848
+Human-GEM genes (2,685 present in the expression labels, 13.9% of all genes) per perturbation, and splits each run's
+`spec_prob_timedose` and its control's by that coverage.
+
+**Data caveat.** The expression labels on the laptop (`results/labels/A549/expr/`, 2 Nov) are an older, partial set:
+they contain 699 of the 3,970 scored perturbations (594–600 per run once those without a time × dose stratum
+are dropped; 607 across runs). The runs read the full labels from scratch on the cluster. Results below are on that subset only; the
+full check is one command on the cluster (`scripts/predict_targets/README.md`, "Metabolic coverage check").
+
+Coverage on the subset (607 active perturbations):
+
+| | 1% | 5% | 25% | median | 75% | 95% |
+|---|---|---|---|---|---|---|
+| DE genes | 196 | 240 | 646 | 2,242 | 6,146 | 12,339 |
+| DE genes in Human-GEM | 19 | 30 | 97 | 322 | 891 | 1,844 |
+| share in Human-GEM | 0.077 | 0.096 | 0.135 | 0.147 | 0.157 | 0.190 |
+
+- **Every active perturbation changes metabolic genes in proportion to its overall change.** The share of DE genes in
+  Human-GEM is ~14–15% for almost all of them, the share expected if DE genes were spread at random (13.9%); only 9 of
+  607 have fewer than 20 DE genes in the GEM. Metabolic DE count and total DE count are essentially the same variable
+  (Spearman 0.99).
+- **So there is no subset of active perturbations without metabolic change** to drop, in this subset. MetChange's
+  inputs are not starved relative to expr's; coverage here is just signature strength.
+- **Split by coverage**, both MetChange and expr gain more on stronger perturbations, noisily (per-bin p mostly >
+  0.05 with ~100–160 drugs per bin); the per-perturbation Spearman between coverage and gain is 0.03–0.09 for both.
+  MetChange does not fail specifically on low-coverage perturbations.
+
+**Caveat on the measure itself.** Most genes are CycleGAN-inferred from the 978 landmarks, and imputation spreads a
+change smoothly over genes, which by itself pushes the DE share towards the background 14%. DE counts therefore
+cannot show whether metabolism specifically responds. A sharper measure is MetChange's own output: the number of
+reactions / metabolites with a significant MetChange score per perturbation (`labels/<cell>/metchange/rank/qvals.csv`;
+the local copy is the same partial set).
+
+### 10.3 What this means
+
+- The coverage hypothesis, in the form "active perturbations with few metabolic DE genes", is **not supported** on the
+  subset available: every active perturbation changes GEM genes in proportion. Pending the full-data run.
+- The MetChange deficit therefore points at the transformation or its use rather than at which perturbations are
+  scored: what MetChange computes from the GEM's genes, how it is represented (top-100 reactions, `np.sign`), and the
+  network it propagates on (`combined` vs `gene`).
+
+### 10.4 Next steps
+
+1. Run `check_metabolic_coverage.py` on the cluster with the full labels (all 3,970 perturbations); add a second
+   coverage measure from MetChange's own significant features.
+2. Separate the network from the signature: expr signatures on the `combined` network (with control). If expr keeps
+   its 8–10 points there, the network is not the cause.
+3. Representation: continuous MetChange values or a larger `--top-n` instead of the top-100 signs
+   (`--signature-weights`, `STATUS.md` section 7).

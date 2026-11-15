@@ -1,11 +1,11 @@
 # Project state — 2026-11-15
 
 Handoff note for continuing in a new session. Everything described here is committed up to
-HEAD `7f25e9a`, except the files listed in section 8.
+HEAD `9c1c70a`, except the files listed in section 8.
 
 **Read first:** `reports/2026-11-14_seed_tf_expr.md` (report 03 — second seed, MetChange vs expr
-vs TF, early stopping and lr schedule; section 9 has the current recipe and the main result),
-then `reports/2026-11-14_lr_noglobals_matched.md` (report 02 —
+vs TF, early stopping and lr schedule; sections 9–10 have the current recipe, the two-seed
+result and the metabolic-coverage check), then `reports/2026-11-14_lr_noglobals_matched.md` (report 02 —
 the current recipe), then `reports/2026-11-13_A549_matched_negatives.md` (report 01 — metric
 definitions, the dose/time leak, how to read a comparison). `scripts/predict_targets/README.md`
 documents every launcher and how to submit runs with their controls.
@@ -75,14 +75,16 @@ Two problems were found and are now understood:
 median of the per-drug real − control differences, in percentile points; it is what the
 Wilcoxon p tests. Report 02's "5.6 points" was a difference of medians (paired: 4.2).
 
-Per-drug gap (points), p — real vs own control, seed 0, current recipe (report 03, 9):
+Per-drug gap (points), p — real vs own control, current recipe, seeds 0 / 1 (report 03, 9–10):
 
 | metric | MetChange | expr | TF (positive control) |
 |---|---|---|---|
-| `spec_prob_timedose` (leak-free) | 4.2, 1e-4 | 7.8, 2e-11 | 9.0, 8e-15 |
-| `rank_probc` | 6.4, 7e-9 | 8.0, 4e-16 | 10.4, 9e-20 |
-| `rank_prob` | 1.3, 1e-3 | 3.3, 5e-15 | 3.3, 2e-14 |
-| `rank_prob` per drug, real / control | 0.396 / 0.407 | 0.381 / 0.437 | 0.397 / 0.445 |
+| `spec_prob_timedose` (leak-free) | 4.2 / 2.7 (1e-4 / 7e-3) | 7.8 / 10.4 (2e-11 / 1e-14) | 9.0 / 9.3 (8e-15 / 7e-15) |
+| `rank_probc` | 6.4 / 4.4 | 8.0 / 11.5 | 10.4 / 10.3 |
+| `rank_prob` | 1.3 / 0.7 (1e-3 / 0.10) | 3.3 / 3.6 | 3.3 / 3.3 |
+
+Paired by drug, expr and TF each beat MetChange in both seeds (expr: p = 0.023 / 7e-5; TF:
+9e-4 / 7e-5); expr vs TF is not significant (p = 0.36 / 0.68).
 
 - **The warm-up (`--min-epochs 15`) fixed the collapse**: no FNN keeps epoch 1–2 any more
   (before: 7–8/15 for TF and expr). Expr was training-limited and now matches the positive
@@ -95,8 +97,12 @@ Per-drug gap (points), p — real vs own control, seed 0, current recipe (report
   is computed from** (4.2 vs 7.8 points), and barely moves plain ranking (1.3 vs 3.3). Candidate
   causes, untested: representation (top-100 reactions, `np.sign`), network (`combined` vs
   `gene`), CycleGAN-inferred GPR genes (6.3).
-- Seed spread for MetChange is ~1.3 points of per-drug gap (seeds 0 and 1 of the older recipe:
-  4.2 vs 2.9); every current-recipe number is one seed.
+- **Robust across two seeds: expr ≈ TF > MetChange.** Seed spread is 1.5 points for MetChange
+  and 2.6 for expr; MetChange's paired deficit (4.8–6.9 points) is larger.
+- **Coverage hypothesis not supported so far** (report 03, 10.2): every active perturbation has
+  ~14–15% of its DE genes in Human-GEM (the background share); metabolic and total DE counts are
+  the same variable (Spearman 0.99). Only on 699 perturbations: the laptop's expression labels
+  are an old partial set; the full check runs on the cluster.
 - The epoch cap does not bind for MetChange; for TF / expr 8–12/15 members reach epoch 80, but
   at an lr ≤ 1.6e-5, where more epochs change little.
 
@@ -152,7 +158,7 @@ Tooling:
   `submit_train_w_shuff_noGlobals_lr1e-3_min15.sh`,
   `submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh`,
   `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` (done, report 03),
-  `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh` (6.1).
+  `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh` (done, report 03 section 10).
 - Variants registered in the submit script: `tf`, `expr`, `mc`, `mc_matched`,
   `mc_matched_auprc`, `mc_matched_noGlobals`, `mc_noGlobals`, `mc_noGlobals_lr1e-3`,
   `mc_matched_noGlobals_lr1e-3`, `mc_noGlobals_lr1e-3_ep100`, `mc_noGlobals_lr1e-3_seed1`,
@@ -183,25 +189,22 @@ yet synced or analysed. It is now of low value: report 02 supersedes it.
 Analysed in report 03, section 9 (seed 0, same splits as `*_noGlobals_lr1e-3`):
 `metchange_rank_noGlobals_lr1e-3_{min15,min15_pat25,plateau}{,_shuff}`,
 `expr_noGlobals_lr1e-3_{min15,plateau}{,_shuff}`,
-`tf_active200_noGlobals_lr1e-3_{min15,plateau}{,_shuff}`.
+`tf_active200_noGlobals_lr1e-3_{min15,plateau}{,_shuff}`. Report 03, section 10 (seed 1):
+`{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_min15_seed1{,_shuff}`.
 
 Pre-dating the current metrics, cannot be re-checked (no `test_scores_heldout.npz`, no FNN
 shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
 
 ## 6. Next steps, in priority order
 
-**6.1 Confirm and locate the MetChange-vs-expr gap** (report 03, 9.3):
-1. Second seed of the current recipe (`_min15`) for MetChange, expr and TF, each with its
-   control — launchers ready, submit with `bash submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh`
-   (`*_noGlobals_lr1e-3_min15_seed1{,_shuff}`, 8 h per fold). Checks that the MetChange-vs-expr
-   difference (3.6 points) is larger than the seed spread.
-2. Where MetChange loses information (no GPU first): **metabolic coverage of the active
-   perturbations** — activity is called from transcriptome-wide DE counts (`--min-de-genes 200`),
-   but MetChange only sees Human-GEM genes, so some active perturbations may barely touch
-   metabolism; count DE genes among the GPR genes per perturbation and check whether
-   MetChange's gap grows on metabolically active ones. Then the representation (top-n, signs vs
-   continuous values: `--signature-weights`, section 7), expr on the `combined` network, and the
-   landmark vs inferred share of the GPR genes (6.3.2).
+**6.1 Locate the MetChange-vs-expr gap** (report 03, 10.4). Second seed: done, the gap is real.
+1. Full-data coverage check on the cluster (no GPU): `check_metabolic_coverage.py` with the
+   scratch expression labels (command in `scripts/predict_targets/README.md`); add MetChange's
+   own count of significant features per perturbation as a second coverage measure.
+2. Network vs signature (GPU): expr signatures on the `combined` network, with control. If expr
+   keeps its 8–10 points there, the network is not the cause.
+3. Representation (code + GPU): continuous MetChange values or a larger `--top-n` instead of the
+   top-100 signs (`--signature-weights`, section 7).
 
 **6.2 Prototype path** (no GPU; this is what "working prototype" needs):
 1. **Query path** — nothing yet turns a user's metabolic query into a ranked drug list. With
@@ -231,8 +234,10 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
   gap for the tool, not a bug.
 - **MetChange reads the signature about half as well as expr** (report 03, 9.2); see 6.1.
   Early stopping is resolved (`--min-epochs 15`).
-- **MetChange `_min15` control below 0.5 in folds 0–1** (0.453, 0.468 per perturbation on
-  `spec_prob_timedose`; per drug 0.504). Not seen in the base control; check if it recurs.
+- **Laptop expression / MetChange labels are an old partial set** (`results/labels/A549/expr/`
+  and `metchange/rank/`, 2 Nov: 699 of the 3,970 scored perturbations). Analyses needing labels
+  must run on the cluster or after syncing the scratch copy. (The MetChange `_min15` control's
+  low folds 0–1 did not recur in seed 1.)
 - **MetChange similarity-check anomaly, unresolved.** TOP1 / JAK1 / XIAP shared-target pairs are
   anticorrelated (mean r -0.24 / -0.23 / -0.35) and the split matches flip status exactly,
   although ATP1A1 drugs are mixed-flip yet r = +0.92. Checks: confirm `labels_dir`; grep
@@ -252,11 +257,9 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 
 ## 8. Uncommitted
 
-- Report 03, section 9 (results of the `_min15`, `_min15_pat25` and `_plateau` runs; coverage
-  hypothesis; seed-1 launchers).
-- Launchers `launch_predict_targets_A549_{mc,expr,tf}_noGlobals_lr1e-3_min15_seed1{,_shuff}.sh`,
-  wrapper `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh`; three variants registered in
-  `submit_with_shuffle_control.sh`; `README.md` variants table.
+- Report 03, section 10 (seed 1 of the current recipe, paired signature comparison, coverage
+  check).
+- `scripts/predict_targets/check_metabolic_coverage.py` (new) and its README section.
 - This `STATUS.md` update.
 
 ## 9. Working notes
