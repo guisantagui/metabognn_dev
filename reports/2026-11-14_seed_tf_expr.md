@@ -119,7 +119,7 @@ logged but can neither be kept nor stop training; patience counts from N.
 4. The prototype path of `STATUS.md` section 6.2 (query path, signature-similarity baseline, Schuhknecht benchmark) is
    unchanged and does not need the GPU.
 
-## 8. Follow-up runs (launched 2026-11-14/15, results pending)
+## 8. Follow-up runs (launched 2026-11-14/15; results in section 9)
 
 ### 8.1 What the kept epochs say about the schedule
 
@@ -188,3 +188,77 @@ For each run, against its own control: per-drug `median_diff` and p for `spec_pr
 `rank_prob`; folds better; and from `metrics.json`: kept epochs, history length (patience vs cap), and the lr at the
 kept epoch. Compare with `*_noGlobals_lr1e-3` (same seed and splits, so fold-by-fold comparisons are valid within
 seed 0). Any winner still needs a second seed (section 3: the seed spread is ~1.3 points of per-drug gap).
+
+## 9. Results of the follow-up runs (2026-11-15)
+
+All seed 0, same folds as `*_noGlobals_lr1e-3` ("base"). Gap = per-drug `median_diff` in points, positive = real
+better than its own control; p = Wilcoxon per drug; folds = folds where real beats control per drug.
+
+| run | `spec_prob_timedose` gap, p, folds | `rank_probc` gap, p | `rank_prob` gap, p, folds | `rank_prob` per drug, real / control |
+|---|---|---|---|---|
+| MetChange base | 4.2, 4e-5, 5/5 | 6.8, 6e-10 | 1.1, 9e-4, 4/5 | 0.401 / 0.410 |
+| MetChange `_min15` | 4.2, 1e-4, 5/5 | 6.4, 7e-9 | 1.3, 1e-3, 4/5 | 0.396 / 0.407 |
+| MetChange `_min15_pat25` | 3.6, 3e-4, 5/5 | 5.4, 4e-8 | 1.3, 1e-3, 4/5 | 0.392 / 0.411 |
+| MetChange `_plateau` | 3.9, 2e-4, 5/5 | 6.4, 5e-8 | 1.5, 5e-4, 4/5 | 0.396 / 0.410 |
+| expr base | 4.1, 2e-3, 3/5 | 6.4, 4e-6 | 1.1, 0.19, 3/5 | 0.454 / 0.459 |
+| **expr `_min15`** | **7.8, 2e-11, 5/5** | **8.0, 4e-16** | **3.3, 5e-15, 5/5** | **0.381 / 0.437** |
+| expr `_plateau` | 7.4, 7e-12, 5/5 | 8.0, 8e-16 | 3.1, 1e-12, 5/5 | 0.386 / 0.439 |
+| TF base | 6.8, 1e-8, 5/5 | 9.5, 4e-15 | 3.3, 5e-8, 4/5 | 0.405 / 0.443 |
+| TF `_min15` | 9.0, 8e-15, 5/5 | 10.4, 9e-20 | 3.3, 2e-14, 5/5 | 0.397 / 0.445 |
+| TF `_plateau` | 8.7, 5e-12, 5/5 | 9.7, 8e-17 | 3.5, 2e-17, 5/5 | 0.388 / 0.445 |
+
+Training (real runs; 15 FNN members each):
+
+| run | kept epoch ≤ 2 | median kept epoch (range) | members at the cap | lr at kept epoch (median) |
+|---|---|---|---|---|
+| MetChange base | 2 | 21 (1–53) | 1 | — |
+| MetChange `_min15` | 0 | 40 (21–61) | 0 | 1.3e-4 |
+| MetChange `_min15_pat25` | 0 | 47 (21–67) | 5 | 6.3e-5 |
+| MetChange `_plateau` | 0 | 36 (23–55) | 0 | 3.1e-5 |
+| expr base | 8 | 2 (1–58) | 2 | — |
+| expr `_min15` | 0 | 66 (43–80) | 8 | 1.6e-5 |
+| expr `_plateau` | 0 | 62 (43–79) | 10 | 3.9e-6 |
+| TF base | 7 | 12 (1–58) | 4 | — |
+| TF `_min15` | 0 | 76 (21–80) | 12 | 7.8e-6 |
+| TF `_plateau` | 0 | 66 (45–80) | 9 | 1.0e-6 |
+
+### 9.1 Reading
+
+1. **The warm-up fixes the collapse.** No member keeps epoch 1–2 in any `_min15` or `_plateau` run (base: 7–8/15 for
+   TF and expr).
+2. **Expression was training-limited, and now matches the positive control.** Per fold, `spec_prob_timedose` per
+   perturbation goes from 0.484 / 0.500 / 0.328 / 0.452 / 0.309 to 0.295 / 0.319 / 0.316 / 0.308 / 0.301 (controls
+   0.47–0.50). Its per-drug gap (7.8) is close to TF's (9.0), and its per-drug `rank_prob` (0.381) is the best of any
+   run: the signature now moves plain ranking (3.3 points, p = 5e-15, 5/5 folds), as in TF.
+3. **TF gains too** (`spec_prob_timedose` gap 6.8 → 9.0), so the positive control was also underestimated.
+4. **MetChange does not move.** Warm-up, patience 25 and plateau all leave the per-drug gap at 3.6–4.2 points
+   (base 4.2) and `rank_prob` at 1.1–1.5 points. Kept epochs move later (median 21 → 36–47), as intended, but the
+   later epochs only refine what the base run had. **MetChange training is done**; the remaining gap to TF and expr
+   is the signature, not the optimisation.
+5. **Plateau ≈ StepLR with warm-up**, for all three signatures. On the cluster it reduced the lr every ~5–6
+   epochs (e.g. MetChange fold 0: epochs 10, 15, 21, 27, 32, …), i.e. a faster decay than StepLR, down to the 1e-6
+   floor. No reason to prefer it; `_min15` (StepLR) stays the simpler recipe.
+6. **The cap now binds for TF and expr** (8–12 of 15 members at epoch 80), but at an lr of ~1e-5 or less, where
+   further epochs change little. Not worth chasing before other questions.
+
+### 9.2 What this means
+
+- **New reference recipe:** `--no-globals --lr 0.001 --min-epochs 15 --patience 15 --ffn-epochs 80` (StepLR).
+- **The central comparison is now MetChange vs expr:** MetChange is computed from the same expression, yet it reads
+  the signature about half as well (4.2 vs 7.8 points per drug on `spec_prob_timedose`) and barely moves plain ranking
+  (1.3 vs 3.3). Under this setup, the MetChange transformation loses drug-specific information that the expression
+  carries. Candidate causes, none tested: the representation (`--ignore-qvalue --top-n 100`, then `np.sign`: 100
+  discretised reactions), the network (MetChange uses `networks/combined`, expr `networks/gene`), and what MetChange
+  computes (inconsistency over the GEM's GPR genes, many of them CycleGAN-inferred, `STATUS.md` 6.3).
+- **Caveats:** one seed for every run in this section (seed spread ~1.3 points, section 3). The MetChange `_min15`
+  control is below 0.5 in folds 0–1 (0.453, 0.468 per perturbation), not seen in the base control; per drug the
+  control is 0.504. Worth a look if it recurs.
+
+### 9.3 Next steps
+
+1. **Second seed of the new recipe** for MetChange, expr and TF, each with its control, to confirm the
+   MetChange-vs-expr gap is larger than the seed spread.
+2. **Locate where MetChange loses information** (no GPU first): the representation (top-n, signs vs continuous
+   values: the `--signature-weights` option proposed in `STATUS.md` section 7), expr on the `combined` network, and the
+   landmark vs inferred share of the GPR genes (`STATUS.md` 6.3).
+3. The prototype path (`STATUS.md` 6.2) with expr as a second reference alongside MetChange.

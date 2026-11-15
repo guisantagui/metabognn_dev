@@ -1,10 +1,11 @@
-# Project state — 2026-11-14
+# Project state — 2026-11-15
 
 Handoff note for continuing in a new session. Everything described here is committed up to
-HEAD `0bff707`, except the files listed in section 8.
+HEAD `7f25e9a`, except the files listed in section 8.
 
 **Read first:** `reports/2026-11-14_seed_tf_expr.md` (report 03 — second seed, MetChange vs expr
-vs TF, why FNNs keep epoch 1), then `reports/2026-11-14_lr_noglobals_matched.md` (report 02 —
+vs TF, early stopping and lr schedule; section 9 has the current recipe and the main result),
+then `reports/2026-11-14_lr_noglobals_matched.md` (report 02 —
 the current recipe), then `reports/2026-11-13_A549_matched_negatives.md` (report 01 — metric
 definitions, the dose/time leak, how to read a comparison). `scripts/predict_targets/README.md`
 documents every launcher and how to submit runs with their controls.
@@ -67,45 +68,47 @@ Two problems were found and are now understood:
    sections 5.3–5.5). Fixes: `--no-globals`, and the dose/time-stratified `spec` in
    `compare_runs.py`.
 
-**Current best recipe** (report 02): `--no-globals --lr 0.001 --patience 10 --ffn-epochs 60`,
-unmatched, epochs selected on AUPRC. **Training stability was the bottleneck, not the sampling.**
+**Current recipe** (report 03, section 9): `--no-globals --lr 0.001 --min-epochs 15
+--patience 15 --ffn-epochs 80` (StepLR), unmatched, epochs selected on AUPRC. The `_min15` runs.
 
 **Gap convention** (report 03, section 1): per-drug gap = `median_diff` of `paired.tsv`, the
 median of the per-drug real − control differences, in percentile points; it is what the
 Wilcoxon p tests. Report 02's "5.6 points" was a difference of medians (paired: 4.2).
 
-Per-drug gap (points), p — real vs own control (report 03):
+Per-drug gap (points), p — real vs own control, seed 0, current recipe (report 03, 9):
 
-| metric | MetChange seed 0 | MetChange seed 1 | expr | TF (positive control) |
-|---|---|---|---|---|
-| `spec_prob_timedose` (leak-free) | 4.2, 4.5e-5 | 2.9, 0.047 | 4.1, 1.7e-3 | 6.8, 1.2e-8 |
-| `rank_probc` | 6.8, 5.7e-10 | 3.5, 1.5e-3 | 6.4, 4.0e-6 | 9.5, 4.2e-15 |
-| `rank_prob` | 1.1, 9.4e-4 | 0.5, 0.09 | 1.1, 0.19 | 3.3, 5.0e-8 |
-| FNN members keeping epoch ≤ 2 | 2/15 | 1/15 | 8/15 | 7/15 |
+| metric | MetChange | expr | TF (positive control) |
+|---|---|---|---|
+| `spec_prob_timedose` (leak-free) | 4.2, 1e-4 | 7.8, 2e-11 | 9.0, 8e-15 |
+| `rank_probc` | 6.4, 7e-9 | 8.0, 4e-16 | 10.4, 9e-20 |
+| `rank_prob` | 1.3, 1e-3 | 3.3, 5e-15 | 3.3, 2e-14 |
+| `rank_prob` per drug, real / control | 0.396 / 0.407 | 0.381 / 0.437 | 0.397 / 0.445 |
 
-- MetChange reads the signature in both seeds (5/5 folds each), at roughly half to two-thirds
-  of the TF level; the seed-to-seed spread (2.9–4.2) is as large as the differences between
-  signature types.
-- The epoch cap does not bind: cap 100 gives byte-identical scores (training is deterministic;
-  no member reached 60). `StepLR` halves the lr every 10 epochs, so by epoch 60 it is 1/64.
-- **New bottleneck: early stopping.** Validation AUPRC peaks at epoch 1, dips, and recovers
-  after the first lr halvings; patience 10 stops before the recovery. About half of the TF /
-  expr members keep epoch 1–2; expr folds 0–1 collapsed (fold 1 `rank_prob` 0.689) while its
-  folds 2 and 4 are as strong as TF. Fix: `--min-epochs` (section 4), runs in 6.1.
-- **The StepLR schedule, not convergence, decides when MetChange stops** (report 03, 8.1):
-  29/60 MetChange FNNs kept the first epoch after an lr halving (11, 21, 31, ...), 52/60 stopped
-  by patience (patience 10 = step size). `--min-epochs` barely matters for MetChange (3/15
-  seed-0 members kept an epoch < 15). Tests: patience 25, and `ReduceLROnPlateau` (6.1).
+- **The warm-up (`--min-epochs 15`) fixed the collapse**: no FNN keeps epoch 1–2 any more
+  (before: 7–8/15 for TF and expr). Expr was training-limited and now matches the positive
+  control, all five folds at 0.30–0.32 (`spec_prob_timedose` per perturbation); TF also gained
+  (6.8 → 9.0).
+- **MetChange training is done.** Warm-up, patience 25 and `ReduceLROnPlateau` all leave its
+  gap at 3.6–4.2 points (before 4.2). Kept epochs move later, but the scores don't improve.
+  Plateau ≈ StepLR for all three signatures; keep StepLR.
+- **Main open question: MetChange reads the signature about half as well as the expression it
+  is computed from** (4.2 vs 7.8 points), and barely moves plain ranking (1.3 vs 3.3). Candidate
+  causes, untested: representation (top-100 reactions, `np.sign`), network (`combined` vs
+  `gene`), CycleGAN-inferred GPR genes (6.3).
+- Seed spread for MetChange is ~1.3 points of per-drug gap (seeds 0 and 1 of the older recipe:
+  4.2 vs 2.9); every current-recipe number is one seed.
+- The epoch cap does not bind for MetChange; for TF / expr 8–12/15 members reach epoch 80, but
+  at an lr ≤ 1.6e-5, where more epochs change little.
 
 **Matched negatives are superseded.** With dose/time inputs gone and training to convergence,
 matched sampling is worse on both metrics (report 02, section 4). What looked like
 matched-negative specificity in report 01 was mostly the dose/time shortcut plus `spec`-based
 epoch selection. Version (b) (grouped specificity loss) is demoted accordingly.
 
-**Still true:** per-drug plain ranking remains mostly prior for MetChange (0.401 vs 0.410), so a
+**Still true:** per-drug plain ranking remains mostly prior for MetChange (0.396 vs 0.407), so a
 query will return broadly similar drugs whatever is asked, with the signature re-ordering within
-that. TF is the only signature where the signature clearly moves plain ranking (control 0.372 vs
-real 0.247 per perturbation; different network, so compare gaps, not absolute values).
+that. With expr and TF the signature clearly moves plain ranking (3.3 points per drug; networks
+differ, so compare gaps, not absolute values).
 
 ## 4. Code in `scripts/predict_targets/`
 
@@ -175,30 +178,23 @@ Not on the laptop: `metchange_rank_matched_auprc_shuff` (its comparison ran on t
 and `metchange_rank_matched_noGlobals{,_shuff}` (plain, lr 0.005) — launched 2026-11-13, not
 yet synced or analysed. It is now of low value: report 02 supersedes it.
 
-**Running** (submitted 2026-11-14): `metchange_rank_noGlobals_lr1e-3_min15`,
-`expr_noGlobals_lr1e-3_min15`, `tf_active200_noGlobals_lr1e-3_min15`, each with `_shuff`.
-**To submit** (launchers ready 2026-11-15): `metchange_rank_noGlobals_lr1e-3_min15_pat25`,
-`{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_plateau`, each with `_shuff`.
-All seed 0, same splits as `*_noGlobals_lr1e-3` (report 03, 8.3).
+Analysed in report 03, section 9 (seed 0, same splits as `*_noGlobals_lr1e-3`):
+`metchange_rank_noGlobals_lr1e-3_{min15,min15_pat25,plateau}{,_shuff}`,
+`expr_noGlobals_lr1e-3_{min15,plateau}{,_shuff}`,
+`tf_active200_noGlobals_lr1e-3_{min15,plateau}{,_shuff}`.
 
 Pre-dating the current metrics, cannot be re-checked (no `test_scores_heldout.npz`, no FNN
 shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
 
 ## 6. Next steps, in priority order
 
-**6.1 Fix early stopping and the schedule** (GPU; report 03, section 8):
-- running: `_min15` (MetChange, expr, TF) — warm-up of 15 epochs, patience 15, StepLR;
-- to submit: `bash submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh` (MetChange
-  patience 25; MetChange plateau) and `bash submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh`
-  (expr, TF plateau). Check the first `_plateau` task's log: it is the first real-torch run of
-  `--lr-schedule plateau`.
-
-Read (8.4): per-drug `median_diff` / p vs own control, folds better, kept epochs, history length
-(patience vs cap), lr at the kept epoch; compare with `*_noGlobals_lr1e-3` (same seed and
-splits). Questions: do expr folds 0–1 recover; does MetChange gain from more halvings or from
-plateau, or is its training done and the gap to TF the signature itself. If expr recovers,
-MetChange vs expr is the comparison that matters for the paper. Then a second seed of the
-winning recipe (seed spread ~1.3 points of per-drug gap).
+**6.1 Confirm and locate the MetChange-vs-expr gap** (report 03, 9.3):
+1. Second seed of the current recipe (`_min15`) for MetChange, expr and TF, each with its
+   control (GPU; launchers to write: `--seed 1` on the `_min15` launchers), to check the
+   MetChange-vs-expr difference (3.6 points) is larger than the seed spread.
+2. Where MetChange loses information (no GPU first): the representation (top-n, signs vs
+   continuous values: `--signature-weights`, section 7), expr on the `combined` network, and the
+   landmark vs inferred share of the GPR genes (6.3.2).
 
 **6.2 Prototype path** (no GPU; this is what "working prototype" needs):
 1. **Query path** — nothing yet turns a user's metabolic query into a ranked drug list. With
@@ -218,7 +214,7 @@ winning recipe (seed spread ~1.3 points of per-drug gap).
 2. Fraction of the GPR genes MetChange uses that are landmarks vs CycleGAN-inferred. If mostly
    inferred, the metabolic labels are a smooth function of the 978 landmarks.
 
-**6.4 Then** freeze the recipe, and only after that revisit version (b), the prior + residual
+**6.4 Then** freeze the recipe (done 2026-11-15: `_min15`), and only after that revisit version (b), the prior + residual
 model, or per-protein standardisation of the dynamic features. (Done on 2026-11-14: cap check —
 does not bind; second seed — replicates, smaller; port to `tf` / `expr` — report 03.)
 
@@ -226,9 +222,10 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 
 - **Per-drug plain ranking is still prior-dominated** (section 3). This is the main scientific
   gap for the tool, not a bug.
-- **Early stopping keeps epoch 1 in many FNN members, and StepLR decides when MetChange stops**
-  (report 03, sections 5 and 8); `--min-epochs` and `--lr-schedule plateau` added, runs in 6.1. The old-recipe `expr` / `tf` runs still lack FNN controls, but are
-  superseded by the `*_noGlobals_lr1e-3` pairs.
+- **MetChange reads the signature about half as well as expr** (report 03, 9.2); see 6.1.
+  Early stopping is resolved (`--min-epochs 15`).
+- **MetChange `_min15` control below 0.5 in folds 0–1** (0.453, 0.468 per perturbation on
+  `spec_prob_timedose`; per drug 0.504). Not seen in the base control; check if it recurs.
 - **MetChange similarity-check anomaly, unresolved.** TOP1 / JAK1 / XIAP shared-target pairs are
   anticorrelated (mean r -0.24 / -0.23 / -0.35) and the split matches flip status exactly,
   although ATP1A1 drugs are mixed-flip yet r = +0.92. Checks: confirm `labels_dir`; grep
@@ -248,15 +245,7 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 
 ## 8. Uncommitted
 
-- `metabolic_target_prediction.py`: `--lr-schedule {step,plateau}`, `--lr-step-size`,
-  `--lr-gamma`, `--plateau-patience`, `--min-lr`; lr recorded per epoch in `history`.
-- Launchers `launch_predict_targets_A549_mc_noGlobals_lr1e-3_min15_pat25{,_shuff}.sh`,
-  `launch_predict_targets_A549_{mc,tf,expr}_noGlobals_lr1e-3_plateau{,_shuff}.sh`; wrappers
-  `submit_train_w_shuff_mc_noGlobals_lr1e-3_pat25_plateau.sh`,
-  `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh`; `submit_with_shuffle_control.sh`
-  (four variants registered); `README.md` (variants table, lr schedule).
-- Report 03, section 8 (follow-up runs, code additions; results pending) and the 31 → 29/60
-  correction in the launcher notes.
+- Report 03, section 9 (results of the `_min15`, `_min15_pat25` and `_plateau` runs).
 - This `STATUS.md` update.
 
 ## 9. Working notes
