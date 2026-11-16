@@ -5,6 +5,13 @@ tf_active200_noGlobals_lr1e-3, expr_noGlobals_lr1e-3}` and their `_shuff` contro
 report 02 (`--no-globals --lr 0.001 --patience 10 --ffn-epochs 60`, unmatched, AUPRC selection, 5-fold CV by drug,
 active perturbations, `--ignore-qvalue --top-n 100`, no VAE), array jobs. Metric definitions: report 01, section 3.*
 
+> **Correction (report 04, `2026-11-16_labels_network_coverage.md`).** Every MetChange run in this report read the
+> home copy of the MetChange labels, which turned out to be the **uncorrected** limma output: 55% of perturbations
+> (those whose name sorts before `DMSO_nan_<time>`, in practice by drug name) had sign-flipped signatures. The expr
+> and TF runs read the correct scratch copy. The MetChange gaps here are therefore gaps of sign-corrupted signatures
+> over valid controls (likely underestimates), and the MetChange vs expr / TF comparison (sections 9–10) must be
+> redone after retraining. Training-recipe conclusions, the expr / TF results and the coverage counts stand.
+
 **Framing.** MetChange is the signature this project is about; expression is a welcome byproduct. TF signatures
 reproduce the setting of Menacho et al. 2026, which is published: they are the **positive control** that the
 pipeline works where it should, and the level MetChange is measured against, not a result in themselves.

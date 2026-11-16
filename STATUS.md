@@ -1,9 +1,19 @@
-# Project state — 2026-11-15
+# Project state — 2026-11-16
 
 Handoff note for continuing in a new session. Everything described here is committed up to
-HEAD `9c1c70a`, except the files listed in section 8.
+HEAD `d11744b`, except the files listed in section 8.
 
-**Read first:** `reports/2026-11-14_seed_tf_expr.md` (report 03 — second seed, MetChange vs expr
+> **2026-11-16 — the MetChange model results so far are invalid** (report 04,
+> `reports/2026-11-16_labels_network_coverage.md`). The home MetChange labels that every MetChange
+> run read until `d11744b` are the **uncorrected** limma output: 24,512 of 44,396 A549 perturbations
+> (55%, exactly R's flip set) have log2FC negated relative to the scratch rerun. Expr / TF runs read
+> scratch and are unaffected. MetChange must be retrained on the scratch labels (6.1) before any
+> MetChange vs expr / TF comparison. Also new: the network is ruled out (expr on `combined` ≈ on
+> `gene`), and MetChange's own coverage is all-or-nothing (57% of active perturbations have no
+> significant feature among the 100 read).
+
+**Read first:** `reports/2026-11-16_labels_network_coverage.md` (report 04 — the label bug in the
+MetChange runs, expr on `combined`, full coverage check), then `reports/2026-11-14_seed_tf_expr.md` (report 03 — second seed, MetChange vs expr
 vs TF, early stopping and lr schedule; sections 9–10 have the current recipe, the two-seed
 result and the metabolic-coverage check), then `reports/2026-11-14_lr_noglobals_matched.md` (report 02 —
 the current recipe), then `reports/2026-11-13_A549_matched_negatives.md` (report 01 — metric
@@ -43,6 +53,15 @@ A549 perturbations limma returned `control - treated`. Correction: `log2FC -> -l
 in `expr/`; PC3 was already correct; MetChange has `rank_signfixed`. `limma_DE.R` now sets the
 control reference explicitly and writes `reference_level.txt`, so new runs need no correction.
 
+**But the home MetChange copy was never corrected** (report 04, section 1; checked 2026-11-16 with
+`compute_labels/compare_label_dirs.py`). `<home>/results/labels/A549/metchange/rank/` vs the scratch
+rerun: 19,884 perturbations identical, 24,512 exactly negated (r = −1, all features), and the
+negated set is exactly `flipped_R = TRUE`; q / p-values and significant sets identical. The
+correction was only ever copied into scratch (`move_corr_files_mc.sh`). Scratch is correct by
+construction (fixed `limma_DE.R`); **confirmed 2026-11-16**: its `reference_level.txt` reads
+"reference level: ctrl (explicit)" (written only by `limma_DE.R` ≥ `85526fe`, which includes the fix). The expr pair of that
+comparison wrote no output (skipped or failed; `logs/cmp_labels.out` not yet looked at).
+
 **MetChange limma rerun over the 9 cell lines — in progress, verify.** The jobs segfaulted in
 `fread` (data.table crashes on the ~150k-column MetChange matrix). Fixed in
 `launch_limma_DE_generic_mc.sh` (commit `de76198`): `mc` mode now passes `--reader lines`, and
@@ -75,6 +94,10 @@ Two problems were found and are now understood:
 median of the per-drug real − control differences, in percentile points; it is what the
 Wilcoxon p tests. Report 02's "5.6 points" was a difference of medians (paired: 4.2).
 
+**Caveat for everything MetChange below (report 04):** these MetChange runs were trained on labels with
+55% of perturbations sign-flipped. Their gaps are over valid controls but probably underestimates, and
+the MetChange vs expr / TF comparisons are void until retrained. Expr / TF numbers stand.
+
 Per-drug gap (points), p — real vs own control, current recipe, seeds 0 / 1 (report 03, 9–10):
 
 | metric | MetChange | expr | TF (positive control) |
@@ -94,17 +117,22 @@ Paired by drug, expr and TF each beat MetChange in both seeds (expr: p = 0.023 /
   gap at 3.6–4.2 points (before 4.2). Kept epochs move later, but the scores don't improve.
   Plateau ≈ StepLR for all three signatures; keep StepLR.
 - **Main open question: MetChange reads the signature about half as well as the expression it
-  is computed from** (4.2 vs 7.8 points), and barely moves plain ranking (1.3 vs 3.3). Candidate
-  causes, untested: representation (top-100 reactions, `np.sign`), network (`combined` vs
-  `gene`), CycleGAN-inferred GPR genes (6.3).
+  is computed from** (4.2 vs 7.8 points), and barely moves plain ranking (1.3 vs 3.3) — void
+  until retrained (report 04). Candidate causes: the label sign bug (report 04, now the first
+  suspect); **network ruled out** (below); coverage (below); representation (top-100 reactions,
+  `np.sign`), CycleGAN-inferred GPR genes (6.3), untested.
+- **Expr on the `combined` network performs as well as on `gene`** (report 04, section 2; seed 0,
+  same folds, `expr_combined_noGlobals_lr1e-3_min15`). Per-drug gap over own control:
+  `spec_prob_timedose` 7.7 (p = 3e-12) vs 7.8 on `gene`, `rank_probc` 8.2 vs 8.0, `rank_prob` 3.0
+  vs 3.3; real better in 5/5 folds. The MetChange network is not why MetChange lags expr.
 - **Robust across two seeds: expr ≈ TF > MetChange.** Seed spread is 1.5 points for MetChange
   and 2.6 for expr; MetChange's paired deficit (4.8–6.9 points) is larger.
-- **Metabolic coverage** (report 03, 10.2–10.4; local subset of ~600 perturbations only):
-  in DE terms it is not the issue (every active perturbation has ~14–15% of its DE genes in
-  Human-GEM, the background share). In MetChange's own output it is: ≥ 25% of active
-  perturbations have no significant feature among the 100 MetChange features the model reads,
-  half have < 17. Whether that explains the deficit against expr is unclear on the subset;
-  the full check runs on the cluster.
+- **Metabolic coverage** (full data, report 04 section 3): in DE terms it is not the issue
+  (every active perturbation has ~14–15% of its DE genes in Human-GEM, the background share).
+  In MetChange's own output it is all-or-nothing: 57% of active perturbations have no
+  significant feature among the 100 the model reads, 35% have all 100. Sign-buggy MetChange
+  runs gain 7.1–7.3 points on fully covered perturbations (both seeds, p ≈ 4e-6) and ~0–3 on
+  uncovered ones; expr gains 7–12 on uncovered ones too. Redo the split after retraining.
 - The epoch cap does not bind for MetChange; for TF / expr 8–12/15 members reach epoch 80, but
   at an lr ≤ 1.6e-5, where more epochs change little.
 
@@ -154,10 +182,9 @@ Tooling:
 - **Labels (2026-11-15):** every training launcher reads its labels from scratch,
   `${project_dir_scratch}/results/labels/<cell>/{expr,metchange/rank}` (MetChange used the home
   copy until then). The scratch copy is the rerun of the fixed `limma_DE.R`; the home copy was
-  corrected with `fix_limma_reference_sign.py`, which is exact for what training reads (swapping
-  the reference only negates log2FC; p / q unchanged), so both give the same signatures. Only a
-  different input matrix to the rerun could change them; a spot check of `log2FC.csv` /
-  `qvals.csv` between the two copies confirms it.
+  ~~corrected with `fix_limma_reference_sign.py`~~ — **wrong for MetChange**: the home
+  `metchange/rank` is the uncorrected output (report 04; the earlier "spot check confirms it" was
+  not true). The expr launchers always read scratch.
   Label pipeline, all writing to scratch: `parse_lincs_data/launch_get_lincs_celllist.sh`
   (expression limma) → `metchange/metchange_list_launcher.sh` → `metchange/mc_res_concat_list_launcher.sh`
   → `compute_labels/launch_limma_mc_celllist.sh`.
@@ -212,24 +239,40 @@ Analysed in report 03, section 9 (seed 0, same splits as `*_noGlobals_lr1e-3`):
 `metchange_rank_noGlobals_lr1e-3_{min15,min15_pat25,plateau}{,_shuff}`,
 `expr_noGlobals_lr1e-3_{min15,plateau}{,_shuff}`,
 `tf_active200_noGlobals_lr1e-3_{min15,plateau}{,_shuff}`. Report 03, section 10 (seed 1):
-`{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_min15_seed1{,_shuff}`.
+`{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_min15_seed1{,_shuff}`. Report 04:
+`expr_combined_noGlobals_lr1e-3_min15{,_shuff}` (seed 0), `metabolic_coverage_full{,_topnbins}/`.
+All MetChange runs listed here used the sign-buggy home labels (report 04).
 
 Pre-dating the current metrics, cannot be re-checked (no `test_scores_heldout.npz`, no FNN
 shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
 
 ## 6. Next steps, in priority order
 
-**6.1 Locate the MetChange-vs-expr gap** (report 03, 10.5). Second seed: done, the gap is real.
-1. Full-data coverage check on the cluster (no GPU): `check_metabolic_coverage.py` with the
-   labels the runs used and both coverage sources (expression DE and MetChange's own `n_sig_mc`
-   / `n_sig_topn`; command in `scripts/predict_targets/README.md`). If MetChange's gap grows
-   with `n_sig_topn` and matches expr on well-covered perturbations, the deficit is mostly
-   coverage; then an activity filter for MetChange from its own output.
-2. Network vs signature (GPU) — launchers ready: `bash submit_train_w_shuff_expr_combined_noGlobals_lr1e-3_min15.sh`
-   (expr signatures on `networks/combined`, seed 0, with control). If expr keeps its ~8 points
-   there, the network is not the cause.
-3. Representation (code + GPU): continuous MetChange values or a larger `--top-n` instead of the
-   top-100 signs (`--signature-weights`, section 7).
+**6.1 Redo MetChange on the corrected labels** (report 04, section 5) — first, everything else waits.
+1. Provenance: scratch confirmed correct (`reference_level.txt`: "ctrl (explicit)"). Still to do:
+   read `compute_labels/logs/cmp_labels.out` for why the expr pair wrote nothing (fine if skipped
+   as same provenance; the expr runs read scratch).
+2. Retrain MetChange `_min15`, seeds 0 and 1, each with its control:
+   `bash submit_train_w_shuff_mc_min15_fixedlabels.sh` (renames the buggy runs to
+   `<run>_signbug{,_shuff}` first, then submits via `submit_with_shuffle_control.sh`). The recipe
+   stays: `--no-globals` and the warm-up were established on shuffled controls and on expr / TF,
+   which had correct labels. Established on buggy MetChange only: lr 0.001 vs 0.005, patience 25 /
+   plateau "no gain", and matched negatives "worse on both metrics" — retest matched negatives
+   first if corrected MetChange still lags expr.
+3. Redo report 03's MetChange vs expr / TF comparison (per-drug gaps, paired by drug) and the
+   coverage split: `check_metabolic_coverage.py --coverage <...>/metabolic_coverage_full/coverage.tsv
+   --run mc=<new run> ...` (no labels needed; q-values are unchanged by the bug).
+4. Check other consumers of the home MetChange copy (similarity checks, `metpath`,
+   `mc_schuhk_assoc`) and the other cell lines' MetChange labels (`compare_label_dirs.py`).
+
+**6.1b Then locate any remaining MetChange-vs-expr gap.**
+- Network: **done, ruled out** (report 04, section 2: expr on `combined` 7.7 vs 7.8 points on `gene`).
+- Coverage: **done, real** (report 04, section 3): 57% of active perturbations have no significant
+  MetChange feature among the 100 read, 35% have all 100. Sign-buggy MetChange runs: 7.1–7.3 points
+  on fully covered perturbations, ~0 on uncovered. Next: an activity filter from MetChange's own
+  output (`n_sig_topn` ≥ 1 or = 100), evaluated on the same perturbations for expr.
+- Representation (code + GPU): continuous MetChange values or a larger `--top-n` instead of the
+  top-100 signs (`--signature-weights`, section 7).
 
 **6.2 Prototype path** (no GPU; this is what "working prototype" needs):
 1. **Query path** — nothing yet turns a user's metabolic query into a ranked drug list. With
@@ -257,17 +300,16 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 
 - **Per-drug plain ranking is still prior-dominated** (section 3). This is the main scientific
   gap for the tool, not a bug.
-- **MetChange reads the signature about half as well as expr** (report 03, 9.2); see 6.1.
-  Early stopping is resolved (`--min-epochs 15`).
+- **MetChange reads the signature about half as well as expr** (report 03, 9.2) — **void until
+  retrained** on corrected labels (report 04); see 6.1. Early stopping is resolved (`--min-epochs 15`).
 - **Laptop expression / MetChange labels are an old partial set** (`results/labels/A549/expr/`
   and `metchange/rank/`, 2 Nov: 699 of the 3,970 scored perturbations). Analyses needing labels
   must run on the cluster or after syncing the scratch copy. (The MetChange `_min15` control's
   low folds 0–1 did not recur in seed 1.)
-- **MetChange similarity-check anomaly, unresolved.** TOP1 / JAK1 / XIAP shared-target pairs are
-  anticorrelated (mean r -0.24 / -0.23 / -0.35) and the split matches flip status exactly,
-  although ATP1A1 drugs are mixed-flip yet r = +0.92. Checks: confirm `labels_dir`; grep
-  `overlap_drug_pairs.tsv` for camptothecin-topotecan in both runs; rerun the fixed
-  `limma_DE.R --perts` on those perturbations and run `check_limma_sign_fix.py compare`.
+- **MetChange similarity-check anomaly — probably explained** (report 04, 1.1). TOP1 / JAK1 / XIAP
+  shared-target pairs were anticorrelated and the split matched flip status exactly: consistent
+  with the uncorrected home labels (camptothecin flipped, topotecan not). ATP1A1 (mixed-flip,
+  r = +0.92) is not explained. Confirm by rerunning the similarity check on the scratch labels.
 - **Model does not use edge signs.** `propagation_operator` gates on weight × activity only;
   the two channels propagate independently.
 - **Signatures are discretized** (`np.sign`, with `--ignore-qvalue --top-n 100`), while the
@@ -282,18 +324,10 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 
 ## 8. Uncommitted
 
-- Report 03, section 10 (seed 1, paired signature comparison, coverage check from expression
-  and from MetChange's own output, expr-on-combined launchers).
-- `scripts/predict_targets/check_metabolic_coverage.py` (new) and its README section.
-- Launchers `launch_predict_targets_A549_expr_combined_noGlobals_lr1e-3_min15{,_shuff}.sh`,
-  wrapper `submit_train_w_shuff_expr_combined_noGlobals_lr1e-3_min15.sh`; variant registered in
-  `submit_with_shuffle_control.sh`; README variants table.
-- All 55 `launch_predict_targets_A549_*.sh`: `out_dir` on scratch (`small` also gains the
-  `project_dir_scratch` variable); `submit_with_shuffle_control.sh`,
-  `compare_runs_mc_vs_shuffled_A549.sh` and the README point to scratch.
-- The 30 MetChange `launch_predict_targets_A549_*.sh`: `labels_dir` on scratch;
-  `compute_labels/launch_limma_DE_A549_mc.sh`: `out_dir` on scratch;
-  `metpath/launch_metpath_A549.sh`: input labels and output on scratch.
+- Report 04 (`reports/2026-11-16_labels_network_coverage.md`) and the correction banner on report 03.
+- `scripts/predict_targets/check_metabolic_coverage.py`: `--coverage` (reuse a `coverage.tsv`),
+  fixed 0 / 1–99 / 100 bins for `n_sig_topn`; README lines.
+- `scripts/predict_targets/submit_train_w_shuff_mc_min15_fixedlabels.sh` (new).
 - This `STATUS.md` update.
 
 ## 9. Working notes

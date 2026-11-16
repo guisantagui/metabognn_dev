@@ -116,10 +116,11 @@ def main():
     ap.add_argument("--model", default="prob", choices=["prob", "logreg"])
     ap.add_argument("--stratum", default="timedose", choices=["time", "timedose"])
     ap.add_argument("--n-bins", type=int, default=4)
+    ap.add_argument("--coverage", help="reuse a coverage.tsv written by an earlier run instead of reading the labels")
     ap.add_argument("--out-dir")
     args = ap.parse_args()
-    if not args.qvals and not args.mc_qvals:
-        ap.error("give --qvals (with --gem-genes) and/or --mc-qvals")
+    if not args.qvals and not args.mc_qvals and not args.coverage:
+        ap.error("give --qvals (with --gem-genes) and/or --mc-qvals, or --coverage")
     if args.qvals and not args.gem_genes:
         ap.error("--qvals needs --gem-genes")
     if (args.mc_log2fc or args.mc_nodes) and not args.mc_qvals:
@@ -138,11 +139,14 @@ def main():
         perts |= set(j.index.get_level_values("pert"))
 
     parts = []
+    if args.coverage:
+        parts.append(pd.read_csv(args.coverage, sep="\t", index_col=0))
     if args.qvals:
         parts.append(expression_coverage(args, perts))
     if args.mc_qvals:
         parts.append(metchange_coverage(args, perts))
     cov = pd.concat(parts, axis=1, join="inner")
+    cov = cov.loc[:, ~cov.columns.duplicated()]
     variables = list(cov.columns)
     cov.rename_axis("pert").to_csv(os.path.join(out_dir, "coverage.tsv"), sep="\t")
     with pd.option_context("display.width", 200):
@@ -157,7 +161,11 @@ def main():
         for var in variables:
             r, p = spearmanr(j[var], j.gain, nan_policy="omit")
             rho.append(dict(run=name, variable=var, spearman_gain=r, p=p, n_perts=len(j)))
-            bins = pd.qcut(j[var], args.n_bins, duplicates="drop")
+            if var == "n_sig_topn":  # bimodal (mostly 0 or all top-n): fixed bins, quantiles collapse
+                bins = pd.cut(j[var], [-0.5, 0.5, args.top_n - 0.5, args.top_n + 0.5],
+                              labels=["0", f"1-{args.top_n - 1}", str(args.top_n)])
+            else:
+                bins = pd.qcut(j[var], args.n_bins, duplicates="drop")
             for b, g in j.groupby(bins, observed=True):
                 g = g.reset_index()
                 dr = g.groupby(["fold", g.drug.str.lower()])[["real", "ctrl"]].mean()
