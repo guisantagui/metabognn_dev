@@ -14,7 +14,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH -c 8
 #SBATCH --mem=48GB
-#SBATCH --time=0-03:00:00
+#SBATCH --time=0-06:00:00
 #SBATCH --output=./schuhknecht_bench_%j.out
 #SBATCH --error=./schuhknecht_bench_%j.err
 #SBATCH -p batch
@@ -39,6 +39,8 @@ for f in 41587_2024_2524_MOESM2_ESM.xlsx cpd_info_wSchuhknecht.csv drug_match_ta
 done
 
 conda activate metabolic_drug_repurposing
+# torch / BLAS threads = allocated cores (scoring took 20-45 min per run on batch nodes vs ~2 min on a laptop)
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8} MKL_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 status=0
 for r in "${runs[@]}"; do
     for d in "${runs_dir}/${r}" "${runs_dir}/${r}_shuff"; do

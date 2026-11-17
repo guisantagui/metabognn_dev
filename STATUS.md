@@ -310,14 +310,16 @@ Leftovers:
    extracellular. Train/query mismatch: training sources are single nodes, query sources are
    spread; if the benchmark is weak, consider also training on compartment-collapsed signatures.
    Inputs now in `data/validation/schuhknecht/` (maps from `scripts/schuhknecht_map/`); counts and
-   design in report 05, section 6: 473 non-ambiguous intracellular ions → 959 nodes (306 ions /
-   571 nodes were MetChange training sources); 646 of 750 matched drugs have targets, 293 were
+   design in report 05, section 6: 473 non-ambiguous intracellular ions → 959 nodes (412 ions /
+   801 nodes are MetChange training sources, cluster labels); 646 of 750 matched drugs have targets, 293 were
    CV-evaluated in A549, ~353 never entered training. Use `cpd_info_wSchuhknecht.csv` (all
    compartments), not `metabolite_match_table_non_ambig_match.csv` (`c` only).
    **Script ready (2026-11-17):** `benchmark_schuhknecht.py`, `sbatch launch_benchmark_schuhknecht_A549.sh`
    (report 05, 6.1). Must run on the cluster: locally the rebuilt features do not reproduce the
    training scores (local network / baseline / targets differ from the cluster copies), and the
    script refuses to score in that case. Copy `data/validation/schuhknecht/` to the cluster first.
+   Cluster reproduction check passed (r = 1.000000, 8/8). Local MetChange labels are an older
+   version (4,086 features vs 5,707 on the cluster): local counts based on them are approximate.
 
 **6.3 Size the data ceiling** (no GPU, ~a day):
 1. PCA of the A549 expression matrix: how many components explain 95% of variance across

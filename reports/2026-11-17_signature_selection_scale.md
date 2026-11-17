@@ -232,8 +232,8 @@ median ~4,400). Reading: `_qsigtop_sdscale` vs `_qsigtop` = scale effect on the 
 ### 5.5 BH over all 4,086 features vs over the 3,747 mapped ones
 
 MetChange q-values are BH over all 4,086 compartment-specific features; 339 (currency etc.) are not network nodes
-and are dropped before selection. Recomputing BH on the 3,747 mapped features only (local MetChange p-values, 607
-active perturbations that matched by name; the local BH reproduces `qvals.csv` to 5e-15): median significant mapped
+and are dropped before selection. Recomputing BH on the 3,747 mapped features only (local MetChange p-values — an older label version with 4,086 features; the training labels on the cluster have
+5,707 — 607 active perturbations that matched by name; the local BH reproduces `qvals.csv` to 5e-15): median significant mapped
 features per perturbation 315 → 319; 2,923 extra calls on 606,928 (+0.5%); 6 of 607 perturbations cross the
 `--min-sources 3` threshold. The unmapped rows are 7.7% of all significant calls. Negligible: keep `qvals.csv`.
 
@@ -251,7 +251,7 @@ compartments. Using the full table, non-ambiguous, intracellular (not `e`), netw
 | | ions | network nodes |
 |---|---|---|
 | non-ambiguous, intracellular | 473 (445 with a `c` copy) | 959 (1–6 per ion: 177 / 160 / 98 / 24 / 12 / 2) |
-| … of which MetChange signature features (nodes that were sources in training) | 306 | 571 |
+| … of which MetChange signature features (nodes that were sources in training) | 412 | 801 |
 | ambiguous (dropped so far), intracellular | 148 | 803 |
 
 **Drugs.** `drug_match_table.csv`: 750 Schuhknecht drugs matched to LINCS A549 by SMILES (68 exact time/dose,
@@ -291,4 +291,11 @@ signature-independent per-protein features also disagree with the training range
 network or baseline differ from the cluster copies as well. Those outputs were deleted; the benchmark has to run on the cluster, where it
 checks itself before scoring. (Also: torch on MPS crashes on this macOS; the script uses CUDA or CPU, ~2 min per
 run on CPU.)
+
+**Cluster verification (2026-11-17).** On the cluster, with the run's own inputs, the reproduction check passes:
+8/8 held-out LINCS perturbations of fold 0, r = 1.000000, max |diff| 8.8e-5 (GPU training vs CPU here). The
+training MetChange labels (scratch, corrected) have 5,707 features, 5,218 of them network nodes; the local copy is an
+older version (4,086 / 3,747). With the training labels, 412 non-ambiguous Schuhknecht ions map to 801 trained
+intracellular nodes (section 6 table corrected; the local count was 306 / 571). Full benchmark:
+`sbatch launch_benchmark_schuhknecht_A549.sh`.
 
