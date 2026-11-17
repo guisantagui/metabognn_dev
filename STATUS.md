@@ -264,14 +264,21 @@ Leftovers:
   activity filter (keeps 1,791 of 3,970 perturbations, 758 drugs).
 - **MetChange `_qsig` done: worse** (report 05, 5.2): 6.1 points vs 11.9–14.2 for `_min15` on the same
   perturbations (p ≤ 3e-3). Half the training data dropped + random 100 of thousands of significant
-  features. Magnitude-based top-100 stays; `_sdscale` is the test of scale. Expr / TF `_qsig` pending.
+  features. Magnitude-based top-100 stays; `_sdscale` is the test of scale.
+- **Expr `_qsig` done: signal gone** (report 05, 5.3): 1.6 points (p = 0.22) vs 7.8 / 10.4 for `_min15`,
+  with no perturbation dropped (all have ≥ 200 significant genes). Random 100 of the significant
+  features loses the signal; the largest changes carry it. TF `_qsig` still running.
 - **Significance (launchers ready, 2026-11-17):** every run so far, MetChange, expr and TF, used
   `--ignore-qvalue --top-n 100` (top 100 by |log2FC|, q-values unused; added 9 Nov in `5a28a0f`
   with the activity filter, no recorded reason). The published setting is significant features,
   capped at 100. `bash submit_train_w_shuff_noGlobals_lr1e-3_min15_qsig.sh` runs `_min15_qsig`
   (`--qvalue 0.05 --max-sources 100`) for all three, with controls. Perturbations with < 3
   significant features drop out, so compare signature types on shared drugs / perturbations.
-  If too few MetChange perturbations survive: rank the top 100 by |t| or q (small code change).
+  `_qsig` samples the significant features at random and lost the signal (report 05, 5.2–5.3).
+  **`_qsigtop` (ready, 2026-11-17):** q < 0.05, then the top 100 of those by |log2FC|
+  (`--qvalue-top-n`, new). Reason: of the top 100 by |log2FC|, a median of 1 is significant for MetChange
+  and 84 for expr (report 05, 5.4). `bash submit_train_w_shuff_noGlobals_lr1e-3_min15_qsigtop.sh` (also
+  MetChange `_qsigtop_sdscale`: plus `--signature-scale sd`).
 - **Feature scale (report 05):** MetChange log2FC is not standardised per metabolite (the MetChange
   paper z-scores against controls), so the current top 100 is mostly a fixed set of high-variance
   metabolites (selection frequency vs metabolite SD: Spearman 0.89; 33 metabolites in > 50% of
@@ -340,6 +347,9 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 - `launch_predict_targets_A549_{mc,tf,expr}_noGlobals_lr1e-3_min15_qsig{,_shuff}.sh`, wrapper
   `submit_train_w_shuff_noGlobals_lr1e-3_min15_qsig.sh`, variants registered in
   `submit_with_shuffle_control.sh`, README row.
+- `--qvalue-top-n` in `metabolic_target_prediction.py`; `_qsigtop` launchers (mc, tf, expr, with `_shuff`),
+  MetChange `_qsigtop_sdscale`,
+  wrapper `submit_train_w_shuff_noGlobals_lr1e-3_min15_qsigtop.sh`, registered, README row.
 - Report 05 (`reports/2026-11-17_signature_selection_scale.md`).
 - Report 05, section 5 (corrected MetChange results); `results/.../metabolic_coverage_fixedlabels/`.
 - `metabolic_target_prediction.py`: `--signature-scale {none,sd,mad}`, `--signature-scale-floor`;

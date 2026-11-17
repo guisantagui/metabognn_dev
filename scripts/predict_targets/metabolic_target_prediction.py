@@ -36,7 +36,9 @@ Inputs
                            (MetChange) or reaction (METAflux) ids, or genes (tf, expr), columns perturbation names
                            as in mdat.csv
   --hgnc                   HGNC table (tf, expr): maps the signature genes to the network's symbols
-  --qvalues                same shape (qvals.csv); without it the --top-n features by |value| are used
+  --qvalues                same shape (qvals.csv); without it the --top-n features by |value| are used. With it,
+                           features with q <= --qvalue (randomly capped at --max-sources), or with --qvalue-top-n
+                           the --top-n of those by |value|
   --signature-sign         multiply the signatures by this (MetChange inconsistency: -1 gives positive = more
                            production, the convention of the Schuhknecht benchmark)
   --signature-scale        none (default) | sd | mad: divide each feature by its spread across perturbations before
@@ -361,6 +363,8 @@ def load_signatures(g, args, perts_table):
         keep = v.notna() & (v.abs() >= args.min_abs_score)
         if qv is not None and not args.ignore_qvalue:
             keep &= qv[p] <= args.qvalue
+            if args.qvalue_top_n:  # significant features, then the top-n of them by |value| (no random cap)
+                keep &= v.where(keep).abs().rank(ascending=False, method="first") <= args.top_n
         else:
             keep &= v.abs().rank(ascending=False, method="first") <= args.top_n
         f = v.index[keep].to_numpy()
@@ -1121,6 +1125,9 @@ def main():
     fe.add_argument("--qvalue", type=float, default=0.05)
     fe.add_argument("--ignore-qvalue", action="store_true", help="use the top-n features by |value| instead")
     fe.add_argument("--top-n", type=int, default=100)
+    fe.add_argument("--qvalue-top-n", action="store_true",
+                    help="with --qvalues: of the features with q <= --qvalue, keep the --top-n by |value| (instead "
+                         "of a random --max-sources of them)")
     fe.add_argument("--signature-scale", default="none", choices=["none", "sd", "mad"],
                     help="divide each feature by its spread across all perturbations of --signatures before the "
                          "--top-n selection (not centred: signs stay relative to the control). For MetChange, whose "

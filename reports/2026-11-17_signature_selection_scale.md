@@ -147,7 +147,8 @@ Per-perturbation Spearman of MetChange's gain with `n_sig_topn`: 0.10 / 0.11 (ex
 ### 5.2 MetChange `_qsig`: worse than top-100
 
 `metchange_rank_noGlobals_lr1e-3_min15_qsig{,_shuff}` (q < 0.05, random cap 100, corrected labels, seed 0). The
-significance filter keeps 1,791 of 3,970 perturbations (758 of 1,358 drugs). Expr / TF `_qsig` not yet available.
+significance filter keeps 1,791 of 3,970 perturbations (758 of 1,358 drugs). Expr `_qsig`: section 5.3. TF `_qsig`:
+still running.
 
 Against its own control: `spec_prob_timedose` 6.1 points (p = 1e-3, 56% of drugs better, 5/5 folds), `rank_probc`
 7.7 (4e-6), `rank_prob` 2.4 (9e-7; per drug 0.409 vs 0.454).
@@ -170,3 +171,60 @@ do carry signal (section 5, 5.4–5.6 points); (b) covered perturbations have th
 magnitude carries information despite the scale bias; the significance threshold is not the way to remove it.
 `_sdscale` (top 100 by scaled magnitude, all perturbations) is the cleaner test. The published TF setting (`_qsig` for
 TF) is still worth having as the faithful positive control.
+
+### 5.3 Expr `_qsig`: the signal mostly disappears
+
+`expr_noGlobals_lr1e-3_min15_qsig{,_shuff}` (seed 0). Expr activity is defined from expr DE, so **no perturbation is
+dropped** (1,358 drugs, all 3,970 perturbations). Every perturbation has ≥ 200 significant genes (median 2,929,
+10th percentile 369), so the cap always applies: a random 100 of the significant genes.
+
+| metric (vs own control) | expr `_min15` s0 / s1 | expr `_qsig` |
+|---|---|---|
+| `spec_prob_timedose` | 7.8 / 10.4 | 1.6 (p = 0.22) |
+| `rank_probc` | — | 1.2 (p = 0.024) |
+| `rank_prob` | — | 0.2 (p = 0.42) |
+
+Paired by drug (all 1,358), `_min15` − `_qsig` on `spec_prob_timedose`: +6.0 (s0, p = 3e-5) and +8.7 (s1, p = 2e-6).
+
+**Reading.** This separates the two confounds in 5.2. Expr `_qsig` loses no training data and still loses almost
+all of its signal, so the loss comes from **which** 100 features are read: a random 100 of the significant genes
+carries almost nothing, and the largest changes carry the signal. For MetChange the same mechanism most likely
+explains the drop in 5.2 (MetChange `_qsig` keeps more signal, 6.1 points, probably because 100 of ~4,400 MetChange
+features still covers a broad share of a coherent metabolic response). Conclusion: **feature selection by magnitude
+stays**. If significance is used, it should rank (top 100 by p or t), not threshold-then-sample. Whether
+`--signature-scale sd` helps is the open test (`_sdscale`).
+
+### 5.4 Significant, then strongest: `_qsigtop`
+
+`_qsig` sampled 100 significant features at random, so 5.2–5.3 do not test the concern behind it: the current top-100
+by |log2FC| can include large but non-significant changes. How often it does:
+
+| among the top 100 by \|log2FC\| | MetChange (3,565 active perturbations) | expr (sample of 607 active perturbations) |
+|---|---|---|
+| significant (q < 0.05), median | 1 | 84 |
+| perturbations with all 100 significant | 35.5% | 23.7% |
+| perturbations with none significant | 57.3% | 0% (min 4) |
+| perturbations with < 90 significant | — | 55% |
+
+(Expr: local `results/labels/A549/expr`, which matched only 607 of the coverage table's perturbation names; q and
+|log2FC| are unaffected by the sign correction.) So the concern is real for both, and for MetChange it is the
+coverage split of report 04: for most perturbations the signature read is entirely non-significant. Those
+signatures nevertheless carry signal (5.4–5.6 points over control, section 5), so non-significant is not the same
+as noise; but a signature backed by significance is the cleaner claim.
+
+New option `--qvalue-top-n` (`metabolic_target_prediction.py`): features with q ≤ `--qvalue`, then the `--top-n` of
+them by |value| (no random cap). Launchers `launch_predict_targets_A549_{mc,tf,expr}_noGlobals_lr1e-3_min15_qsigtop{,_shuff}.sh`,
+wrapper `submit_train_w_shuff_noGlobals_lr1e-3_min15_qsigtop.sh`.
+
+Expectations: MetChange keeps the same 1,791 perturbations as `_qsig`; on the 35% fully covered ones the signature
+equals `_min15`'s, so the comparison on shared perturbations isolates the cost of dropping the uncovered half from
+training. Expr keeps all perturbations and replaces on average ~26 non-significant genes per signature with the next
+strongest significant ones: if it matches `_min15`, significance can be required at no cost (preferred for
+interpretation); if it is better, it should become the recipe.
+
+MetChange also runs as `_qsigtop_sdscale` (`--qvalue-top-n` with `--signature-scale sd`): significant metabolites,
+ranked by SD-scaled |log2FC|. Scaling does not change q-values, so it keeps the same perturbations as `_qsigtop`; it
+only changes which significant metabolites are read where more than 100 are significant (the covered perturbations,
+median ~4,400). Reading: `_qsigtop_sdscale` vs `_qsigtop` = scale effect on the same perturbations; vs `_min15_sdscale`
+= the effect of requiring significance. Same wrapper.
+
