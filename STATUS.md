@@ -301,6 +301,15 @@ Leftovers:
    check whether that drug (or its mechanism class) ranks high. This is the only validation on
    the actual task; `spec` only measures whether the signature is read at all. Partly in
    `scripts/mc_schuhk_assoc`.
+   **Compartments (to handle when running it):** training signatures are compartment-specific
+   (`MAM00003c`; 3,747 of 4,086 MetChange features are exact network nodes, weight ±1 each, the
+   ±1/n split in `select_sources` never triggers). Intracellular metabolomics gives one value per
+   metabolite, not per compartment, so a Schuhknecht feature must be spread ±1/n over its
+   **intracellular** copies only (all compartments except `e`). Today `feature_node_map` maps a
+   compartment-free id to *every* copy, including `e`: needs an option to exclude
+   extracellular. Train/query mismatch: training sources are single nodes, query sources are
+   spread; if the benchmark is weak, consider also training on compartment-collapsed signatures.
+   Schuhknecht ids also need mapping to `base_met` (MAM) ids.
 
 **6.3 Size the data ceiling** (no GPU, ~a day):
 1. PCA of the A549 expression matrix: how many components explain 95% of variance across

@@ -228,3 +228,11 @@ only changes which significant metabolites are read where more than 100 are sign
 median ~4,400). Reading: `_qsigtop_sdscale` vs `_qsigtop` = scale effect on the same perturbations; vs `_min15_sdscale`
 = the effect of requiring significance. Same wrapper.
 
+
+### 5.5 BH over all 4,086 features vs over the 3,747 mapped ones
+
+MetChange q-values are BH over all 4,086 compartment-specific features; 339 (currency etc.) are not network nodes
+and are dropped before selection. Recomputing BH on the 3,747 mapped features only (local MetChange p-values, 607
+active perturbations that matched by name; the local BH reproduces `qvals.csv` to 5e-15): median significant mapped
+features per perturbation 315 → 319; 2,923 extra calls on 606,928 (+0.5%); 6 of 607 perturbations cross the
+`--min-sources 3` threshold. The unmapped rows are 7.7% of all significant calls. Negligible: keep `qvals.csv`.
