@@ -54,6 +54,21 @@ For A549 with the `_min15` runs of both seeds: `sbatch launch_check_metabolic_co
 `--coverage <dir>/coverage.tsv` reuses the counts of an earlier run instead of reading the labels (e.g. to split a
 retrained run; runs locally). `n_sig_topn` is binned 0 / 1–99 / 100 (it is all-or-nothing); other variables by quantile.
 
+### Schuhknecht benchmark (`benchmark_schuhknecht.py`)
+
+Queries the fold models of a cross-validated MetChange run with the measured intracellular metabolome change of
+each drug (Schuhknecht et al., 10 µM, 48 h; inputs in `data/validation/schuhknecht/`): ions → intracellular GEM
+nodes (±1/n over the compartment copies, `e` excluded; by default only nodes that were MetChange training sources,
+`--restrict-nodes all` for every one; ambiguous ions dropped, `--ambiguous spread` to keep them), selection and
+`--signature-scale` as the run. A drug held out in fold i is queried with fold i's model, a never-trained drug with
+the mean of the folds. Metrics (percentiles, 0 = best): `spec` (own query vs the other queries on the drug's
+targets), `rankc` (drug among candidates after standardising each candidate over queries), `rank` (raw, among
+untrained candidates); permutation null over the query → drug assignment. Before scoring it rebuilds `--check-n`
+held-out LINCS perturbations of the first fold from the run's own inputs and stops if they do not reproduce
+`test_scores_heldout.npz` (inputs differ from training; locally they do: run it on the cluster).
+`sbatch launch_benchmark_schuhknecht_A549.sh [run ...] [-- options]` runs each run and its `_shuff` control
+(default: MetChange `_min15`, seeds 0 and 1); output `<run>/schuhknecht_benchmark[_<tag>]/`.
+
 Either source can be given alone. Output: `coverage.tsv`, `spec_by_coverage.tsv`, `spearman.tsv` in `--out-dir`
 (default `<results>/metabolic_coverage`).
 

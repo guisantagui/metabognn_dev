@@ -236,3 +236,58 @@ and are dropped before selection. Recomputing BH on the 3,747 mapped features on
 active perturbations that matched by name; the local BH reproduces `qvals.csv` to 5e-15): median significant mapped
 features per perturbation 315 → 319; 2,923 extra calls on 606,928 (+0.5%); 6 of 607 perturbations cross the
 `--min-sources 3` threshold. The unmapped rows are 7.7% of all significant calls. Negligible: keep `qvals.csv`.
+
+## 6. Schuhknecht benchmark: inputs (`data/validation/schuhknecht/`)
+
+Generated on the cluster by `scripts/schuhknecht_map/` (`map_gem_cpds_with_table.ipynb`: GEM ↔ ion map;
+`create_drugmap.py`: LINCS ↔ Schuhknecht drug/condition match for the earlier MetChange-vs-Schuhknecht correlation).
+
+**Metabolites.** The GEM's KEGG / HMDB ids are matched to the ion annotations (`Metainformation_Ions`, "Annotation IDs").
+Multiple matches were resolved by hand (30 cases); `dup_after_shuhknecht_map` = several GEM metabolites map to the
+same ion (isomers / ion annotated with several candidates). `metabolite_match_table_non_ambig_match.csv` is the
+non-ambiguous map **restricted to compartment `c`** (435 rows); the full table `cpd_info_wSchuhknecht.csv` has all
+compartments. Using the full table, non-ambiguous, intracellular (not `e`), network nodes:
+
+| | ions | network nodes |
+|---|---|---|
+| non-ambiguous, intracellular | 473 (445 with a `c` copy) | 959 (1–6 per ion: 177 / 160 / 98 / 24 / 12 / 2) |
+| … of which MetChange signature features (nodes that were sources in training) | 306 | 571 |
+| ambiguous (dropped so far), intracellular | 148 | 803 |
+
+**Drugs.** `drug_match_table.csv`: 750 Schuhknecht drugs matched to LINCS A549 by SMILES (68 exact time/dose,
+682 nearest time; 72 flagged `validated_metabolic`). The `matched_column` refers to the old `metabo_pert`
+averaged-delta columns; it is not needed for the benchmark (the query is the Schuhknecht profile itself). Of the
+750: 646 have known targets (candidates for ranking); 293 are among the A549 drugs evaluated in CV (active
+perturbations), so they were training positives in 4 of 5 folds; the other ~353 never entered training.
+
+**Design notes for the benchmark script (not written yet):**
+1. Query sources: Schuhknecht log2FC (48 h, 10 µM; sign already "positive = more", as `--signature-sign -1` makes
+   the MetChange signatures), select as in training (top 100 by |log2FC| among q < 0.05 if `_qsigtop` wins), each ion
+   spread ±1/n over its intracellular copies. Restrict to the 571 nodes that were training sources (306 ions) by
+   default; all 959 as a sensitivity check (sources the model never saw). Ambiguous ions: optionally spread over all
+   their candidate metabolites.
+2. Model per drug: the fold model in which the drug was held out (the 293); the 5-fold ensemble average for drugs that
+   never entered training. Report the two groups separately.
+3. Ranking: score all 646 candidate drugs from the protein scores (as `rank_prob` / `rank_probc`), rank of the true
+   drug, against a shuffled-query control (Schuhknecht profiles permuted across drugs) and the signature-similarity
+   baseline.
+4. Train/query mismatch: training sources are single compartment nodes with weight ±1, query sources are spread. If
+   the benchmark is weak, train a variant on compartment-collapsed MetChange signatures.
+
+### 6.1 Benchmark script (written, not yet validly run)
+
+`scripts/predict_targets/benchmark_schuhknecht.py` + `launch_benchmark_schuhknecht_A549.sh` implement the design
+above (README, "Schuhknecht benchmark"). Candidates and queries: the 646 matched drugs with targets (all have ≥ 3
+ions; median 100 of the 306 trained-node ions). Metrics `spec`, `rankc`, `rank` per drug, by group (`heldout_cv`
+293, `never_trained` 353, `validated_metabolic` 70), with a permutation null on the query → drug assignment.
+
+**Local runs are invalid.** A first local run gave chance everywhere (spec median 0.50–0.51 for the real runs and
+their controls, both seeds), but the script's reproduction check fails locally: rebuilding held-out LINCS
+perturbations of fold 0 (label columns identical between the home and scratch copies) gives drug scores with
+r = 0.32–0.68 against the saved `test_scores_heldout.npz`, and the protein-level probabilities differ too. The static
+per-protein features already disagree with the training ranges (e.g. `activity_down_hop1` max 0.2519 locally vs
+0.2523 among the training rows, impossible with identical inputs), so the local network / baseline / target files
+are not the ones the cluster runs used. Those outputs were deleted; the benchmark has to run on the cluster, where it
+checks itself before scoring. (Also: torch on MPS crashes on this macOS; the script uses CUDA or CPU, ~2 min per
+run on CPU.)
+
