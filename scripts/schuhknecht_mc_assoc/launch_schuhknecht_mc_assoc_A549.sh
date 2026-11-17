@@ -6,9 +6,9 @@
 #                                  producers baseline from the expression log2FC, drug match)
 #     2. overlap_enrichment.py     MetChange-significant vs Schuhknecht-significant metabolites per drug, against a
 #                                  mismatched-drug null and a size-matched expression baseline
-#     3. metchange_vs_expression_benchmark.R + sign_heterogeneity_analysis.R (needs R with data.table, tidyr, tibble,
-#        dplyr, lme4, performance, ggplot2; skipped with a message if Rscript is not available: the folder from step
-#        1 is small, rsync it and run step 3 locally with the command printed at the end)
+#     3. metchange_vs_expression_benchmark.R + sign_heterogeneity_analysis.R, in the conda env r-4.3.1 (needs
+#        data.table, tidyr, tibble, dplyr, lme4, performance, ggplot2; skipped with a message if they are missing:
+#        the folder from step 1 is small, rsync it and run step 3 locally with the command printed at the end)
 #   Output: <scratch>/results/mc_schuhk_assoc/limma_<penalty>_<compartments>/ (overlap_enrichment/, benchmark/)
 #SBATCH --job-name=mc_schuhk_assoc
 #SBATCH -N 1
@@ -42,22 +42,29 @@ for f in "${mc_dir}/log2FC.csv" "${mc_dir}/qvals.csv" "${expr_dir}/log2FC.csv" "
 done
 
 conda activate metabolic_drug_repurposing
-have_r=0
-command -v Rscript >/dev/null 2>&1 || module load lang/R >/dev/null 2>&1
-command -v Rscript >/dev/null 2>&1 && Rscript -e 'for (p in c("data.table","tidyr","tibble","dplyr","lme4","performance","ggplot2")) if (!requireNamespace(p, quietly = TRUE)) quit(status = 1)' \
-    && have_r=1
 status=0
+outs=()
 for comp in "${settings[@]}"; do
     out="${out_root}/limma_${penalty}_${comp//,/_}"
     echo "=== compartments ${comp} -> ${out}"
     python prepare_assoc_inputs.py --mc-dir "$mc_dir" --expr-dir "$expr_dir" --schuhknecht-dir "$schk_dir" \
         --network-dir "$net_dir" --compartments "$comp" --out-dir "$out" || { status=1; continue; }
     python overlap_enrichment.py --in-dir "$out" || status=1
+    outs+=("$out")
+done
+conda deactivate
+
+conda activate r-4.3.1
+have_r=0
+command -v Rscript >/dev/null 2>&1 && Rscript -e 'for (p in c("data.table","tidyr","tibble","dplyr","lme4","performance","ggplot2")) if (!requireNamespace(p, quietly = TRUE)) quit(status = 1)' \
+    && have_r=1
+for out in "${outs[@]}"; do
     if [[ $have_r -eq 1 ]]; then
+        echo "=== R benchmark -> ${out}/benchmark"
         Rscript -e 'source("metchange_vs_expression_benchmark.R"); source("sign_heterogeneity_analysis.R")' \
             "$out" "${out}/benchmark" > "${out}/benchmark.log" 2>&1 || { status=1; echo "R step failed: ${out}/benchmark.log"; }
     else
-        echo "R (with the packages) not available here: rsync ${out} and run, from scripts/schuhknecht_mc_assoc:"
+        echo "R (with the packages) not available in r-4.3.1: rsync ${out} and run, from scripts/schuhknecht_mc_assoc:"
         echo "  Rscript -e 'source(\"metchange_vs_expression_benchmark.R\"); source(\"sign_heterogeneity_analysis.R\")' <dir> <dir>/benchmark > <dir>/benchmark.log 2>&1"
     fi
 done

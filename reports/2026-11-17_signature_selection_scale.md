@@ -322,3 +322,186 @@ removed), and `launch_schuhknecht_mc_assoc_A549.sh`. All steps run end to end lo
 (numbers not meaningful). Local counts: 306 metabolites (`c`) / 327 (`intracellular`), 750 drugs; with the local
 labels ~610 of the 750 matched perturbations have no significant MetChange metabolite, so the overlap test rests on
 the ~115–140 drugs with calls in both datasets.
+
+## 7. `_qsigtop` results (q < 0.05, then the top 100 by |log2FC|)
+
+Seed 0, corrected labels, each against its own control. Per-drug gap (`spec_prob_timedose`, points, control −
+real), then paired by drug against the earlier selections (same drugs; "same perts" = per-drug means over shared
+perturbations only). `rank_prob` / `rank_probc` are raw ranks, so they only compare runs with the same candidate set
+(the `_qsig*` MetChange runs have 758 drugs, the others 1,358).
+
+| run | drugs | gap vs own control (p) | vs `_min15` s0 | vs `_min15` s1 | vs `_qsig` |
+|---|---|---|---|---|---|
+| expr `_qsigtop` | 1,358 | **10.5** (4e-16) | +2.2 (p 0.12) | −0.3 (0.74) | +8.0 (3e-8) |
+| TF `_qsigtop` | 1,346 | **7.8** (2e-11) | −0.3 (0.38) | −0.2 (0.44) | +5.1 (5e-5) |
+| MetChange `_qsigtop` (folds 1–4 only) | 606 | **10.3** (3e-10) | +0.9 (0.39); same perts −0.1 (0.85) | +0.6 (0.72); same perts −1.9 (0.99) | +6.0 (0.01) |
+| MetChange `_qsigtop_sdscale` | 758 | **8.1** (4e-7) | −0.8 (0.20); same perts −3.7 (8e-3) | −0.8 (0.22); same perts −3.2 (0.06) | +3.8 (0.10) |
+
+- MetChange `_qsigtop` **fold 0 is missing** (no `fold0/` in the download, cluster `compare` summary also on folds
+  1–4), most likely a failed array task as for `_sdscale` fold 3. Numbers above are on 4 of 5 folds.
+- `_qsigtop_sdscale` vs `_qsigtop` (same 606 drugs): −2.0 points (p = 0.12); `rank_prob` −4.4 ranks (p = 0.015).
+- Cross-signature, same drugs: expr `_qsigtop` vs TF `_qsigtop` +1.5 (p = 0.29); MetChange `_qsigtop_sdscale` vs
+  expr `_qsigtop` −1.9 (p = 0.07; same perts −3.1, p = 0.05).
+- MetChange `_sdscale` (4 of 5 folds, fold 3 still to rerun): 7.1 points; vs `_min15` −1.9 (s0, p = 0.36) and +0.7
+  (s1, p = 0.82).
+
+**Reading.**
+1. **Requiring significance costs nothing.** Significant-then-strongest equals the unfiltered top 100 for all three
+   signatures (paired differences within ±2 points, p ≥ 0.12), and beats the random-significant `_qsig` by 5–8
+   points. So the `_qsig` losses were the random sampling, not the significance filter.
+2. MetChange `_qsigtop` trains on half the perturbations (the covered ones) and does as well on them as `_min15`,
+   which trained on all: the uncovered perturbations add nothing to the covered ones. It cannot score the
+   uncovered half, so `_min15` stays the run with full drug coverage.
+3. **SD scaling does not help**, neither alone (`_sdscale`, provisional) nor on top of significance
+   (`_qsigtop_sdscale` ≤ `_qsigtop`). The scale bias of section 2 changes which metabolites are read but not how well
+   the drug is recovered; the high-variance metabolites carry as much drug information as the rest.
+4. Recipe: `_qsigtop` is the interpretable default (every signature feature is significant) at no cost; for
+   MetChange it is restricted to the 758 covered drugs. Expr and TF can switch at no cost. Pending: MetChange
+   `_qsigtop` fold 0, `_sdscale` fold 3, and a second seed if `_qsigtop` becomes the recipe.
+
+## 8. Schuhknecht: benchmark complete, and the association on the limma labels
+
+### 8.1 Benchmark, seed 1 control
+
+`metchange_rank_noGlobals_lr1e-3_min15_seed1_shuff` (rerun, reproduction check OK): `spec` 0.503 (all), never_trained
+0.472 (p = 0.12), validated_metabolic 0.483. The never_trained dip (0.469 / 0.480 in the real seeds) appears in the
+controls too (0.505 s0, 0.472 s1), so it is not signal. **The benchmark is null in both seeds, real and control.**
+
+### 8.2 MetChange vs Schuhknecht on the limma labels (`results/mc_schuhk_assoc/limma_rank_{c,intracellular}`)
+
+750 matched drugs (68 exact dose/time, 682 nearest time), 416 metabolites (`c`), MetChange sign flipped to
+production. The two compartment settings agree; numbers for `c`.
+
+**Coverage.** MetChange has significant metabolites (q ≤ 0.05) for **85 of 750** matched drugs, and when it has
+any it has most (median 365 of 416). Schuhknecht: median 7 significant metabolites per drug (57 drugs none). So the
+overlap test rests on 78 drugs, and on those MetChange's call set is nearly the whole metabolite list.
+
+**Overlap enrichment** (`overlap_enrichment/summary.tsv`):
+
+| | MetChange | expression producers, size-matched |
+|---|---|---|
+| overlap with Schuhknecht-significant, observed / mismatched-drug null | 1,002 / 882 (z 1.9, p = 0.018) | 783 / 700 (z 1.8, p = 0.020) |
+| sign-concordant overlaps, observed / null | 485 / 442 (p = 0.29) | 375 / 352 (p = 0.25) |
+| directional score (concordant − discordant) | −32 vs +2 (p = 0.59) | −33 vs +5 (p = 0.80) |
+| pooled sign concordance among overlaps | 48% | — |
+
+Per-drug Fisher: 1 of 78 at q ≤ 0.1. Overlap is slightly above the mismatched-drug null, but equally so for the
+expression baseline of the same size, and the directions do not agree. Paired MetChange vs expression directional
+score: p = 0.45.
+
+**Whole-profile checks (all 750 drugs, laptop, on the same matrices):**
+
+| | MetChange | expression producers |
+|---|---|---|
+| per-drug Spearman with Schuhknecht log2FC, median (mismatched null mean) | −0.007 (−0.001) | +0.008 |
+| same, metabolites centred across drugs | −0.001 (Wilcoxon p = 0.38) | — |
+| sign agreement on Schuhknecht-significant metabolites (459 drugs with ≥ 5), observed / mismatched null | **0.569 / 0.541 ± 0.014 (p = 0.02)** | 0.394 / 0.400 (p = 0.80) |
+
+(`intracellular`: 0.569 / 0.542, p = 0.03; expression 0.425 / 0.432.)
+
+**R benchmark** (`metchange_vs_expression_benchmark.R`, run on the laptop from the cluster matrices, the cluster
+had no R; `limma_rank_c/benchmark/`, log `benchmark.log`). Default selection: the 188 drugs in the top quartile of
+Schuhknecht response, 355 metabolites. `rhoc` = per-drug Spearman with the Schuhknecht log2FC after centring each
+metabolite across drugs (the drug-specific part).
+
+| | MetChange | expression producers |
+|---|---|---|
+| mean `rhoc`, 188 drugs (p vs 0) | **−0.013** (0.08) | **+0.033** (5e-6) |
+| MetChange − expression per drug | −0.046, MetChange better in 35% of drugs (p = 7e-6) | |
+| specificity permutation (mismatched drugs), MetChange | observed −0.013 vs null 0.000, p = 1.0 | |
+| pooled mixed model, slope (R² marginal) | −0.054 (0.0012) | +0.032 (0.0008) |
+| MetChange adds to expression (LRT) | p = 0.0025, **with a negative slope** | |
+| same, all 750 / 408 / 78 drugs | MetChange − expression −0.012 / −0.026 / −0.058, all p < 0.02 | |
+| gap vs expression, by number of Schuhknecht-significant metabolites (quartiles) | +0.013, −0.011, −0.008, −0.044 | |
+| direction AUROC on Schuhknecht-significant metabolites (90 drugs) | 0.504 | 0.521 |
+| sign accuracy, top 5% / 10% / 20% of MetChange values | 0.552 (p = 0.008) / 0.511 / 0.494 | 0.492 / 0.507 / 0.528 |
+
+`intracellular` (394 metabolites, 188 drugs) is the same: MetChange `rhoc` −0.015 vs expression +0.037,
+difference −0.052 (p = 2e-6), specificity p = 1.0, pooled slope −0.060 (LRT p = 7e-4), sign accuracy at the top
+5% / 10% / 20%: 0.548 (p = 0.008) / 0.502 / 0.500.
+
+**Reading.**
+1. On the limma labels, **MetChange does not agree with Schuhknecht for the same drug.** Across the profile its
+   drug-specific correlation is zero to slightly negative (−0.013; specificity permutation p = 1.0) and below the
+   naive expression-producers baseline (+0.033), increasingly so for the drugs with the strongest measured
+   response. The earlier "MetChange adds to expression" (delta-based labels) reappears only as an LRT with a
+   negative slope, i.e. not as agreement. The only positive hints are sign agreement on the most extreme values:
+   on Schuhknecht-significant metabolites 57% vs 54% for a mismatched drug (p = 0.02), and for MetChange's top 5%
+   values 55% (p = 0.008), vanishing at the top 10–20%. Small, inconsistent across thresholds, not a usable signal.
+   (The sign convention is the training one: corrected labels, `−log2FC` = production; with the opposite sign the
+   correlation would be +0.013 and the sign agreement 43% vs 46%, no better.)
+2. The expression baseline itself is weak (ρ ≈ 0.03), so measured 48 h metabolomics and LINCS ≤ 24 h
+   transcriptomics share little drug-specific signal in either representation.
+3. MetChange's significance is not informative here: it is on for 11% of drugs and then covers most metabolites.
+4. This explains the null benchmark (8.1). The model does read MetChange signatures (sections 5, 7), but the
+   measured profile of the same drug does not resemble them, so a MetChange-trained model cannot recover the drug
+   from measured metabolomics. The bottleneck is the label (MetChange vs measured), not the model. Contributing:
+   timepoints (≤ 24 h vs 48 h), nearest-time match for 91% of drugs, MetChange inferred from partly CycleGAN-inferred
+   transcriptomes. For the Schuhknecht query to be meaningful, the model would need to be trained or calibrated on
+   measured metabolomics (e.g. Schuhknecht itself, cross-validated over drugs), or the query compared at the level
+   where the two agree best.
+
+## 9. What can validate the tool, given 8.2
+
+The intended claim, that the tool finds compounds that change metabolism in a given way, cannot be validated
+through MetChange or expression labels: neither agrees with measured metabolomics of the same drug at the whole-profile
+level (MetChange ρ ≈ −0.01, expression producers ≈ 0.03). Part of that is data mismatch (48 h vs ≤ 24 h,
+nearest-time match for 91% of drugs, partly inferred transcriptomes), but it rules out validation through the
+inferred labels. An expr model supports only the weaker claim of compounds that cause a given transcriptional
+change in metabolic genes. MetChange is a network reading of the same transcriptomes, not a predictor of metabolite
+levels.
+
+Ways forward, in order of strength:
+
+1. **Train on measured metabolomics (Schuhknecht as training data, not as a query).** About 1,500 drugs in A549,
+   more than the LINCS A549 set. Use the same network model with Schuhknecht profiles as signatures, cross-validated
+   over drugs, against its own shuffled control. That directly tests "a measured metabolic change predicts the
+   targets of the drugs that cause it", with no inference step in the labels. LINCS / MetChange / expr then become
+   pretraining or added features, judged by whether they help on held-out Schuhknecht drugs. The query building
+   from `benchmark_schuhknecht.py` and the feature × perturbation signature input of the training script can be
+   reused.
+   **First check (laptop, ~1 h):** are the Schuhknecht profiles of drugs that share targets more similar than those
+   of random drug pairs? If not, this path fails at the data level.
+2. **Knowledge-based queries at the enzyme level.** Build the expected substrate-up / product-down change around
+   the target of drugs with simple, documented metabolic mechanisms (methotrexate / DHFR, brequinar or leflunomide /
+   DHODH, mycophenolate / IMPDH, statins / HMGCR, 5-FU or pemetrexed / TYMS, complex I inhibitors), and check that
+   their inhibitors rank near the top. This tests the network reasoning, not the labels, and needs no
+   high-throughput data. The Schuhknecht `validated_metabolic` drugs (70 with targets) are the natural set; the
+   measured profile can also be restricted to the metabolites around the target.
+3. **Prospective experiments:** targeted metabolomics or isotope tracing (or Seahorse) for a few predictions chosen
+   by 1 or 2. This is the only direct proof of the claim.
+
+Plan: run the shared-target similarity check (1) first; if it holds, set up Schuhknecht training, with (2) as a
+second, interpretable benchmark.
+
+Also: `launch_schuhknecht_mc_assoc_A549.sh` now runs the R step in the conda env `r-4.3.1` on the cluster (Python
+steps first, then `conda activate r-4.3.1`).
+
+### 9.1 Revised after discussion
+
+- **Schuhknecht as training data: deprioritised.** One cancer cell line and ~1,500 drugs, against hundreds of cell
+  lines and thousands of perturbations in LINCS. And intracellular metabolomics measures pools: a larger pool can come
+  from more production or less consumption. MetChange's intended claim is about production / consumption capacity
+  (e.g. drugs whose transcriptional response supports more NAD+ production), which pool measurements cannot test.
+  The Schuhknecht null is therefore not evidence against that claim, only against reading MetChange as pool change.
+  Pathway-level metabolomics can point to the pathway a drug hits, but not to the target (Sarvin et al., Nat Commun
+  2026, as described by the user).
+- **The expr model is not restricted to metabolic genes:** `launch_predict_targets_A549_expr_*` uses all DE genes on
+  `networks/gene` (protein network with transcriptional edges, no GEM layer). It is a generic transcriptome → target
+  model, the same class as the TF positive control. MetChange's specific value is the stoichiometric reading
+  (production vs consumption of a metabolite), and that is what needs validating.
+- **Validation split into two links:** (a) signature → target, already validated by target recovery in CV
+  (sections 5, 7); (b) transcriptome → MetChange → production / consumption, which belongs to MetChange's own
+  validation. Enzyme-level ground truth for the full chain:
+  1. **LINCS genetic perturbations of metabolic enzymes** (shRNA `trt_sh`, CRISPR `trt_xpr`, overexpression `trt_oe`)
+     in the same cell lines. Compute MetChange labels for them, query the trained model, and check whether the
+     perturbed enzyme ranks near the top. The ground truth is exact, with no polypharmacology and no new data
+     modality. **Most direct next step.**
+  2. **Inborn errors of metabolism:** enzyme deficiency → known biomarker metabolites, the standard GEM
+     benchmark (Shlomi et al., Mol Syst Biol 2009; IEMbase, OMIM / HMDB). The query is the biomarker profile, the
+     answer the deficient enzyme. Caveat: biomarkers are plasma / urine pools.
+  3. **Derived queries from the GEM:** for drugs annotated as inhibitors of a GEM enzyme (ChEMBL mechanism /
+     DrugBank actions), the expected production / consumption change around the enzyme's reaction. Self-built, so
+     partly circular with the network.
+  4. Flux-level measurements (isotope tracing, exometabolomics uptake / secretion, Seahorse) for selected
+     predictions, prospectively.

@@ -3,13 +3,16 @@
 Handoff note for continuing in a new session. Everything described here is committed up to
 HEAD `d11744b`, except the files listed in section 8.
 
-> **2026-11-17 — corrected MetChange matches expr and TF** (report 05, section 5). Retrained on the
-> corrected scratch labels (`_min15`, seeds 0 / 1), MetChange's per-drug gap is 8.3 / 7.7 points
-> (buggy: 4.2 / 2.7), not significantly different from expr (7.8 / 10.4) or TF (9.0 / 9.3) paired
-> by drug (p = 0.09–0.79). On perturbations with a full MetChange response it beats expr on the
-> same perturbations (14.6–14.7 vs 10.5–12.1). The deficit of reports 03–04 was the sign bug
-> (report 04: the home MetChange labels were the uncorrected limma output). Open: whether a
-> scale-free signature selection adds to this (`_sdscale`, `_qsig`, running).
+> **2026-11-17 (evening) — selection settled, Schuhknecht null explained** (report 05, sections 7–8).
+> `_qsigtop` (q < 0.05, then top 100 by |log2FC|) equals the unfiltered top 100 for expr (10.5 points),
+> TF (7.8) and MetChange (10.3, folds 1–4; fold 0 missing): significance can be required at no cost.
+> SD scaling does not help (`_qsigtop_sdscale` 8.1, `_sdscale` 7.1 provisional). The Schuhknecht
+> benchmark is null in both seeds and both controls. Cause: on the limma labels MetChange does not agree
+> with measured Schuhknecht metabolomics for the same drug (drug-specific ρ −0.013, below the
+> expression-producers baseline +0.033, p = 7e-6; specificity permutation p = 1.0).
+>
+> Earlier today: corrected MetChange matches expr and TF (report 05, section 5): per-drug gap 8.3 / 7.7
+> (seeds 0 / 1), vs expr 7.8 / 10.4 and TF 9.0 / 9.3, not significantly different.
 
 **Read first:** `reports/2026-11-17_signature_selection_scale.md` (report 05 — q-values unused; MetChange's
 top-100 is chosen by metabolite scale; `_qsig` / `_sdscale`; section 5: corrected MetChange results), then `reports/2026-11-16_labels_network_coverage.md` (report 04 — the label bug in the
@@ -279,6 +282,10 @@ Leftovers:
   (`--qvalue-top-n`, new). Reason: of the top 100 by |log2FC|, a median of 1 is significant for MetChange
   and 84 for expr (report 05, 5.4). `bash submit_train_w_shuff_noGlobals_lr1e-3_min15_qsigtop.sh` (also
   MetChange `_qsigtop_sdscale`: plus `--signature-scale sd`).
+  **`_qsigtop` done (report 05, section 7): no cost.** expr 10.5, TF 7.8, MetChange 10.3 points (folds 1–4;
+  **fold 0 missing, rerun it**); paired vs `_min15` within ±2 points (p ≥ 0.12), +5–8 over `_qsig`.
+  `_qsigtop_sdscale` 8.1, not better than `_qsigtop` (−2.0, p = 0.12). MetChange `_qsigtop` covers only
+  the 758 drugs with significant metabolites.
 - **Feature scale (report 05):** MetChange log2FC is not standardised per metabolite (the MetChange
   paper z-scores against controls), so the current top 100 is mostly a fixed set of high-variance
   metabolites (selection frequency vs metabolite SD: Spearman 0.89; 33 metabolites in > 50% of
@@ -287,6 +294,8 @@ Leftovers:
   (implemented: per-feature SD across perturbations, not centred, floored; z-scoring against
   controls rejected, many controls are constant in many features).
   `bash submit_train_w_shuff_mc_noGlobals_lr1e-3_min15_sdscale.sh` (MetChange, seed 0, with control).
+  `_sdscale` (folds 0–2, 4; fold 3 to rerun, then re-run compare): 7.1 points, vs `_min15` −1.9 / +0.7
+  (p = 0.36 / 0.82). Scaling does not help so far.
 - Representation (code + GPU): continuous MetChange values or a larger `--top-n` instead of the
   top-100 signs (`--signature-weights`, section 7).
 
@@ -320,10 +329,32 @@ Leftovers:
    script refuses to score in that case. Copy `data/validation/schuhknecht/` to the cluster first.
    Cluster reproduction check passed (r = 1.000000, 8/8). Local MetChange labels are an older
    version (4,086 features vs 5,707 on the cluster): local counts based on them are approximate.
-   **Result, seed 0: chance** (spec 0.500, rankc 0.519; control the same; report 05, 6.2).
+   **Result: chance in both seeds, real and control** (report 05, 6.2 and 8.1).
    Next: does MetChange agree with Schuhknecht at all, on the limma labels:
    `scripts/schuhknecht_mc_assoc/` (`sbatch launch_schuhknecht_mc_assoc_A549.sh`: prep, overlap
-   enrichment with MetChange q-values, the R benchmark vs the expression baseline).
+   enrichment with MetChange q-values, the R benchmark vs the expression baseline; R ran on the laptop,
+   no R on the cluster). **Done (report 05, 8.2): no agreement.** MetChange drug-specific ρ −0.013 vs
+   expression producers +0.033 (p = 7e-6); MetChange significant for only 85 of 750 matched drugs, and
+   then for most metabolites; overlap enrichment equal to the size-matched expression baseline; sign
+   agreement 57% vs 54% mismatched on Schuhknecht-significant metabolites. The benchmark cannot work
+   with MetChange-trained models; options: train / calibrate on measured metabolomics, or drop the
+   Schuhknecht query as validation of the MetChange path.
+
+**6.2b Validation strategy after the Schuhknecht null (report 05, section 9).** Inferred labels (MetChange,
+expr) do not agree with measured metabolomics of the same drug, so the claim "finds compounds that alter
+metabolism in a given way" cannot be validated through them. Next, in order:
+1. **Shared-target similarity in Schuhknecht** (laptop, ~1 h): are the profiles of drugs that share targets
+   more similar than those of random pairs? It decides whether step 2 is viable.
+2. **Train on Schuhknecht** (measured profiles as signatures, CV over drugs, with a shuffled control); then
+   test LINCS / MetChange / expr as pretraining or added features on held-out Schuhknecht drugs.
+3. **Knowledge-based enzyme queries** (DHFR, DHODH, IMPDH, HMGCR, TYMS, complex I; Schuhknecht
+   `validated_metabolic`) as an interpretable benchmark of the network reasoning.
+4. Prospective targeted metabolomics or tracing for a few predictions.
+**Revised (report 05, 9.1):** Schuhknecht training deprioritised (one cell line, pools ≠ production / consumption).
+The expr model already uses all genes (`networks/gene`), not only metabolic ones. **Next: LINCS genetic
+perturbations of metabolic enzymes** (`trt_sh` / `trt_xpr` / `trt_oe`): MetChange labels → trained model → does
+the perturbed enzyme rank near the top. Then inborn errors of metabolism (biomarker → deficient enzyme).
+R on the cluster: conda env `r-4.3.1` (the association launcher uses it now).
 
 **6.3 Size the data ceiling** (no GPU, ~a day):
 1. PCA of the A549 expression matrix: how many components explain 95% of variance across
