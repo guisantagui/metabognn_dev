@@ -505,3 +505,59 @@ steps first, then `conda activate r-4.3.1`).
      partly circular with the network.
   4. Flux-level measurements (isotope tracing, exometabolomics uptake / secretion, Seahorse) for selected
      predictions, prospectively.
+
+### 9.2 Sarvin et al. (Nat Commun 2026, doi 10.1038/s41467-026-78024-8), what it offers
+
+Read from the main text (methods and data availability not seen yet).
+- **Dataset with enzyme-level ground truth:** 76 known drugs targeting 30 metabolic enzymes (Supplementary Data 1),
+  HCT116, 6 doses (0.5 nM–50 µM) × 6 times (10 min–24 h), LC-MS, 481 annotated metabolites. HCT116 is a LINCS
+  cell line, and the time range overlaps LINCS (3–24 h), unlike Schuhknecht (A549, 48 h).
+- **How the target shows in pools:** locally and early. Substrate accumulates and product depletes around the
+  inhibited enzyme (MPA / IMPDH: IMP up, GTP down, AMP unchanged; DHODH inhibitors: DHO up, UTP down within 2 h).
+  The information is in substrate / product pairs of the target reaction, not in whole-profile correlation (the
+  test in 8.2).
+- **Their model:** a CNN over the time × dose matrix plus a GNN on HumanCyc pathway graphs predicts the target
+  *pathway* (373 candidates): top 1 for 29% of drugs, top 3 47%, AUC 0.87. The enzyme was assigned by rescue
+  experiments, not by the model. Ours predicts proteins from transcriptomes, which costs nothing per compound in
+  LINCS: complementary.
+- **Possible reason MetChange anti-correlates with pools (8.2, negative slope):** an inhibitor blocks flux
+  post-translationally; the transcriptional response is secondary, often compensatory (upregulating the blocked
+  pathway). MetChange then reads "more production" where the pool of the product falls. To check, not assumed.
+
+**Data (checked 2026-11-17, figshare 29268887):** public but **raw only** — `Data_mzxml.zip` (8.9 GB of mzXML)
+and `Sample description.xlsx` (saved to `data/validation/sarvin/`: 76 drugs by catalogue number and name,
+pravastatin / teriflunomide / mycophenolate mofetil / pemetrexed / 2-deoxy-D-glucose …, with the negative-control
+coding). **No processed intensity table, no annotation, no drug → target column** (the targets are in
+Supplementary Data 1 of the paper, not in the deposit). Using it means peak picking + alignment (XCMS / MZmine),
+m/z annotation against HMDB and control normalisation: days of work, and the published values would not be
+reproduced exactly. A targeted extraction of only the substrates / products of the ~30 target enzymes from the
+mzXML is much lighter than full untargeted processing and would be enough for the local test below. Supplementary
+Data 1 (drug → enzyme) is needed either way.
+
+### 9.3 Which of these actually validate the labels (they mostly do not)
+
+Correction to 9.1–9.2: none of the pool-metabolomics tests proposed there validate the MetChange labels. A
+MetChange label claims that the drug's transcriptional response supports more (or less) **production or
+consumption** of a metabolite. The direct ground truth is flux. Pools (Schuhknecht, Sarvin) are indirect, and for
+the enzyme inhibitors in question they are not even expected to agree: an inhibitor blocks its enzyme
+post-translationally, without changing its expression, so a correct MetChange need not mirror the
+substrate-up / product-down pattern. Agreement would be a bonus; disagreement is not evidence against MetChange;
+and the compensation pattern fits both "MetChange is right and the cell compensates" and "MetChange is noise".
+The local Schuhknecht test (metabolic-target drugs, target reaction only) and the Sarvin comparison are therefore
+**characterisation of how the labels relate to pools, not validation**. The LINCS-inhibitor check (9.2, item 2)
+shows whether MetChange carries specific, reproducible information around the target — useful, and what the
+target model relies on — but not whether its direction corresponds to a real change in production; CV target
+recovery (sections 5, 7) already shows that kind of informativeness globally.
+
+The chain, and what tests each link:
+
+| link | claim | test | status |
+|---|---|---|---|
+| (a) signature → target | the model reads a metabolic signature and recovers the drug's targets | held-out target recovery vs shuffled control | **done** (8–10 points, sections 5, 7) |
+| (b) transcriptome → MetChange | the network reading turns expression into production / consumption capacity | **LINCS genetic perturbations of metabolic enzymes** (`trt_sh` / `trt_xpr` / `trt_oe`): knockdown of an enzyme should read as less production of its products, overexpression as more, including 1–2 reactions away | feasible now, the one test that is really about the labels; partly circular (MetChange reads the perturbed transcript itself) |
+| (c) enzyme transcript → enzyme protein | MetChange's assumption that expression tracks enzyme abundance | drug proteomics atlas (Mitchell et al. 2023, thousands of compounds, cited by Sarvin) vs expression-inferred enzyme changes for the same drugs | depends on cell-line / timepoint overlap with LINCS, **not checked** |
+| (d) capacity → flux | the claim itself | isotope tracing, or exometabolomics uptake / secretion, under drug treatment | no large public resource known; realistically a prospective experiment on a few predictions |
+
+Framing for the paper: (a) is validated; the labels get (b) plus whatever the MetChange publication validated;
+(d) is one or two prospective experiments on top predictions. Pool metabolomics is then presented for what it is
+— a different measurement — with Schuhknecht / Sarvin used to describe the relation, not to validate.

@@ -340,21 +340,67 @@ Leftovers:
    with MetChange-trained models; options: train / calibrate on measured metabolomics, or drop the
    Schuhknecht query as validation of the MetChange path.
 
-**6.2b Validation strategy after the Schuhknecht null (report 05, section 9).** Inferred labels (MetChange,
-expr) do not agree with measured metabolomics of the same drug, so the claim "finds compounds that alter
-metabolism in a given way" cannot be validated through them. Next, in order:
-1. **Shared-target similarity in Schuhknecht** (laptop, ~1 h): are the profiles of drugs that share targets
-   more similar than those of random pairs? It decides whether step 2 is viable.
-2. **Train on Schuhknecht** (measured profiles as signatures, CV over drugs, with a shuffled control); then
-   test LINCS / MetChange / expr as pretraining or added features on held-out Schuhknecht drugs.
-3. **Knowledge-based enzyme queries** (DHFR, DHODH, IMPDH, HMGCR, TYMS, complex I; Schuhknecht
-   `validated_metabolic`) as an interpretable benchmark of the network reasoning.
-4. Prospective targeted metabolomics or tracing for a few predictions.
-**Revised (report 05, 9.1):** Schuhknecht training deprioritised (one cell line, pools ≠ production / consumption).
-The expr model already uses all genes (`networks/gene`), not only metabolic ones. **Next: LINCS genetic
-perturbations of metabolic enzymes** (`trt_sh` / `trt_xpr` / `trt_oe`): MetChange labels → trained model → does
-the perturbed enzyme rank near the top. Then inborn errors of metabolism (biomarker → deficient enzyme).
-R on the cluster: conda env `r-4.3.1` (the association launcher uses it now).
+**6.2b Validation strategy after the Schuhknecht null (report 05, sections 9–9.3).** Inferred labels do not
+agree with measured metabolomics of the same drug (8.2). **Key distinction (9.3): pool metabolomics does not
+validate the MetChange labels at all.** A MetChange label claims production / consumption *capacity*; the ground
+truth for that is flux. An enzyme inhibitor acts post-translationally, so a correct MetChange need not mirror the
+substrate-up / product-down pattern in pools — disagreement is not evidence against it, agreement is a bonus.
+Schuhknecht / Sarvin tests are **characterisation**, not validation. Schuhknecht training is deprioritised (one
+cancer cell line, ~1,500 drugs vs thousands of LINCS perturbations in hundreds of cell lines; pools cannot
+separate more production from less consumption). The expr model is not restricted to metabolic genes: the expr
+launchers use all DE genes on `networks/gene` (no GEM layer), so it is a generic transcriptome → target model and
+the stoichiometric reading is MetChange's specific contribution.
+
+The chain and what tests each link (report 05, 9.3): (a) signature → target = **done** (CV target recovery,
+8–10 points over control); (b) transcriptome → MetChange = the LINCS genetic-perturbation test below; (c) enzyme
+transcript → enzyme protein = drug proteomics atlas, overlap not checked; (d) capacity → flux = the claim itself,
+prospective tracing only.
+
+**To do, in order:**
+1. **LINCS genetic perturbations of metabolic enzymes (link b, the one real label test).** `trt_sh` / `trt_xpr`
+   (knockdown / knockout) and `trt_oe` (overexpression) signatures of GEM enzymes, in the cell lines with the
+   most coverage. Two readouts: (i) **label-level** — does knockdown of an enzyme read as less production of its
+   products (and overexpression as more), including 1–2 reactions away from the perturbed gene? (ii)
+   **model-level** — query the trained model with those MetChange signatures: does the perturbed enzyme rank near
+   the top? Exact ground truth, no polypharmacology, no new data modality. Partly circular (MetChange reads the
+   perturbed transcript itself), so report the 1–2-reaction-away version separately.
+   *First step (no GPU):* count how many GEM enzymes have `trt_sh` / `trt_xpr` / `trt_oe` signatures per cell
+   line, and whether A549 or another line has the best coverage. Then compute MetChange labels for them
+   (`scripts/compute_labels`, same recipe as the drug labels) on the cluster.
+2. **MetChange around the target reaction for known metabolic inhibitors** (characterisation, cluster: needs the
+   **corrected** labels, the laptop copy is the old uncorrected one). LINCS drugs whose target is a GEM enzyme
+   (MTX / DHFR, MPA / IMPDH, leflunomide-teriflunomide / DHODH, statins / HMGCR, pemetrexed / TYMS, …): restricted
+   to the target reaction's substrates and products, is MetChange specific to the drug vs other drugs, and in
+   which direction (block vs compensation)? Expression read the same way as comparison. Tests the compensation
+   hypothesis for the negative slope in 8.2.
+3. **Local Schuhknecht test** (characterisation, laptop, runs on the corrected matched matrices in
+   `results/mc_schuhk_assoc/limma_rank_*`): Schuhknecht drugs with a GEM-enzyme target (its `validated_metabolic`
+   set, ~70 with targets), only the target reaction's substrates / products. Does Schuhknecht show substrate up /
+   product down at 48 h, and what does MetChange say at the same metabolites? Needs the drug → enzyme annotation
+   already used by the benchmark. Caveat: few drugs will have an annotated, measured substrate or product.
+4. **Knowledge-based enzyme benchmark** (link a, interpretable): expected substrate-up / product-down query
+   around the enzymes of drugs with simple documented mechanisms (DHFR, DHODH, IMPDH, HMGCR, TYMS, PAICS, UMPS,
+   complex I) — do the known inhibitors rank at the top? Self-built from the GEM, so partly circular with the
+   network; cheap and easy to read.
+5. **Inborn errors of metabolism** (link a, external ground truth): deficiency → biomarker metabolites
+   (Shlomi et al., Mol Syst Biol 2009; IEMbase, OMIM / HMDB). Query = biomarker profile, answer = the deficient
+   enzyme. Caveat: plasma / urine pools.
+6. **Prospective**: isotope tracing / exometabolomics for a few top predictions (link d, the only direct test of
+   the claim).
+
+**Sarvin et al. (Nat Commun 2026, report 05, 9.2).** 76 known drugs, 30 metabolic enzymes, HCT116 (a LINCS cell
+line), 6 doses × 6 times (10 min–24 h) — the best-matched public dataset (Schuhknecht is A549 at 48 h only).
+**But figshare 29268887 holds raw data only:** `Data_mzxml.zip` (8.9 GB mzXML) + `Sample description.xlsx`
+(downloaded to `data/validation/sarvin/`: 76 drugs by catalogue number / name, control coding). No processed
+intensity matrix, no annotation, no drug → target table (that is Supplementary Data 1 of the paper). Full
+untargeted processing (XCMS / MZmine + HMDB annotation + control normalisation) is days of work and would not
+reproduce their values exactly; a **targeted extraction of the ~30 target enzymes' substrates / products** from
+the mzXML is the lighter option, and enough for test 2–3 style comparisons. Supplementary Data 1 is needed either
+way. Their model predicts the target *pathway* (373 candidates: top 1 29%, top 3 47%, AUC 0.87) from a
+time × dose metabolomics matrix, and the enzyme was pinned down by rescue experiments — complementary to ours
+(proteins from transcriptomes, free for thousands of LINCS compounds).
+
+R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` activates it for the R step).
 
 **6.3 Size the data ceiling** (no GPU, ~a day):
 1. PCA of the A549 expression matrix: how many components explain 95% of variance across
