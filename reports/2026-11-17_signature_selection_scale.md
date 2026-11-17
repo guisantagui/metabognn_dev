@@ -89,3 +89,84 @@ Check on the laptop MetChange labels (function extracted from the script; no tor
 Run: `bash submit_train_w_shuff_mc_noGlobals_lr1e-3_min15_sdscale.sh` (MetChange `_min15` + `--signature-scale sd`,
 seed 0, corrected labels, with control). Compare with the corrected `_min15` retrain (same seed and folds) and with
 `_qsig`. Expr could get the same option, but its scale bias is much smaller (section 2).
+
+## 5. MetChange retrained on the corrected labels (`_min15`, seeds 0 and 1)
+
+Runs `metchange_rank_noGlobals_lr1e-3_min15{,_seed1}{,_shuff}`, current recipe, scratch labels (rerun of the fixed
+`limma_DE.R`; `config_fold0.json` checked), same seeds and folds as the buggy runs of report 03 (now
+`..._signbug` on scratch; the laptop copy of the seed-0 buggy pair was overwritten by this download, its numbers are
+in reports 03–04). Unscaled `--ignore-qvalue --top-n 100` selection, i.e. still with the scale problem of section 2.
+
+Per-drug gap over own control (points), Wilcoxon p:
+
+| metric | MetChange s0: buggy → corrected | MetChange s1: buggy → corrected | expr s0 / s1 | TF s0 / s1 |
+|---|---|---|---|---|
+| `spec_prob_timedose` | 4.2 → **8.3** (6e-12) | 2.7 → **7.7** (4e-11) | 7.8 / 10.4 | 9.0 / 9.3 |
+| `rank_probc` | 6.4 → **9.3** | 4.4 → **7.7** | 8.0 / 11.5 | 10.4 / 10.3 |
+| `rank_prob` | 1.3 → **2.5** (1e-11) | 0.7 → **2.5** (5e-9) | 3.3 / 3.6 | 3.3 / 3.3 |
+| `rank_prob` per drug, real / control | 0.381 / 0.415 | 0.376 / 0.414 | 0.381 / 0.437, 0.390 / 0.441 | 0.397 / 0.445, 0.383 / 0.452 |
+
+Real beats control per drug in 5/5 folds in both seeds (fold medians: real 0.39–0.43, control 0.47–0.53).
+
+**Paired by drug between signatures** (`spec_prob_timedose`, as in report 03, 10.1):
+
+| comparison | seed | median gap A / B | paired median difference | drugs A > B | p |
+|---|---|---|---|---|---|
+| expr vs MetChange | 0 | 7.8 / 8.3 | +1.0 | 51% | 0.79 |
+| expr vs MetChange | 1 | 10.4 / 7.7 | +2.2 | 53% | 0.085 |
+| TF vs MetChange | 0 | 9.0 / 8.3 | +2.4 | 53% | 0.21 |
+| TF vs MetChange | 1 | 9.3 / 7.7 | +2.5 | 53% | 0.12 |
+| MetChange corrected vs buggy | 1 | 7.7 / 2.7 | +3.0 | 55% | 2.5e-5 |
+
+(Report 03's "expr and TF beat MetChange, p = 0.023 / 7e-5 and 9e-4 / 7e-5" is withdrawn: it was the sign bug.)
+
+**Coverage split, corrected runs** (`metabolic_coverage_fixedlabels/`, `--coverage` reusing report 04's counts):
+
+| `n_sig_topn` | perts / drugs | MetChange s0 | MetChange s1 | expr s0 | expr s1 |
+|---|---|---|---|---|---|
+| 0 of 100 | 2,010 / 1,045 | 5.4 (5e-4) | 5.6 (3e-4) | 7.3 | 11.8 |
+| 1–99 | 250 / 174 | 8.4 (1e-3) | 13.5 (1e-4) | 13.3 | 16.9 |
+| 100 of 100 | 1,245 / 645 | **14.6** (<1e-6) | **14.7** (<1e-6) | 12.1 | 10.5 |
+
+Per-perturbation Spearman of MetChange's gain with `n_sig_topn`: 0.10 / 0.11 (expr: 0.01 / 0.02).
+
+### 5.1 Reading
+
+1. **The MetChange deficit was the sign bug.** On corrected labels MetChange reads the signature as well as expr and
+   TF: gap 7.7–8.3 points, not significantly different from either, paired by drug, in both seeds. Plain per-drug
+   ranking now moves too (2.5 points, p < 1e-8; buggy: 0.7–1.3), close to expr / TF (3.3–3.6).
+2. **Where MetChange has a response it outperforms expr**: 14.6–14.7 points on fully covered perturbations vs 10.5–12.1
+   for expr on the same ones. Its weaker spot is the 57% of active perturbations with no significant MetChange
+   response (5.4–5.6 vs 7.3–11.8), which pulls its overall gap down to the expr level. Unlike before, its gain now
+   tracks coverage (Spearman 0.10 vs ~0.01 for expr).
+3. Even uncovered perturbations carry some signal (5.4–5.6 points, p < 1e-3): the top-100 values are not pure noise
+   when no feature passes q < 0.05.
+4. These runs still use the scale-biased selection (section 2). `_sdscale` and `_qsig` test whether a scale-free
+   selection adds to this.
+
+### 5.2 MetChange `_qsig`: worse than top-100
+
+`metchange_rank_noGlobals_lr1e-3_min15_qsig{,_shuff}` (q < 0.05, random cap 100, corrected labels, seed 0). The
+significance filter keeps 1,791 of 3,970 perturbations (758 of 1,358 drugs). Expr / TF `_qsig` not yet available.
+
+Against its own control: `spec_prob_timedose` 6.1 points (p = 1e-3, 56% of drugs better, 5/5 folds), `rank_probc`
+7.7 (4e-6), `rank_prob` 2.4 (9e-7; per drug 0.409 vs 0.454).
+
+Against the corrected `_min15` runs on the **same drugs / the same perturbations** (each drug held out once per run, so
+per-drug gaps pair across runs even though the folds differ):
+
+| reference | restricted to | drugs | reference gap | `_qsig` gap | paired difference | p |
+|---|---|---|---|---|---|---|
+| MetChange `_min15` s0 | same drugs | 758 | 11.3 | 6.1 | −4.1 | 0.01 |
+| MetChange `_min15` s0 | same perturbations | 735 | 14.2 | 5.9 | −6.7 | 6e-4 |
+| MetChange `_min15` s1 | same drugs | 758 | 10.4 | 6.1 | −3.4 | 0.012 |
+| MetChange `_min15` s1 | same perturbations | 736 | 11.9 | 5.9 | −5.3 | 3e-3 |
+| expr `_min15` s0 / s1 | same perturbations | 735 / 736 | 11.8 / 10.5 | 5.9 | −5.6 / −4.6 | 6e-3 / 0.02 |
+
+**Reading.** On the perturbations it keeps, `_qsig` reads the signature about half as well as the current top-100
+selection. Two changes are confounded: (a) half the training perturbations are gone, and the dropped (uncovered) ones
+do carry signal (section 5, 5.4–5.6 points); (b) covered perturbations have thousands of significant features (median
+`n_sig_mc` ≈ 4,400 among covered ones), and `_qsig` keeps a random 100 of them instead of the largest changes. So
+magnitude carries information despite the scale bias; the significance threshold is not the way to remove it.
+`_sdscale` (top 100 by scaled magnitude, all perturbations) is the cleaner test. The published TF setting (`_qsig` for
+TF) is still worth having as the faithful positive control.

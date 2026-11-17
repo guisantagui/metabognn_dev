@@ -1,19 +1,18 @@
-# Project state — 2026-11-16
+# Project state — 2026-11-17
 
 Handoff note for continuing in a new session. Everything described here is committed up to
 HEAD `d11744b`, except the files listed in section 8.
 
-> **2026-11-16 — the MetChange model results so far are invalid** (report 04,
-> `reports/2026-11-16_labels_network_coverage.md`). The home MetChange labels that every MetChange
-> run read until `d11744b` are the **uncorrected** limma output: 24,512 of 44,396 A549 perturbations
-> (55%, exactly R's flip set) have log2FC negated relative to the scratch rerun. Expr / TF runs read
-> scratch and are unaffected. MetChange must be retrained on the scratch labels (6.1) before any
-> MetChange vs expr / TF comparison. Also new: the network is ruled out (expr on `combined` ≈ on
-> `gene`), and MetChange's own coverage is all-or-nothing (57% of active perturbations have no
-> significant feature among the 100 read).
+> **2026-11-17 — corrected MetChange matches expr and TF** (report 05, section 5). Retrained on the
+> corrected scratch labels (`_min15`, seeds 0 / 1), MetChange's per-drug gap is 8.3 / 7.7 points
+> (buggy: 4.2 / 2.7), not significantly different from expr (7.8 / 10.4) or TF (9.0 / 9.3) paired
+> by drug (p = 0.09–0.79). On perturbations with a full MetChange response it beats expr on the
+> same perturbations (14.6–14.7 vs 10.5–12.1). The deficit of reports 03–04 was the sign bug
+> (report 04: the home MetChange labels were the uncorrected limma output). Open: whether a
+> scale-free signature selection adds to this (`_sdscale`, `_qsig`, running).
 
 **Read first:** `reports/2026-11-17_signature_selection_scale.md` (report 05 — q-values unused; MetChange's
-top-100 is chosen by metabolite scale, `_qsig` launchers), then `reports/2026-11-16_labels_network_coverage.md` (report 04 — the label bug in the
+top-100 is chosen by metabolite scale; `_qsig` / `_sdscale`; section 5: corrected MetChange results), then `reports/2026-11-16_labels_network_coverage.md` (report 04 — the label bug in the
 MetChange runs, expr on `combined`, full coverage check), then `reports/2026-11-14_seed_tf_expr.md` (report 03 — second seed, MetChange vs expr
 vs TF, early stopping and lr schedule; sections 9–10 have the current recipe, the two-seed
 result and the metabolic-coverage check), then `reports/2026-11-14_lr_noglobals_matched.md` (report 02 —
@@ -95,45 +94,40 @@ Two problems were found and are now understood:
 median of the per-drug real − control differences, in percentile points; it is what the
 Wilcoxon p tests. Report 02's "5.6 points" was a difference of medians (paired: 4.2).
 
-**Caveat for everything MetChange below (report 04):** these MetChange runs were trained on labels with
-55% of perturbations sign-flipped. Their gaps are over valid controls but probably underestimates, and
-the MetChange vs expr / TF comparisons are void until retrained. Expr / TF numbers stand.
-
-Per-drug gap (points), p — real vs own control, current recipe, seeds 0 / 1 (report 03, 9–10):
+Per-drug gap (points), p — real vs own control, current recipe, seeds 0 / 1. MetChange on the
+corrected labels (report 05, section 5); expr / TF from report 03, 9–10:
 
 | metric | MetChange | expr | TF (positive control) |
 |---|---|---|---|
-| `spec_prob_timedose` (leak-free) | 4.2 / 2.7 (1e-4 / 7e-3) | 7.8 / 10.4 (2e-11 / 1e-14) | 9.0 / 9.3 (8e-15 / 7e-15) |
-| `rank_probc` | 6.4 / 4.4 | 8.0 / 11.5 | 10.4 / 10.3 |
-| `rank_prob` | 1.3 / 0.7 (1e-3 / 0.10) | 3.3 / 3.6 | 3.3 / 3.3 |
+| `spec_prob_timedose` (leak-free) | 8.3 / 7.7 (6e-12 / 4e-11) | 7.8 / 10.4 (2e-11 / 1e-14) | 9.0 / 9.3 (8e-15 / 7e-15) |
+| `rank_probc` | 9.3 / 7.7 | 8.0 / 11.5 | 10.4 / 10.3 |
+| `rank_prob` | 2.5 / 2.5 (1e-11 / 5e-9) | 3.3 / 3.6 | 3.3 / 3.3 |
 
-Paired by drug, expr and TF each beat MetChange in both seeds (expr: p = 0.023 / 7e-5; TF:
-9e-4 / 7e-5); expr vs TF is not significant (p = 0.36 / 0.68).
+Paired by drug, MetChange vs expr: p = 0.79 / 0.085; vs TF: 0.21 / 0.12; expr vs TF: 0.36 / 0.68.
+**All three signatures are indistinguishable.** (Sign-buggy MetChange was 4.2 / 2.7, 6.4 / 4.4,
+1.3 / 0.7; corrected vs buggy, seed 1: p = 2.5e-5.)
 
 - **The warm-up (`--min-epochs 15`) fixed the collapse**: no FNN keeps epoch 1–2 any more
   (before: 7–8/15 for TF and expr). Expr was training-limited and now matches the positive
   control, all five folds at 0.30–0.32 (`spec_prob_timedose` per perturbation); TF also gained
   (6.8 → 9.0).
-- **MetChange training is done.** Warm-up, patience 25 and `ReduceLROnPlateau` all leave its
-  gap at 3.6–4.2 points (before 4.2). Kept epochs move later, but the scores don't improve.
-  Plateau ≈ StepLR for all three signatures; keep StepLR.
-- **Main open question: MetChange reads the signature about half as well as the expression it
-  is computed from** (4.2 vs 7.8 points), and barely moves plain ranking (1.3 vs 3.3) — void
-  until retrained (report 04). Candidate causes: the label sign bug (report 04, now the first
-  suspect); **network ruled out** (below); coverage (below); representation (top-100 reactions,
-  `np.sign`), CycleGAN-inferred GPR genes (6.3), untested.
+- **Schedule variants** (patience 25, `ReduceLROnPlateau`) made no difference on sign-buggy
+  MetChange, nor on expr / TF; keep StepLR. Not retested on corrected MetChange.
+- **Resolved: "MetChange reads the signature half as well as expr"** (reports 03–04) was the
+  label sign bug. Network ruled out independently (below).
 - **Expr on the `combined` network performs as well as on `gene`** (report 04, section 2; seed 0,
   same folds, `expr_combined_noGlobals_lr1e-3_min15`). Per-drug gap over own control:
   `spec_prob_timedose` 7.7 (p = 3e-12) vs 7.8 on `gene`, `rank_probc` 8.2 vs 8.0, `rank_prob` 3.0
   vs 3.3; real better in 5/5 folds. The MetChange network is not why MetChange lags expr.
-- **Robust across two seeds: expr ≈ TF > MetChange.** Seed spread is 1.5 points for MetChange
-  and 2.6 for expr; MetChange's paired deficit (4.8–6.9 points) is larger.
+- **Robust across two seeds: MetChange ≈ expr ≈ TF** (corrected labels). Per-drug gaps agree
+  only moderately between seeds (MetChange Spearman 0.32): read effects in aggregate, not drug by drug.
 - **Metabolic coverage** (full data, report 04 section 3): in DE terms it is not the issue
   (every active perturbation has ~14–15% of its DE genes in Human-GEM, the background share).
   In MetChange's own output it is all-or-nothing: 57% of active perturbations have no
-  significant feature among the 100 the model reads, 35% have all 100. Sign-buggy MetChange
-  runs gain 7.1–7.3 points on fully covered perturbations (both seeds, p ≈ 4e-6) and ~0–3 on
-  uncovered ones; expr gains 7–12 on uncovered ones too. Redo the split after retraining.
+  significant feature among the 100 the model reads, 35% have all 100. Corrected MetChange
+  (report 05, 5): 14.6 / 14.7 points on fully covered perturbations (expr on the same: 12.1 /
+  10.5), 5.4 / 5.6 on uncovered ones (expr 7.3 / 11.8). MetChange beats expr where it has a
+  response; uncovered perturbations are what pull its average down to the expr level.
 - The epoch cap does not bind for MetChange; for TF / expr 8–12/15 members reach epoch 80, but
   at an lr ≤ 1.6e-5, where more epochs change little.
 
@@ -142,10 +136,9 @@ matched sampling is worse on both metrics (report 02, section 4). What looked li
 matched-negative specificity in report 01 was mostly the dose/time shortcut plus `spec`-based
 epoch selection. Version (b) (grouped specificity loss) is demoted accordingly.
 
-**Still true:** per-drug plain ranking remains mostly prior for MetChange (0.396 vs 0.407), so a
-query will return broadly similar drugs whatever is asked, with the signature re-ordering within
-that. With expr and TF the signature clearly moves plain ranking (3.3 points per drug; networks
-differ, so compare gaps, not absolute values).
+**Plain ranking:** with corrected labels the MetChange signature moves per-drug `rank_prob` by
+2.5 points (0.381 vs 0.415 control), close to expr / TF (3.3–3.6). The prior still dominates the
+absolute ranking for all three (real 0.38–0.40 per drug vs 0.5 chance).
 
 ## 4. Code in `scripts/predict_targets/`
 
@@ -243,7 +236,9 @@ Analysed in report 03, section 9 (seed 0, same splits as `*_noGlobals_lr1e-3`):
 `{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_min15_seed1{,_shuff}`. Report 04:
 `expr_combined_noGlobals_lr1e-3_min15{,_shuff}` (seed 0), `metabolic_coverage_full{,_topnbins}/`.
 All MetChange runs listed here used the sign-buggy home labels (report 04).
-On scratch, `metchange_rank_noGlobals_lr1e-3_min15{,_seed1}{,_shuff}` were renamed to
+Corrected (report 05, section 5): `metchange_rank_noGlobals_lr1e-3_min15{,_seed1}{,_shuff}` (the laptop
+copies are now the corrected runs; the seed-0 buggy pair exists only on scratch as `_signbug`),
+`metabolic_coverage_fixedlabels/`. Report 05, 5.2: `metchange_rank_noGlobals_lr1e-3_min15_qsig{,_shuff}`. On scratch, `metchange_rank_noGlobals_lr1e-3_min15{,_seed1}{,_shuff}` were renamed to
 `..._signbug{,_shuff}` (2026-11-16), and `..._min15_pat25{,_shuff}` were deleted 2026-11-17 (laptop
 copies remain).
 
@@ -252,29 +247,24 @@ shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
 
 ## 6. Next steps, in priority order
 
-**6.1 Redo MetChange on the corrected labels** (report 04, section 5) — first, everything else waits.
-1. Provenance: scratch confirmed correct (`reference_level.txt`: "ctrl (explicit)"). Still to do:
-   read `compute_labels/logs/cmp_labels.out` for why the expr pair wrote nothing (fine if skipped
-   as same provenance; the expr runs read scratch).
-2. Retrain MetChange `_min15`, seeds 0 and 1, each with its control:
-   `bash submit_train_w_shuff_mc_min15_fixedlabels.sh` (renames the buggy runs to
-   `<run>_signbug{,_shuff}` first, then submits via `submit_with_shuffle_control.sh`). The recipe
-   stays: `--no-globals` and the warm-up were established on shuffled controls and on expr / TF,
-   which had correct labels. Established on buggy MetChange only: lr 0.001 vs 0.005, patience 25 /
-   plateau "no gain", and matched negatives "worse on both metrics" — retest matched negatives
-   first if corrected MetChange still lags expr.
-3. Redo report 03's MetChange vs expr / TF comparison (per-drug gaps, paired by drug) and the
-   coverage split: `check_metabolic_coverage.py --coverage <...>/metabolic_coverage_full/coverage.tsv
-   --run mc=<new run> ...` (no labels needed; q-values are unchanged by the bug).
-4. Check other consumers of the home MetChange copy (similarity checks, `metpath`,
+**6.1 Corrected MetChange: done** (report 05, section 5: MetChange ≈ expr ≈ TF, both seeds).
+Leftovers:
+1. Read `compute_labels/logs/cmp_labels.out` for why the expr pair of the label comparison wrote
+   nothing (fine if skipped as same provenance; the expr runs read scratch).
+2. Check other consumers of the home MetChange copy (similarity checks, `metpath`,
    `mc_schuhk_assoc`) and the other cell lines' MetChange labels (`compare_label_dirs.py`).
+3. The recipe parts established only on buggy MetChange (lr 0.001 vs 0.005, matched negatives
+   "worse") are low priority now that MetChange matches the positive control.
 
-**6.1b Then locate any remaining MetChange-vs-expr gap.**
+**6.1b Signature selection** (no MetChange-vs-expr gap left to explain; these may still improve it).
 - Network: **done, ruled out** (report 04, section 2: expr on `combined` 7.7 vs 7.8 points on `gene`).
-- Coverage: **done, real** (report 04, section 3): 57% of active perturbations have no significant
-  MetChange feature among the 100 read, 35% have all 100. Sign-buggy MetChange runs: 7.1–7.3 points
-  on fully covered perturbations, ~0 on uncovered. Next: an activity filter from MetChange's own
-  output (`n_sig_topn` ≥ 1 or = 100), evaluated on the same perturbations for expr.
+- Coverage: **done, real** (reports 04–05): 57% of active perturbations have no significant
+  MetChange feature among the 100 read. Corrected MetChange: 14.6–14.7 points on fully covered
+  perturbations (beats expr there), 5.4–5.6 on uncovered. `_qsig` is in effect the MetChange
+  activity filter (keeps 1,791 of 3,970 perturbations, 758 drugs).
+- **MetChange `_qsig` done: worse** (report 05, 5.2): 6.1 points vs 11.9–14.2 for `_min15` on the same
+  perturbations (p ≤ 3e-3). Half the training data dropped + random 100 of thousands of significant
+  features. Magnitude-based top-100 stays; `_sdscale` is the test of scale. Expr / TF `_qsig` pending.
 - **Significance (launchers ready, 2026-11-17):** every run so far, MetChange, expr and TF, used
   `--ignore-qvalue --top-n 100` (top 100 by |log2FC|, q-values unused; added 9 Nov in `5a28a0f`
   with the activity filter, no recorded reason). The published setting is significant features,
@@ -319,8 +309,8 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 
 - **Per-drug plain ranking is still prior-dominated** (section 3). This is the main scientific
   gap for the tool, not a bug.
-- **MetChange reads the signature about half as well as expr** (report 03, 9.2) — **void until
-  retrained** on corrected labels (report 04); see 6.1. Early stopping is resolved (`--min-epochs 15`).
+- ~~MetChange reads the signature about half as well as expr~~ — **resolved**: the label sign bug
+  (report 05, section 5; corrected MetChange ≈ expr ≈ TF).
 - **Laptop expression / MetChange labels are an old partial set** (`results/labels/A549/expr/`
   and `metchange/rank/`, 2 Nov: 699 of the 3,970 scored perturbations). Analyses needing labels
   must run on the cluster or after syncing the scratch copy. (The MetChange `_min15` control's
@@ -351,6 +341,7 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
   `submit_train_w_shuff_noGlobals_lr1e-3_min15_qsig.sh`, variants registered in
   `submit_with_shuffle_control.sh`, README row.
 - Report 05 (`reports/2026-11-17_signature_selection_scale.md`).
+- Report 05, section 5 (corrected MetChange results); `results/.../metabolic_coverage_fixedlabels/`.
 - `metabolic_target_prediction.py`: `--signature-scale {none,sd,mad}`, `--signature-scale-floor`;
   launchers `launch_predict_targets_A549_mc_noGlobals_lr1e-3_min15_sdscale{,_shuff}.sh`, wrapper
   `submit_train_w_shuff_mc_noGlobals_lr1e-3_min15_sdscale.sh`, variant registered, README row.
