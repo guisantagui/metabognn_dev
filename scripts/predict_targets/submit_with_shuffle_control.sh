@@ -12,6 +12,7 @@
 #             tf_noGlobals_lr1e-3_plateau expr_noGlobals_lr1e-3_plateau mc_noGlobals_lr1e-3_min15_seed1
 #             tf_noGlobals_lr1e-3_min15_seed1 expr_noGlobals_lr1e-3_min15_seed1
 #             expr_combined_noGlobals_lr1e-3_min15 {mc,tf,expr}_noGlobals_lr1e-3_min15_qsig
+#             mc_noGlobals_lr1e-3_min15_sdscale
 #             (array jobs, one fold per task)
 #   (launch_predict_targets_A549_<variant>[_shuff].sh)
 #   --real-job: the real run is already queued or running as <jobid> (or finished: give 0); only the control and the
@@ -45,7 +46,8 @@ declare -A real_dir=([tf]="${results}/tf_active200" [expr]="${results}/expr" [mc
                     [expr_combined_noGlobals_lr1e-3_min15]="${results}/expr_combined_noGlobals_lr1e-3_min15"
                     [mc_noGlobals_lr1e-3_min15_qsig]="${results}/metchange_rank_noGlobals_lr1e-3_min15_qsig"
                     [tf_noGlobals_lr1e-3_min15_qsig]="${results}/tf_active200_noGlobals_lr1e-3_min15_qsig"
-                    [expr_noGlobals_lr1e-3_min15_qsig]="${results}/expr_noGlobals_lr1e-3_min15_qsig")
+                    [expr_noGlobals_lr1e-3_min15_qsig]="${results}/expr_noGlobals_lr1e-3_min15_qsig"
+                    [mc_noGlobals_lr1e-3_min15_sdscale]="${results}/metchange_rank_noGlobals_lr1e-3_min15_sdscale")
 
 out_dir_of() {  # the last out_dir= assignment of a launcher (must match real_dir / real_dir + _shuff)
     grep -E '^out_dir=' "$1" | tail -1

@@ -39,7 +39,9 @@ Inputs
   --qvalues                same shape (qvals.csv); without it the --top-n features by |value| are used
   --signature-sign         multiply the signatures by this (MetChange inconsistency: -1 gives positive = more
                            production, the convention of the Schuhknecht benchmark)
-  --drug-targets           build_drug_targets.py output (drug = LINCS pert_id, target, effect, pertname)
+  --signature-scale        none (default) | sd | mad: divide each feature by its spread across perturbations before
+                           the --top-n selection (not centred); --signature-scale-floor floors the spread
+  --drug-targets          build_drug_targets.py output (drug = LINCS pert_id, target, effect, pertname)
   --drug-metabolites       build_network.py drug_metabolite_matches.tsv: metabolites removed from a drug's own
                            signature (the drug or its metabolites measured as a metabolite)
 
@@ -304,11 +306,32 @@ def feature_node_map(g, features, mode):
     return fmap
 
 
+def scale_signatures(val, method, floor_q):
+    """Divide each feature (row) by its spread across perturbations (columns): sd or mad (1.4826 x median absolute
+    deviation from the median). Not centred, so signs stay relative to the control. The spread is floored at the
+    floor_q quantile of all features' spreads, so near-constant features do not get inflated values. Only changes
+    which features --top-n selects; the signs used downstream are unchanged."""
+    if method == "sd":
+        s = val.std(axis=1, skipna=True)
+    else:
+        med = val.median(axis=1, skipna=True)
+        s = 1.4826 * val.sub(med, axis=0).abs().median(axis=1, skipna=True)
+    floor = float(np.nanquantile(s[s > 0], floor_q)) if (s > 0).any() else 1.0
+    n_floored = int((s.isna() | (s < floor)).sum())
+    s = s.fillna(floor).clip(lower=floor)
+    log(f"signature scaling ({method} across {val.shape[1]:,} perturbations): spread 5/50/95% "
+        f"{np.nanquantile(s, .05):.3g} / {np.nanquantile(s, .5):.3g} / {np.nanquantile(s, .95):.3g}; "
+        f"floor {floor:.3g} (quantile {floor_q}) applied to {n_floored:,} of {len(s):,} features")
+    return val.div(s, axis=0)
+
+
 def load_signatures(g, args, perts_table):
     """features x perturbations matrices -> per perturbation: significant mapped features and their sign."""
     val = pd.read_csv(args.signatures, index_col=0)
     val.index = val.index.astype(str)
     val = val * args.signature_sign
+    if args.signature_scale != "none":
+        val = scale_signatures(val, args.signature_scale, args.signature_scale_floor)
     qv = pd.read_csv(args.qvalues, index_col=0).reindex(index=val.index, columns=val.columns) if args.qvalues else None
     if args.mode in ("tf", "expr"):
         # gene symbols or Ensembl ids -> HGNC approved symbols; rows without one, or repeating one, are dropped
@@ -1098,7 +1121,14 @@ def main():
     fe.add_argument("--qvalue", type=float, default=0.05)
     fe.add_argument("--ignore-qvalue", action="store_true", help="use the top-n features by |value| instead")
     fe.add_argument("--top-n", type=int, default=100)
-    fe.add_argument("--min-abs-score", type=float, default=0.0)
+    fe.add_argument("--signature-scale", default="none", choices=["none", "sd", "mad"],
+                    help="divide each feature by its spread across all perturbations of --signatures before the "
+                         "--top-n selection (not centred: signs stay relative to the control). For MetChange, whose "
+                         "per-metabolite scales differ by orders of magnitude, so that the top-n is not a fixed set "
+                         "of high-variance metabolites (reports/2026-11-17_signature_selection_scale.md)")
+    fe.add_argument("--signature-scale-floor", type=float, default=0.05,
+                    help="floor of the spread, as a quantile of all features' spreads (near-constant features)")
+    fe.add_argument("--min-abs-score", type=float, default=0.0, help="on the scaled values with --signature-scale")
     fe.add_argument("--min-sources", type=int, default=3, help="drop weaker perturbations")
     fe.add_argument("--de-counts", help="CSV, perturbation -> number of DE genes (e.g. fit_info_nsig.csv of the "
                                         "expression limma output); needed by --min-de-genes")

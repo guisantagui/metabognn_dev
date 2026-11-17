@@ -12,7 +12,8 @@ HEAD `d11744b`, except the files listed in section 8.
 > `gene`), and MetChange's own coverage is all-or-nothing (57% of active perturbations have no
 > significant feature among the 100 read).
 
-**Read first:** `reports/2026-11-16_labels_network_coverage.md` (report 04 — the label bug in the
+**Read first:** `reports/2026-11-17_signature_selection_scale.md` (report 05 — q-values unused; MetChange's
+top-100 is chosen by metabolite scale, `_qsig` launchers), then `reports/2026-11-16_labels_network_coverage.md` (report 04 — the label bug in the
 MetChange runs, expr on `combined`, full coverage check), then `reports/2026-11-14_seed_tf_expr.md` (report 03 — second seed, MetChange vs expr
 vs TF, early stopping and lr schedule; sections 9–10 have the current recipe, the two-seed
 result and the metabolic-coverage check), then `reports/2026-11-14_lr_noglobals_matched.md` (report 02 —
@@ -281,6 +282,14 @@ shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
   (`--qvalue 0.05 --max-sources 100`) for all three, with controls. Perturbations with < 3
   significant features drop out, so compare signature types on shared drugs / perturbations.
   If too few MetChange perturbations survive: rank the top 100 by |t| or q (small code change).
+- **Feature scale (report 05):** MetChange log2FC is not standardised per metabolite (the MetChange
+  paper z-scores against controls), so the current top 100 is mostly a fixed set of high-variance
+  metabolites (selection frequency vs metabolite SD: Spearman 0.89; 33 metabolites in > 50% of
+  signatures; different drugs share 22% of features vs 2–3% ranked by p). Expr is affected much
+  less (5%). Fixes: `_qsig` (scale-free via significance) and **`--signature-scale sd`**
+  (implemented: per-feature SD across perturbations, not centred, floored; z-scoring against
+  controls rejected, many controls are constant in many features).
+  `bash submit_train_w_shuff_mc_noGlobals_lr1e-3_min15_sdscale.sh` (MetChange, seed 0, with control).
 - Representation (code + GPU): continuous MetChange values or a larger `--top-n` instead of the
   top-100 signs (`--signature-weights`, section 7).
 
@@ -341,6 +350,10 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 - `launch_predict_targets_A549_{mc,tf,expr}_noGlobals_lr1e-3_min15_qsig{,_shuff}.sh`, wrapper
   `submit_train_w_shuff_noGlobals_lr1e-3_min15_qsig.sh`, variants registered in
   `submit_with_shuffle_control.sh`, README row.
+- Report 05 (`reports/2026-11-17_signature_selection_scale.md`).
+- `metabolic_target_prediction.py`: `--signature-scale {none,sd,mad}`, `--signature-scale-floor`;
+  launchers `launch_predict_targets_A549_mc_noGlobals_lr1e-3_min15_sdscale{,_shuff}.sh`, wrapper
+  `submit_train_w_shuff_mc_noGlobals_lr1e-3_min15_sdscale.sh`, variant registered, README row.
 - This `STATUS.md` update.
 
 ## 9. Working notes
