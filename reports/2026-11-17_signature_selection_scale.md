@@ -342,8 +342,10 @@ perturbations only). `rank_prob` / `rank_probc` are raw ranks, so they only comp
 - `_qsigtop_sdscale` vs `_qsigtop` (same 606 drugs): −2.0 points (p = 0.12); `rank_prob` −4.4 ranks (p = 0.015).
 - Cross-signature, same drugs: expr `_qsigtop` vs TF `_qsigtop` +1.5 (p = 0.29); MetChange `_qsigtop_sdscale` vs
   expr `_qsigtop` −1.9 (p = 0.07; same perts −3.1, p = 0.05).
-- MetChange `_sdscale` (4 of 5 folds, fold 3 still to rerun): 7.1 points; vs `_min15` −1.9 (s0, p = 0.36) and +0.7
-  (s1, p = 0.82).
+- MetChange `_sdscale` **complete** (fold 3 rerun downloaded 2026-11-17 22:20, `compare` re-run on all 5 folds,
+  1,358 drugs, 3,970 perturbations): **6.7 points** (`rank_probc` 8.6, `rank_prob` 2.0, all p < 1e-4); vs `_min15`
+  −1.6 (s0, p = 0.46) and +0.4 (s1, p = 0.66); vs `_qsigtop_sdscale` on its 758 drugs −1.3 (p = 0.62).
+  (The 4-fold provisional value was 7.1.) So SD scaling is neutral with full drug coverage, confirming point 3.
 
 **Reading.**
 1. **Requiring significance costs nothing.** Significant-then-strongest equals the unfiltered top 100 for all three
@@ -561,3 +563,23 @@ The chain, and what tests each link:
 Framing for the paper: (a) is validated; the labels get (b) plus whatever the MetChange publication validated;
 (d) is one or two prospective experiments on top predictions. Pool metabolomics is then presented for what it is
 — a different measurement — with Schuhknecht / Sarvin used to describe the relation, not to validate.
+
+### 9.4 Corrections and the cheap next test
+
+1. **`validated_metabolic` is LLM-generated and does not mean "targets a metabolic enzyme".** It marks drugs known
+   to have metabolic *effects*, which may be indirect (signalling, transport, toxicity). Wherever this report used
+   those 70 drugs as the metabolic subset (sections 6, 6.2, 9.1, 9.2), that subset is wrong; the seed-1
+   `validated_metabolic` `spec` 0.418 (p = 0.085) is therefore not a statement about enzyme-targeting drugs.
+   **The subset has to be derived:** drugs whose annotated targets (the target table the training and benchmark
+   scripts already read) intersect the **GEM enzyme genes**, with the mechanism being inhibition where ChEMBL /
+   DrugBank say so. `validated_metabolic` can stay as a secondary, labelled annotation.
+2. **Protein-level target rank, the cheap next test.** The saved `scores.npz` holds only drug × drug matrices, but
+   the benchmark already computes the ~924 candidate-protein scores internally. Saving them and reporting, per
+   drug, the rank of its true target protein(s) (mean over folds for never-trained drugs, same permutation null,
+   same groups, plus the GEM-enzyme-target subset of item 1) is a small change and one rerun. The model's output
+   *is* protein scores; drug ranking is a downstream aggregation, so this is both the real task and much better
+   powered. It decides whether any further measured-metabolomics benchmark is worth processing.
+3. **Sarvin as a Schuhknecht-style benchmark: weak, and not first.** 22 of the 76 drugs are in our A549 CV set by
+   name (33 in LINCS; ~30 scorable after SMILES matching), so drug ranking has far too little power, and it is
+   HCT116. Its value is the 30 known target enzymes, i.e. the protein-level metric of item 2. Processing only the
+   8 h / 24 h samples at ~10 µM (~300 of 2,736 mzXML files) keeps it bounded, but only after item 2 shows signal.

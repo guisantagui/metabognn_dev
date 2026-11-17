@@ -1,7 +1,14 @@
-# Project state — 2026-11-17
+# Project state — 2026-11-18
 
 Handoff note for continuing in a new session. Everything described here is committed up to
 HEAD `d11744b`, except the files listed in section 8.
+
+> **2026-11-18 — recipe state (report 06, not frozen).** Best complete run: **expr `_qsigtop` 10.5 points**
+> (q < 0.05 then top 100 by |log2FC|, 1,358 drugs, one seed). `_qsigtop` matches `_min15` for all three signature
+> types (±2 points, p ≥ 0.12) and beats `_qsig` by 5–8, so **requiring significance is free**; **SD scaling is
+> dropped** (`_sdscale` 6.7, `_qsigtop_sdscale` ≤ `_qsigtop`). MetChange `_qsigtop` 10.3 is provisional (fold 0
+> relaunched 2026-11-18, running) and covers only the 758 drugs with significant metabolites, so **`_min15`
+> stays the primary MetChange run**. One seed for every `_qsigtop` run. See section 6.0.
 
 > **2026-11-17 (evening) — selection settled, Schuhknecht null explained** (report 05, sections 7–8).
 > `_qsigtop` (q < 0.05, then top 100 by |log2FC|) equals the unfiltered top 100 for expr (10.5 points),
@@ -14,7 +21,8 @@ HEAD `d11744b`, except the files listed in section 8.
 > Earlier today: corrected MetChange matches expr and TF (report 05, section 5): per-drug gap 8.3 / 7.7
 > (seeds 0 / 1), vs expr 7.8 / 10.4 and TF 9.0 / 9.3, not significantly different.
 
-**Read first:** `reports/2026-11-17_signature_selection_scale.md` (report 05 — q-values unused; MetChange's
+**Read first:** `reports/2026-11-18_recipe_state.md` (report 06 — where the recipe stands, what is settled and
+what is pending), then `reports/2026-11-17_signature_selection_scale.md` (report 05 — q-values unused; MetChange's
 top-100 is chosen by metabolite scale; `_qsig` / `_sdscale`; section 5: corrected MetChange results), then `reports/2026-11-16_labels_network_coverage.md` (report 04 — the label bug in the
 MetChange runs, expr on `combined`, full coverage check), then `reports/2026-11-14_seed_tf_expr.md` (report 03 — second seed, MetChange vs expr
 vs TF, early stopping and lr schedule; sections 9–10 have the current recipe, the two-seed
@@ -283,7 +291,9 @@ Leftovers:
   and 84 for expr (report 05, 5.4). `bash submit_train_w_shuff_noGlobals_lr1e-3_min15_qsigtop.sh` (also
   MetChange `_qsigtop_sdscale`: plus `--signature-scale sd`).
   **`_qsigtop` done (report 05, section 7): no cost.** expr 10.5, TF 7.8, MetChange 10.3 points (folds 1–4;
-  **fold 0 missing, rerun it**); paired vs `_min15` within ±2 points (p ≥ 0.12), +5–8 over `_qsig`.
+  **fold 0 of the MetChange real run missing — rerun it**;
+  `..._min15_qsigtop/` has fold1–4 only and no `cv_metrics.json`, while its `_shuff` control and the expr / TF
+  `_qsigtop` runs have all 5, then re-run `compare_runs.py` for it); paired vs `_min15` within ±2 points (p ≥ 0.12), +5–8 over `_qsig`.
   `_qsigtop_sdscale` 8.1, not better than `_qsigtop` (−2.0, p = 0.12). MetChange `_qsigtop` covers only
   the 758 drugs with significant metabolites.
 - **Feature scale (report 05):** MetChange log2FC is not standardised per metabolite (the MetChange
@@ -294,8 +304,9 @@ Leftovers:
   (implemented: per-feature SD across perturbations, not centred, floored; z-scoring against
   controls rejected, many controls are constant in many features).
   `bash submit_train_w_shuff_mc_noGlobals_lr1e-3_min15_sdscale.sh` (MetChange, seed 0, with control).
-  `_sdscale` (folds 0–2, 4; fold 3 to rerun, then re-run compare): 7.1 points, vs `_min15` −1.9 / +0.7
-  (p = 0.36 / 0.82). Scaling does not help so far.
+  **`_sdscale` done** (fold 3 rerun 2026-11-17, compare re-run on all 5 folds, 1,358 drugs): 6.7 points, vs
+  `_min15` −1.6 / +0.4 (p = 0.46 / 0.66), vs `_qsigtop_sdscale` −1.3 (p = 0.62). **SD scaling is neutral: drop
+  it from the recipe.**
 - Representation (code + GPU): continuous MetChange values or a larger `--top-n` instead of the
   top-100 signs (`--signature-weights`, section 7).
 
@@ -340,6 +351,41 @@ Leftovers:
    with MetChange-trained models; options: train / calibrate on measured metabolomics, or drop the
    Schuhknecht query as validation of the MetChange path.
 
+**6.0 Recipe as it stands (report 06, 2026-11-18). Not frozen** — kept here to take over from.
+
+| signature | `_min15` (top 100 by \|log2FC\|) | `_qsigtop` (q < 0.05, then top 100) | `_qsig` | `_sdscale` |
+|---|---|---|---|---|
+| MetChange | 8.3 / 7.7 (seeds 0 / 1; 1,358 drugs) | **10.3** (606 drugs, folds 1–4, provisional) | 6.1 (758) | 6.7 (1,358) |
+| expr | 7.8 / 10.4 | **10.5** (1,358) | 1.6 | — |
+| TF | 9.0 / 9.3 | 7.8 (1,346) | 4.2 | — |
+
+(per-drug gap over own shuffled control, `spec_prob_timedose`, points; MetChange `_qsigtop_sdscale` 8.1 / 758.)
+
+Flags, as in the `_qsigtop` launchers (`launch_predict_targets_A549_{mc,tf,expr}_noGlobals_lr1e-3_min15_qsigtop{,_shuff}.sh`,
+wrapper `submit_train_w_shuff_noGlobals_lr1e-3_min15_qsigtop.sh`):
+`--signature-sign -1 --mode metchange --qvalue 0.05 --qvalue-top-n --top-n 100 --de-counts <expr>/fit_info_nsig.csv
+--min-de-genes 200 --score-active-only --lr 0.001 --patience 15 --ffn-epochs 80 --min-epochs 15 --no-vae
+--no-globals --n-folds 5`, **no `--signature-scale`**; `networks/gene` for expr / TF, `combined` for MetChange,
+corrected scratch labels.
+
+**Settled:** (1) requiring significance is free — `_qsigtop` ≈ `_min15` (±2 points, p ≥ 0.12) and ≫ `_qsig`
+(+5–8, p ≤ 5e-5), and every feature read is then significant; expr and TF switch at no cost. (2) **SD scaling
+out** (6.7 on full coverage, p ≥ 0.46 vs `_min15`; no gain on top of significance). (3) **Threshold-then-sample
+out** (`_qsig`: expr 1.6 points, p = 0.22) — significance must rank, not sample. (4) **MetChange trade-off:**
+`_qsigtop` ties `_min15` on its 758 covered drugs but cannot score the other 600, so **`_min15` remains the
+primary MetChange run** and `_qsigtop` the significance-backed variant.
+
+**Pending / caveats:**
+- **MetChange `_qsigtop` fold 0: relaunched 2026-11-18, running.** The real run has folds 1–4 only and no
+  `cv_metrics.json`; its `_shuff` control and the expr / TF runs are complete. When it lands: re-run
+  `compare_runs.py` for that run, then redo the paired comparisons (`_qsigtop` vs `_min15` s0 / s1 and vs
+  `_qsigtop_sdscale`) — script in the session scratchpad, or re-derive from `cv_drug_ranks.tsv` + `stratified_spec`.
+- **One seed only** for all `_qsigtop` runs; needed before calling it the recipe (the expr seed spread,
+  7.8 vs 10.4, is larger than most differences being compared).
+- `_sdscale` is complete (6.7) and can be dropped from future comparisons.
+- Open, not selection: representation (continuous MetChange values or a larger `--top-n` instead of 100 signs,
+  `--signature-weights`), and validation (6.2b).
+
 **6.2b Validation strategy after the Schuhknecht null (report 05, sections 9–9.3).** Inferred labels do not
 agree with measured metabolomics of the same drug (8.2). **Key distinction (9.3): pool metabolomics does not
 validate the MetChange labels at all.** A MetChange label claims production / consumption *capacity*; the ground
@@ -374,10 +420,10 @@ prospective tracing only.
    which direction (block vs compensation)? Expression read the same way as comparison. Tests the compensation
    hypothesis for the negative slope in 8.2.
 3. **Local Schuhknecht test** (characterisation, laptop, runs on the corrected matched matrices in
-   `results/mc_schuhk_assoc/limma_rank_*`): Schuhknecht drugs with a GEM-enzyme target (its `validated_metabolic`
-   set, ~70 with targets), only the target reaction's substrates / products. Does Schuhknecht show substrate up /
-   product down at 48 h, and what does MetChange say at the same metabolites? Needs the drug → enzyme annotation
-   already used by the benchmark. Caveat: few drugs will have an annotated, measured substrate or product.
+   `results/mc_schuhk_assoc/limma_rank_*`): drugs whose annotated target **is a GEM enzyme** (see the warning
+   below: *not* the `validated_metabolic` column), only the target reaction's substrates / products. Does
+   Schuhknecht show substrate up / product down at 48 h, and what does MetChange say at the same metabolites?
+   Caveat: few drugs will have an annotated, measured substrate or product.
 4. **Knowledge-based enzyme benchmark** (link a, interpretable): expected substrate-up / product-down query
    around the enzymes of drugs with simple documented mechanisms (DHFR, DHODH, IMPDH, HMGCR, TYMS, PAICS, UMPS,
    complex I) — do the known inhibitors rank at the top? Self-built from the GEM, so partly circular with the
@@ -388,6 +434,28 @@ prospective tracing only.
 6. **Prospective**: isotope tracing / exometabolomics for a few top predictions (link d, the only direct test of
    the claim).
 
+**0. (Do first, cheap) Protein-level target rank in the Schuhknecht benchmark.** `scores.npz` only holds the
+drug x drug matrices, but `benchmark_schuhknecht.py` already computes the ~924 candidate-protein scores
+internally. **To do: save them and report, per drug, the rank / percentile of its true target protein(s)** among
+the candidates (and the mean over the 5 folds for never-trained drugs), with the same permutation null and the
+same group split. Small code change + one rerun (~2 min per run on the GPU, runs are on scratch). Why it matters:
+the model's output *is* protein scores; ranking drugs is a downstream aggregation, and "lands near the right
+enzyme" is both the real task and far better powered than drug retrieval. Report it for all 646 drugs and
+separately for the GEM-enzyme-target subset. If the model does not get near the right enzyme here, no new dataset
+will rescue it.
+
+**Warning: `validated_metabolic` is LLM-generated and is not "targets a metabolic enzyme".** It flags drugs
+*known to have metabolic effects*, which may be indirect (signalling, transport, toxicity), not drugs that
+directly inhibit an enzyme. Do not use it as the metabolic-target subset in any of the tests above. **Derive the
+subset properly instead:** intersect each drug's annotated targets (the target table the training / benchmark
+scripts already use: `--targets`, gene symbols) with the **GEM enzyme genes** (`data/networks/combined`
+`gpr_ensembl` / the GEM gene list used by `check_metabolic_coverage.py --gem-genes`), and keep drugs whose target
+is a GEM enzyme *and* whose mechanism is inhibition (ChEMBL `mechanism_of_action` / DrugBank actions where
+available). Report `validated_metabolic` only as a secondary, clearly-labelled annotation. The same correction
+applies to report 05 sections 6, 6.2, 9.1 and 9.2, where the 70 `validated_metabolic` drugs were used as the
+metabolic subset, and to the seed-1 `validated_metabolic` spec 0.418 (p = 0.085), which is therefore not even
+about enzyme-targeting drugs.
+
 **Sarvin et al. (Nat Commun 2026, report 05, 9.2).** 76 known drugs, 30 metabolic enzymes, HCT116 (a LINCS cell
 line), 6 doses × 6 times (10 min–24 h) — the best-matched public dataset (Schuhknecht is A549 at 48 h only).
 **But figshare 29268887 holds raw data only:** `Data_mzxml.zip` (8.9 GB mzXML) + `Sample description.xlsx`
@@ -396,7 +464,20 @@ intensity matrix, no annotation, no drug → target table (that is Supplementary
 untargeted processing (XCMS / MZmine + HMDB annotation + control normalisation) is days of work and would not
 reproduce their values exactly; a **targeted extraction of the ~30 target enzymes' substrates / products** from
 the mzXML is the lighter option, and enough for test 2–3 style comparisons. Supplementary Data 1 is needed either
-way. Their model predicts the target *pathway* (373 candidates: top 1 29%, top 3 47%, AUC 0.87) from a
+way.
+**Usable as a Schuhknecht-style benchmark? Only weakly, and not first.** Crude name match of the 76 drugs:
+33 in LINCS, **22 evaluated in our A549 CV** (methotrexate, brequinar, leflunomide, mycophenolate mofetil,
+pemetrexed, merimepodib, 3 statins, raltitrexed, pralatrexate, TEPP-46, AGI-6780, cytarabine, gemcitabine,
+capecitabine, clofarabine, metformin, lonidamine, fomepizole, disulfiram, indoximod). SMILES matching should add
+5-FU, mycophenolic acid, 2-deoxy-D-glucose, telaglenastat and the other statins: ~45 in LINCS, ~30 scorable.
+Drug-ranking with n ~ 30 has far too little power (Schuhknecht had 646 and was flat), and it is HCT116, so it
+needs either cross-cell-line transfer or HCT116 labels + a second training run. **Its value is the enzyme ground
+truth** (30 known target enzymes), i.e. the protein-level metric of item 0, which works at n ~ 30 because each
+drug is one trial against ~924 candidates. Processing only the useful conditions (8 h / 24 h at ~10 uM, ~300
+mzXML files instead of 2,736) keeps it bounded. **Order: do item 0 on Schuhknecht first; process Sarvin only if
+that shows signal.** Either way it is a benchmark of the tool, not validation of the labels (9.3): a positive
+result counts, a null is uninformative.
+Their model predicts the target *pathway* (373 candidates: top 1 29%, top 3 47%, AUC 0.87) from a
 time × dose metabolomics matrix, and the enzyme was pinned down by rescue experiments — complementary to ours
 (proteins from transcriptomes, free for thousands of LINCS compounds).
 
