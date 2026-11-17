@@ -213,7 +213,7 @@ Tooling:
   `tf_noGlobals_lr1e-3`, `expr_noGlobals_lr1e-3`, `mc_noGlobals_lr1e-3_min15`,
   `tf_noGlobals_lr1e-3_min15`, `expr_noGlobals_lr1e-3_min15`, `mc_noGlobals_lr1e-3_min15_pat25`,
   `{mc,tf,expr}_noGlobals_lr1e-3_plateau`, `{mc,tf,expr}_noGlobals_lr1e-3_min15_seed1`,
-  `expr_combined_noGlobals_lr1e-3_min15`.
+  `expr_combined_noGlobals_lr1e-3_min15`, `{mc,tf,expr}_noGlobals_lr1e-3_min15_qsig`.
   `mc_noStatic` is not registered
   (launch both by hand).
 - The `_lr1e-3` launchers are **array jobs** (`--array=0-4`; 4 h per task, 6 h for `_ep100` and
@@ -242,6 +242,9 @@ Analysed in report 03, section 9 (seed 0, same splits as `*_noGlobals_lr1e-3`):
 `{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_min15_seed1{,_shuff}`. Report 04:
 `expr_combined_noGlobals_lr1e-3_min15{,_shuff}` (seed 0), `metabolic_coverage_full{,_topnbins}/`.
 All MetChange runs listed here used the sign-buggy home labels (report 04).
+On scratch, `metchange_rank_noGlobals_lr1e-3_min15{,_seed1}{,_shuff}` were renamed to
+`..._signbug{,_shuff}` (2026-11-16), and `..._min15_pat25{,_shuff}` were deleted 2026-11-17 (laptop
+copies remain).
 
 Pre-dating the current metrics, cannot be re-checked (no `test_scores_heldout.npz`, no FNN
 shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
@@ -271,6 +274,13 @@ shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
   MetChange feature among the 100 read, 35% have all 100. Sign-buggy MetChange runs: 7.1–7.3 points
   on fully covered perturbations, ~0 on uncovered. Next: an activity filter from MetChange's own
   output (`n_sig_topn` ≥ 1 or = 100), evaluated on the same perturbations for expr.
+- **Significance (launchers ready, 2026-11-17):** every run so far, MetChange, expr and TF, used
+  `--ignore-qvalue --top-n 100` (top 100 by |log2FC|, q-values unused; added 9 Nov in `5a28a0f`
+  with the activity filter, no recorded reason). The published setting is significant features,
+  capped at 100. `bash submit_train_w_shuff_noGlobals_lr1e-3_min15_qsig.sh` runs `_min15_qsig`
+  (`--qvalue 0.05 --max-sources 100`) for all three, with controls. Perturbations with < 3
+  significant features drop out, so compare signature types on shared drugs / perturbations.
+  If too few MetChange perturbations survive: rank the top 100 by |t| or q (small code change).
 - Representation (code + GPU): continuous MetChange values or a larger `--top-n` instead of the
   top-100 signs (`--signature-weights`, section 7).
 
@@ -328,6 +338,9 @@ does not bind; second seed — replicates, smaller; port to `tf` / `expr` — re
 - `scripts/predict_targets/check_metabolic_coverage.py`: `--coverage` (reuse a `coverage.tsv`),
   fixed 0 / 1–99 / 100 bins for `n_sig_topn`; README lines.
 - `scripts/predict_targets/submit_train_w_shuff_mc_min15_fixedlabels.sh` (new).
+- `launch_predict_targets_A549_{mc,tf,expr}_noGlobals_lr1e-3_min15_qsig{,_shuff}.sh`, wrapper
+  `submit_train_w_shuff_noGlobals_lr1e-3_min15_qsig.sh`, variants registered in
+  `submit_with_shuffle_control.sh`, README row.
 - This `STATUS.md` update.
 
 ## 9. Working notes

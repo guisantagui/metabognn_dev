@@ -84,6 +84,7 @@ Either source can be given alone. Output: `coverage.tsv`, `spec_by_coverage.tsv`
 | `expr_noGlobals_lr1e-3_plateau` | as `expr_noGlobals_lr1e-3` with the same plateau settings | `expr_noGlobals_lr1e-3_plateau` | `submit_train_w_shuff_tf_expr_noGlobals_lr1e-3_plateau.sh` |
 | `{mc,expr,tf}_noGlobals_lr1e-3_min15_seed1` | the current recipe (`_min15`) with `--seed 1` (new folds, init and permutation: a full replicate); array job, 8 h per task | `{metchange_rank,expr,tf_active200}_noGlobals_lr1e-3_min15_seed1` | `submit_train_w_shuff_noGlobals_lr1e-3_min15_seed1.sh` |
 | `expr_combined_noGlobals_lr1e-3_min15` | as `expr_noGlobals_lr1e-3_min15` but on `networks/combined` (the MetChange network); array job, 8 h per task | `expr_combined_noGlobals_lr1e-3_min15` | `submit_train_w_shuff_expr_combined_noGlobals_lr1e-3_min15.sh` |
+| `{mc,tf,expr}_noGlobals_lr1e-3_min15_qsig` | as the `_min15` run but signatures = features with q < 0.05, random cap 100 (`--qvalue 0.05 --max-sources 100` instead of `--ignore-qvalue --top-n 100`; the published setting); perturbations with < 3 significant features are dropped; array job, 8 h per task | `{metchange_rank,tf_active200,expr}_noGlobals_lr1e-3_min15_qsig` | `submit_train_w_shuff_noGlobals_lr1e-3_min15_qsig.sh` |
 
 **Learning-rate schedule** (defaults reproduce every earlier run): `--lr-schedule step` multiplies the lr by
 `--lr-gamma` (0.5) every `--lr-step-size` (10) epochs (`StepLR`); `--lr-schedule plateau` multiplies it by `--lr-gamma`
