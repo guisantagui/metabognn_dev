@@ -283,11 +283,12 @@ ions; median 100 of the 306 trained-node ions). Metrics `spec`, `rankc`, `rank` 
 
 **Local runs are invalid.** A first local run gave chance everywhere (spec median 0.50–0.51 for the real runs and
 their controls, both seeds), but the script's reproduction check fails locally: rebuilding held-out LINCS
-perturbations of fold 0 (label columns identical between the home and scratch copies) gives drug scores with
-r = 0.32–0.68 against the saved `test_scores_heldout.npz`, and the protein-level probabilities differ too. The static
-per-protein features already disagree with the training ranges (e.g. `activity_down_hop1` max 0.2519 locally vs
-0.2523 among the training rows, impossible with identical inputs), so the local network / baseline / target files
-are not the ones the cluster runs used. Those outputs were deleted; the benchmark has to run on the cluster, where it
+perturbations of fold 0 gives drug scores with r = 0.32–0.68 against the saved `test_scores_heldout.npz`, and the
+protein-level probabilities differ too. Two local inputs differ from training: (a) the local MetChange labels are an
+uncorrected copy (the corrected labels exist only on the cluster), so the signature features cannot match; (b) the
+signature-independent per-protein features also disagree with the training ranges (e.g. `activity_down_hop1` max
+0.2519 over all proteins locally vs 0.2523 among the training rows, impossible with identical inputs), so the local
+network or baseline differ from the cluster copies as well. Those outputs were deleted; the benchmark has to run on the cluster, where it
 checks itself before scoring. (Also: torch on MPS crashes on this macOS; the script uses CUDA or CPU, ~2 min per
 run on CPU.)
 
