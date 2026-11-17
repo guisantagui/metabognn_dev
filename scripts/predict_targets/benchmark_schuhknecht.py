@@ -174,6 +174,11 @@ def main():
     ap.add_argument("--schuhknecht-dir", default=os.path.join(REPO, "data", "validation", "schuhknecht"))
     ap.add_argument("--out-dir", help="default: <run-dir>/schuhknecht_benchmark[_<tag>]")
     ap.add_argument("--tag", default="", help="suffix of the default out dir (variants of the query)")
+    ap.add_argument("--cache-dir", help="where the Schuhknecht sheets are cached as pickles (default: the out dir); "
+                                        "share it between runs to read the xlsx once")
+    ap.add_argument("--threads", type=int, default=0,
+                    help="torch CPU threads (default: SLURM_CPUS_PER_TASK, else the CPUs this process may use); "
+                         "torch's own default counts all cores of the node and oversubscribes a Slurm allocation")
     ap.add_argument("--path-map", nargs=2, action="append", default=[], metavar=("CLUSTER_PREFIX", "LOCAL_PREFIX"),
                     help="rewrite input paths of the run config (repeatable); by default paths under "
                          "metabognn_dev/ are re-rooted at this repository when they do not exist")
@@ -235,6 +240,12 @@ def main():
                        signature_scale=scale, run_config={k: v for k, v in vars(cfg).items()}), fh, indent=2)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if args.device == "auto" else \
         torch.device(args.device)
+    if device.type == "cpu":
+        n_thr = args.threads or int(os.environ.get("SLURM_CPUS_PER_TASK", 0))
+        if not n_thr:
+            n_thr = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
+        torch.set_num_threads(max(1, n_thr))
+    log(f"torch threads: {torch.get_num_threads()}")
     log(f"run {run}: folds {folds}; selection {mode} (top_n {top_n}, q {qvalue}), scale {scale}, nodes "
         f"{args.restrict_nodes}, ambiguous ions {args.ambiguous}; device {device}")
 
@@ -274,7 +285,9 @@ def main():
         allowed = set(feats[feats.isin(g.pos.index)])
         log(f"trained source nodes: {len(allowed):,} MetChange features that are network nodes")
     imap = ion_nodes(os.path.join(sd, "cpd_info_wSchuhknecht.csv"), g, allowed, args.ambiguous)
-    lfc, qv = read_schuhknecht(os.path.join(sd, "41587_2024_2524_MOESM2_ESM.xlsx"), out)
+    cache = args.cache_dir or out
+    os.makedirs(cache, exist_ok=True)
+    lfc, qv = read_schuhknecht(os.path.join(sd, "41587_2024_2524_MOESM2_ESM.xlsx"), cache)
     ions = [a for a in imap if a in lfc.index]
     log(f"ions with intracellular nodes: {len(ions)} ({sum(len(imap[a]) for a in ions)} nodes, "
         f"{len(np.unique(np.concatenate([imap[a] for a in ions])))} distinct)")
