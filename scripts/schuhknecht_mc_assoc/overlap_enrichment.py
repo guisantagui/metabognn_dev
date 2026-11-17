@@ -140,9 +140,13 @@ def main():
                                      left_on="drug", right_on="schuhknecht_name", how="left").drop(
         columns="schuhknecht_name")
     if "p_fisher" in pdrug:
-        from statsmodels.stats.multitest import multipletests
         ok = pdrug.p_fisher.notna()
-        pdrug.loc[ok, "q_fisher"] = multipletests(pdrug.p_fisher[ok], method="fdr_bh")[1]
+        p_ = pdrug.p_fisher[ok].to_numpy()
+        o = np.argsort(p_)
+        q_ = np.minimum.accumulate((p_[o] * len(p_) / np.arange(1, len(p_) + 1))[::-1])[::-1]  # BH
+        q = np.empty_like(q_)
+        q[o] = np.minimum(q_, 1)
+        pdrug.loc[ok, "q_fisher"] = q
     if ex is not None:
         e_ov, e_conc, e_disc = stats_for(E, dirE, B, dirB, (vE, vb))
         pdrug["expr_overlap"], pdrug["expr_concordant"], pdrug["expr_discordant"] = e_ov, e_conc, e_disc
