@@ -304,7 +304,9 @@ intracellular nodes (section 6 table corrected; the local count was 306 / 571). 
 
 Full benchmark, `metchange_rank_noGlobals_lr1e-3_min15` seed 0 (reproduction check OK): chance on every metric
 (all 646 drugs: `spec` 0.500, p = 0.49; `rankc` 0.519; `rank` 0.499), its `_shuff` control likewise (0.532 / 0.503 /
-0.501). Never-trained drugs: `spec` 0.469 (p = 0.11; control 0.505). Seed 1 pending. The model reads LINCS MetChange
+0.501). Never-trained drugs: `spec` 0.469 (p = 0.11; control 0.505). Seed 1: also chance (all drugs `spec` 0.485,
+p = 0.18; `rankc` 0.491; `rank` 0.507; `validated_metabolic` (70) `spec` 0.418, p = 0.085, `rankc` 0.435, p = 0.13, not
+significant and not seen in seed 0: 0.492 / 0.478). Seed 1 control: cut by the time limit after scoring, rerun. The model reads LINCS MetChange
 signatures but not measured metabolomics; first suspect: little shared signal between MetChange (inferred
 transcriptome, ≤ 24 h) and Schuhknecht (measured, 48 h) for the same drug.
 
