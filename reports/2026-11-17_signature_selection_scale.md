@@ -299,3 +299,24 @@ older version (4,086 / 3,747). With the training labels, 412 non-ambiguous Schuh
 intracellular nodes (section 6 table corrected; the local count was 306 / 571). Full benchmark:
 `sbatch launch_benchmark_schuhknecht_A549.sh`.
 
+
+### 6.2 Schuhknecht benchmark, cluster results (seed 0) and the association pipeline
+
+Full benchmark, `metchange_rank_noGlobals_lr1e-3_min15` seed 0 (reproduction check OK): chance on every metric
+(all 646 drugs: `spec` 0.500, p = 0.49; `rankc` 0.519; `rank` 0.499), its `_shuff` control likewise (0.532 / 0.503 /
+0.501). Never-trained drugs: `spec` 0.469 (p = 0.11; control 0.505). Seed 1 pending. The model reads LINCS MetChange
+signatures but not measured metabolomics; first suspect: little shared signal between MetChange (inferred
+transcriptome, ≤ 24 h) and Schuhknecht (measured, 48 h) for the same drug.
+
+To test that directly on the labels the model uses, the earlier association analysis (averaged deltas,
+`scripts/mc_schuhk_assoc`) is rebuilt on the limma labels in `scripts/schuhknecht_mc_assoc/`:
+`prepare_assoc_inputs.py` (matched MetChange log2FC / q, Schuhknecht log2FC / p / q, expression producers baseline
+from the expression log2FC via the network's GPRs and reaction → metabolite edges, drug match re-derived on the label
+columns as in `create_drugmap.py`; compartment `c` as before, or `intracellular` with copies averaged),
+`overlap_enrichment.py` (new: MetChange-significant vs Schuhknecht-significant metabolites per drug, Fisher / CMH,
+mismatched-drug permutation for overlap, direction-concordance and a size-matched expression baseline), the two R
+scripts made non-interactive (inputs as arguments, one label set allowed, hard-coded paths and exploratory lines
+removed), and `launch_schuhknecht_mc_assoc_A549.sh`. All steps run end to end locally on the old local labels
+(numbers not meaningful). Local counts: 306 metabolites (`c`) / 327 (`intracellular`), 750 drugs; with the local
+labels ~610 of the 750 matched perturbations have no significant MetChange metabolite, so the overlap test rests on
+the ~115–140 drugs with calls in both datasets.

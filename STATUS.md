@@ -320,6 +320,10 @@ Leftovers:
    script refuses to score in that case. Copy `data/validation/schuhknecht/` to the cluster first.
    Cluster reproduction check passed (r = 1.000000, 8/8). Local MetChange labels are an older
    version (4,086 features vs 5,707 on the cluster): local counts based on them are approximate.
+   **Result, seed 0: chance** (spec 0.500, rankc 0.519; control the same; report 05, 6.2).
+   Next: does MetChange agree with Schuhknecht at all, on the limma labels:
+   `scripts/schuhknecht_mc_assoc/` (`sbatch launch_schuhknecht_mc_assoc_A549.sh`: prep, overlap
+   enrichment with MetChange q-values, the R benchmark vs the expression baseline).
 
 **6.3 Size the data ceiling** (no GPU, ~a day):
 1. PCA of the A549 expression matrix: how many components explain 95% of variance across
