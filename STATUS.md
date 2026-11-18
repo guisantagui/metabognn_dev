@@ -5,9 +5,10 @@ HEAD `d11744b`, except the files listed in section 8.
 
 > **2026-11-18 — recipe state (report 06, not frozen).** Best complete run: **expr `_qsigtop` 10.5 points**
 > (q < 0.05 then top 100 by |log2FC|, 1,358 drugs, one seed). `_qsigtop` matches `_min15` for all three signature
-> types (±2 points, p ≥ 0.12) and beats `_qsig` by 5–8, so **requiring significance is free**; **SD scaling is
+> types (±2 points, p ≥ 0.12) and beats `_qsig` by 5–8, so **requiring significance is free**; figure:
+> `results/predict_targets/A549/performance_figure/` (`scripts/predict_targets/plot_performance_panels.py`); **SD scaling is
 > dropped** (`_sdscale` 6.7, `_qsigtop_sdscale` ≤ `_qsigtop`). MetChange `_qsigtop` 10.3 is provisional (fold 0
-> relaunched 2026-11-18, running) and covers only the 758 drugs with significant metabolites, so **`_min15`
+> complete since 2026-11-18, 10.2 points) and covers only the 758 drugs with significant metabolites, so **`_min15`
 > stays the primary MetChange run**. One seed for every `_qsigtop` run. See section 6.0.
 
 > **2026-11-17 (evening) — selection settled, Schuhknecht null explained** (report 05, sections 7–8).
@@ -355,7 +356,7 @@ Leftovers:
 
 | signature | `_min15` (top 100 by \|log2FC\|) | `_qsigtop` (q < 0.05, then top 100) | `_qsig` | `_sdscale` |
 |---|---|---|---|---|
-| MetChange | 8.3 / 7.7 (seeds 0 / 1; 1,358 drugs) | **10.3** (606 drugs, folds 1–4, provisional) | 6.1 (758) | 6.7 (1,358) |
+| MetChange | 8.3 / 7.7 (seeds 0 / 1; 1,358 drugs) | **10.2** (758 drugs, complete) | 6.1 (758) | 6.7 (1,358) |
 | expr | 7.8 / 10.4 | **10.5** (1,358) | 1.6 | — |
 | TF | 9.0 / 9.3 | 7.8 (1,346) | 4.2 | — |
 
@@ -375,11 +376,27 @@ out** (`_qsig`: expr 1.6 points, p = 0.22) — significance must rank, not sampl
 `_qsigtop` ties `_min15` on its 758 covered drugs but cannot score the other 600, so **`_min15` remains the
 primary MetChange run** and `_qsigtop` the significance-backed variant.
 
+**Performance figure (report 06, section 5):** `scripts/predict_targets/plot_performance_panels.py` →
+ECDF real vs own control per signature, forest of per-drug gaps with bootstrap CIs, top-k recovery — all on
+`_qsigtop` (no other recipe to explain; `--extra sig=run:label` adds comparison rows to the forest when
+wanted). Presentation format: 11 x 5.95 in (2:1), runs labelled only MetChange / expression / TF, no panel letters,
+transparent background (`--background surface` for opaque). Light ink by default; `--theme dark` writes a
+`..._dark` variant with the dark steps of the same hues for a dark slide. Output
+`results/predict_targets/A549/performance_figure/performance_panels_<metric>.{png,pdf,tsv}`. The coverage-split
+panel was dropped: it only exists for `_min15` (in `_qsigtop` every feature read is significant), so it is the
+motivation for the recipe, not a result of it.
+**Metric:** headline `rank_probc_heldout` (the deployment task, prior-controlled; MetChange / expr / TF
+`_qsigtop` = 10.0 / 8.5 / 8.8 points), `spec_prob_timedose_heldout` beside it as the dose/time-leakage-controlled
+check (10.2 / 10.5 / 7.8; the metric of reports 01–05), `rank_prob_heldout` in the supplement (5.8 / 3.4 / 4.0).
+**Watch out:** `rank_*_heldout` in `cv_drug_ranks.tsv` are **raw ranks** — divide by `n_candidates_heldout` for a
+percentile (only the stratified `spec_*` are percentiles already). Report 05 section 7's `rank_probc` numbers are
+in rank units ×100, so their magnitudes are not comparable with the `spec` points; signs and p-values hold.
+Re-run when a second `_qsigtop` seed exists.
+
 **Pending / caveats:**
-- **MetChange `_qsigtop` fold 0: relaunched 2026-11-18, running.** The real run has folds 1–4 only and no
-  `cv_metrics.json`; its `_shuff` control and the expr / TF runs are complete. When it lands: re-run
-  `compare_runs.py` for that run, then redo the paired comparisons (`_qsigtop` vs `_min15` s0 / s1 and vs
-  `_qsigtop_sdscale`) — script in the session scratchpad, or re-derive from `cv_drug_ranks.tsv` + `stratified_spec`.
+- **MetChange `_qsigtop` fold 0: done** (landed 2026-11-18 00:40, `compare_runs.py` re-run). 10.2 points,
+  758 drugs, p < 1e-4; paired vs `_min15` s0 / s1 +0.3 / +1.1 (p = 0.76 / 0.82), vs `_qsig` +6.0 (p = 0.0023),
+  vs `_qsigtop_sdscale` +1.8 (p = 0.12). All runs in the table are now complete (5 folds).
 - **One seed only** for all `_qsigtop` runs; needed before calling it the recipe (the expr seed spread,
   7.8 vs 10.4, is larger than most differences being compared).
 - `_sdscale` is complete (6.7) and can be dropped from future comparisons.

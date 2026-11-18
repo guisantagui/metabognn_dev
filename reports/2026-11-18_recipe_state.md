@@ -10,13 +10,20 @@ between runs.*
 
 | signature | `_min15` (top 100 by \|log2FC\|) | `_qsigtop` (q < 0.05, then top 100) | `_qsig` (random 100 significant) | `_sdscale` |
 |---|---|---|---|---|
-| MetChange | 8.3 / 7.7 (seeds 0 / 1; 1,358 drugs) | **10.3** (606 drugs, folds 1–4, provisional) | 6.1 (758) | 6.7 (1,358) |
+| MetChange | 8.3 / 7.7 (seeds 0 / 1; 1,358 drugs) | **10.2** (758 drugs, complete) | 6.1 (758) | 6.7 (1,358) |
 | expr | 7.8 / 10.4 | **10.5** (1,358) | 1.6 | — |
 | TF | 9.0 / 9.3 | 7.8 (1,346) | 4.2 | — |
 
 MetChange `_qsigtop_sdscale`: 8.1 (758 drugs).
 
-**Best complete result: expr `_qsigtop`, 10.5 points** (p = 4e-16, 1,358 drugs, 5 folds, one seed).
+**Best complete result: expr `_qsigtop`, 10.5 points** (p = 4e-16, 1,358 drugs, 5 folds, one seed), with
+MetChange `_qsigtop` at 10.2 on its 758 covered drugs.
+
+**MetChange `_qsigtop` fold 0 landed 2026-11-18 00:40**, `compare_runs.py` re-run: **10.2 points** over its own
+control (`rank_probc` 10.9, `rank_prob` 5.8, all p < 1e-4; 61% of drugs better). Paired by drug: vs `_min15` s0
++0.3 (p = 0.76) and s1 +1.1 (p = 0.82) on its 758 drugs — on shared perturbations −1.0 / −2.7 (p = 0.32 / 0.47);
+vs `_qsig` +6.0 (p = 0.0023); vs `_qsigtop_sdscale` +1.8 (p = 0.12). The 4-fold provisional value was 10.3, so
+nothing changed with fold 0: **`_qsigtop` ties `_min15` on the drugs it covers**, as reported below.
 
 ## 2. Recipe as it stands (the `_qsigtop` launchers)
 
@@ -49,10 +56,8 @@ wrapper `submit_train_w_shuff_noGlobals_lr1e-3_min15_qsigtop.sh`. **Not frozen**
 
 ## 4. Caveats and pending
 
-- **MetChange `_qsigtop` is provisional:** fold 0 of the real run is missing (array task failure; the `_shuff`
-  control and the expr / TF runs have all 5 folds), so 10.3 is on folds 1–4 / 606 drugs and there is no
-  `cv_metrics.json`. **Fold 0 relaunched 2026-11-18, running.** When it lands: re-run `compare_runs.py` for that
-  run and redo the paired comparisons (`_qsigtop` vs `_min15` s0 / s1 and vs `_qsigtop_sdscale`).
+- ~~MetChange `_qsigtop` fold 0 missing~~ **done 2026-11-18** (section 1): all runs in the table are complete,
+  5 folds each.
 - **One seed only** for every `_qsigtop` run. A second seed is needed before calling `_qsigtop` the recipe,
   as the expr seed spread shows (`_min15` 7.8 vs 10.4 across seeds is larger than most of the differences
   being compared).
@@ -60,3 +65,57 @@ wrapper `submit_train_w_shuff_noGlobals_lr1e-3_min15_qsigtop.sh`. **Not frozen**
   MetChange values or a larger `--top-n` instead of 100 signs, `--signature-weights`) and everything in
   STATUS 6.2b (validation).
 - `_sdscale` is complete and can be dropped from future comparisons.
+
+## 5. Performance figure
+
+`scripts/predict_targets/plot_performance_panels.py` (new), run on the laptop. Three panels, all on the
+`_qsigtop` runs, each against its own `_shuff` control. Presentation format (11 x 5.95 in, 2:1): the runs are
+labelled only **MetChange / expression / TF** (the selection is the same everywhere, so `_qsigtop` is not
+written on the figure), no A / B / C panel letters, and a **transparent background** (`--background surface`
+for an opaque one). The ink is near-black, i.e. for a light slide; `--theme dark` re-renders with the dark
+steps of the same hues and light ink for a dark slide, writing `..._dark.{png,pdf}` (both themes are
+transparent, and the dark one is a selected palette, not an inverted light one). Output
+`results/predict_targets/A549/performance_figure/performance_panels_<metric>.{png,pdf}` + `.tsv` with the
+numbers behind every panel.
+
+- **A** ECDF of the percentile per drug, real vs own shuffled control, one panel per signature — the full
+  distribution, not a summary. The real curve is above the control everywhere for all three.
+- **B** Forest of the per-drug gap with bootstrap CIs (5,000 resamples of the median): the three runs only,
+  so no other recipe has to be explained. On `rank_probc` the CIs overlap for all three (MetChange 10.0
+  [8.2-13.0], TF 8.8 [6.7-10.7], expression 8.5 [7.4-10.9]) — none is distinguishable from the others.
+  `--extra sig=run:label` puts `_min15` or ablation rows back when a selection comparison is wanted.
+- **C** Top-k recovery at 1 / 5 / 10 / 25 %, real bars with each run's own control marked on the bar.
+
+**The coverage-split panel was dropped.** It can only be the `_min15` runs (in `_qsigtop` every feature read is
+significant by construction), so it is the *motivation* for `_qsigtop`, not a result of the current recipe, and
+it is not how the work is framed. It stays available in `metabolic_coverage_fixedlabels/spec_by_coverage.tsv`
+and in report 05 section 5.
+
+### 5.1 Which metric to show
+
+All three are rendered (`--metric`); they answer different questions and the choice changes the ordering:
+
+| metric | question | MetChange / expr / TF `_qsigtop`, gap in points |
+|---|---|---|
+| `rank_probc_heldout` | **the deployment task:** given a query, where does the true drug rank among candidates, after standardising each candidate across queries (which removes the protein prior) | **10.0 / 8.5 / 8.8** |
+| `spec_prob_timedose_heldout` | is the signature read at all: do the drug's targets score higher under its own query than under other drugs' queries of the same time × relative dose stratum (so the design cannot carry drug identity) | 10.2 / 10.5 / 7.8 |
+| `rank_prob_heldout` | the same ranking without the per-candidate standardisation, so the protein prior still contributes | 5.8 / 3.4 / 4.0 |
+
+**Use `rank_probc` as the headline** — it is the task the tool is for and it is prior-controlled — and
+`spec_prob_timedose` beside it as the leakage-controlled check; `rank_prob` belongs in the supplement.
+`spec_prob_timedose` was the metric of reports 01–05 because it is the one that is not affected by the
+dose / time design, which is why the earlier tables quote it; the two agree on every conclusion so far
+(`_qsigtop` ≈ `_min15`, scaling neutral, `_qsig` worse), they differ only in which signature looks best.
+
+Caveat for all three: the per-drug percentile normalises the candidate-set size, but MetChange `_qsigtop`
+ranks within a different (758-drug) candidate pool than expr / TF (1,358), so cross-signature differences are
+read with that in mind — the paired comparisons in section 1 are on shared drugs and are the ones to trust.
+
+**A bug found while adding this** (worth knowing for any reuse of `cv_drug_ranks.tsv`): the `rank_*_heldout`
+columns are **raw ranks**, not percentiles — `compare_runs.py` divides them by `n_candidates_heldout`. Only the
+stratified `spec_*` columns are already percentiles. The earlier scratch comparisons of `rank_probc` in report 05
+section 7 are in rank units ×100, not points, which is why they read in the thousands; the conclusions there
+(signs and p-values) are unaffected, but the magnitudes are not comparable with the `spec` ones. The plotting
+script now normalises correctly.
+
+Re-run when a second `_qsigtop` seed exists; `--extra sig=run:label` adds forest rows.
