@@ -147,7 +147,11 @@ drug`), so drugs with many doses get one vote. The output is laid out like a run
 Each fold is checked first: the held-out drugs and test perturbations rebuilt from the run's own inputs must
 match the run's (`fold<i>/test_scores_heldout.npz`, `test_drug_ranks.tsv`), otherwise it stops. On the laptop
 they do not (older labels: 835 perturbations with significant MetChange features vs thousands on the cluster; no
-`gene` network for expr / TF), so it runs on the cluster: `sbatch launch_baseline_signature_knn_A549.sh` (the three
-`_qsigtop` runs and their controls, both representations, then `compare_runs.py` per pair and
-`performance_figure/vs_baseline/`). Smoke-tested end to end here with `--allow-mismatch`: both representations,
+`gene` network for expr / TF), so it runs on the cluster: `sbatch launch_baseline_signature_knn_A549.sh`, a 3-task array
+(one per `_qsigtop` run). Each task makes **one** call that scores the run and its `_shuff`, both representations
+and every k from a single read of the labels (the sides differ only by the replayed permutation; the similarity
+matrix of a fold is reused for every k), then `compare_runs.py` per pair and `performance_figure/vs_baseline/`.
+Wall time is one expr label read, ~30-50 min (the first version re-read the labels for every side and
+representation, ~2.5-3 h; it was cancelled and replaced the same day). The single-read version reproduces the
+first one's real-side numbers exactly on the smoke test. Smoke-tested end to end here with `--allow-mismatch`: both representations,
 `compare_runs.py` (including the dose/time-stratified spec from the `.npz`) and the figure row — code path only.

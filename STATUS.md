@@ -432,6 +432,8 @@ worse, so *which* 100 features are read barely matters; do not spend more there.
      network on the same input**;
    - `profile` = the full continuous signature (Spearman) → **is there more in the data than the model reads?**
      (directly informs item 3).
+   One call per run scores the run and its `_shuff`, both representations and every k from a single read of the
+   labels; the launcher is a 3-task array (one per signature type), so wall time is one expr read, ~30-50 min.
    Output is run-shaped, so `compare_runs.py` and the performance figure read it unchanged; the launcher draws
    `performance_figure/vs_baseline/` with the baseline rows under each model row. Smoke-tested end to end on the
    laptop with `--allow-mismatch` (code path only; numbers meaningless there).

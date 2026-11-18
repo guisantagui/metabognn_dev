@@ -81,8 +81,9 @@ weighted, encoded like the model's prior), and the protein scores go through the
 mean for the model. `--representation sources`: the model's own input (selected features, signs, on network
 nodes; cosine): network vs no network on the same input. `--representation profile`: the full continuous
 signature (Spearman): is there more in the data than the model reads? Held-out drugs never serve as references
-(ranking a drug by similarity to its own other doses would be the same-drug ceiling, not a baseline). Run on a run
-and on its `_shuff`: the shuffle is replayed, so baseline-real vs baseline-shuffled is the model's contrast. The
+(ranking a drug by similarity to its own other doses would be the same-drug ceiling, not a baseline). One call
+scores a run and its `_shuff` (the shuffle is replayed, so baseline-real vs baseline-shuffled is the model's
+contrast), both representations and every `--k`, reading the label files once. The
 output is run-shaped (`<runs_dir>/<run>__knn_<rep>_k<k>{,_shuff}/`), so `compare_runs.py` and
 `plot_performance_panels.py --extra` read it unchanged. Each fold is checked against the run (held-out drugs and
 test perturbations rebuilt from the run's inputs); locally they differ, so run it on the cluster:
