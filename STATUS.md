@@ -422,14 +422,25 @@ worse, so *which* 100 features are read barely matters; do not spend more there.
 
    (permuted-label nulls all ~0.50 / 1.0x.) So the signatures do carry target information, and expr carries more
    of it than MetChange — consistent with the model results.
-   **What is missing is the predictive version**, scored exactly like the model so the numbers are comparable:
-   for each held-out drug, rank the candidates by signature similarity to the query (or transfer targets by a
-   similarity-weighted vote of the k nearest perturbations of *other* drugs), then compute the same per-drug
-   percentile against the same `_shuff` control. The 9.9x kNN enrichment above makes this a serious contender.
-   **If it also reaches 8-10 points, the network and the whole GNN architecture are not earning their place** — which is
-   why this comes before any modelling work. Note `rank_baseline_heldout` in the run outputs is *not* this: it
-   is the protein-prior baseline (`prior_scores`), signature-independent, identical in real and shuffled runs
-   (0.508 / 0.508).
+   **The predictive version is now written (2026-11-18), not yet run:** `scripts/predict_targets/
+   baseline_signature_knn.py` + `sbatch launch_baseline_signature_knn_A549.sh` (cluster only: each fold is checked
+   against the run's held-out drugs and test perturbations, and the laptop inputs differ — older labels, no `gene`
+   network). For each held-out perturbation, the k = 25 most similar **training** drugs vote their targets, and the
+   protein scores go through the model's own `DrugRanker` / `signature_specificity` / `centered_ranks` on the
+   run's own folds, queries and candidates, against the run's `_shuff` (shuffle replayed). Two inputs:
+   - `sources` = exactly the model's input (selected features, signs, on nodes; cosine) → **network vs no
+     network on the same input**;
+   - `profile` = the full continuous signature (Spearman) → **is there more in the data than the model reads?**
+     (directly informs item 3).
+   Output is run-shaped, so `compare_runs.py` and the performance figure read it unchanged; the launcher draws
+   `performance_figure/vs_baseline/` with the baseline rows under each model row. Smoke-tested end to end on the
+   laptop with `--allow-mismatch` (code path only; numbers meaningless there).
+   **Reading:** baseline ≈ model on `sources` → the network adds nothing over similarity of the same input;
+   `profile` > `sources` → the 100-sign input is the bottleneck (go to item 3); model ≫ both → the network earns
+   its place and the effort goes into data (item 4). Not a baseline: ranking a held-out drug by similarity to its
+   *own* other doses (that is the same-drug ceiling, AUROC 0.85). Also not this: `rank_baseline_heldout` in the
+   run outputs is the protein-prior baseline (`prior_scores`), signature-independent, identical in real and
+   shuffled runs (0.508 / 0.508).
 2. **Diagnostic — split the 10 points into prior vs signature.** The model learns a protein prior (validation
    AUPRC 0.348 real vs 0.280 shuffled, base rate 0.027; full proteome 0.0116 vs 0.0074). Retrain with
    `--no-static` (per-protein features removed, so signature only) and, the other way round, with the signature

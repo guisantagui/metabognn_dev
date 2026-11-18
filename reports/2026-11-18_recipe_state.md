@@ -119,3 +119,35 @@ section 7 are in rank units ×100, not points, which is why they read in the tho
 script now normalises correctly.
 
 Re-run when a second `_qsigtop` seed exists; `--extra sig=run:label` adds forest rows.
+
+## 6. Signature-similarity baseline (written, not yet run)
+
+The model-free check (`check_signature_target_similarity.py`, `results/signature_similarity/A549/`) already shows
+that drugs sharing a target have similar signatures (expr: AUROC 0.69 at the same time point, 10-NN enrichment
+9.9x; MetChange 0.57, 5.5x). What was missing is a *predictive* baseline on the model's own metric, to say
+whether the network adds anything over that similarity.
+
+`scripts/predict_targets/baseline_signature_knn.py`: for each held-out perturbation of a run, the k (25) most
+similar **training** drugs vote their targets, similarity-weighted and encoded like the model's prior; the protein
+scores then go through the model's own `DrugRanker.prob_scores`, `signature_specificity` and `centered_ranks`, on
+the run's folds, queries and candidates, against the run's `_shuff` control with the shuffle replayed. Same
+contrast, same candidates, same code: the gaps are directly comparable with the figure in section 5.
+
+- `--representation sources`: the model's exact input (selected features, signs, on network nodes; cosine) —
+  network vs no network on the same information.
+- `--representation profile`: the full continuous signature (Spearman) — whether the data hold more than the
+  100-sign input keeps (bears directly on STATUS 6.0b item 3).
+
+Design choices: held-out drugs are never references (ranking a drug by similarity to its *own* other doses would
+be the same-drug ceiling, AUROC 0.85 for expr, not a baseline); references are training drugs only, active
+perturbations, as the model trains on; a drug's similarity is that of its most similar perturbation (`--unit
+drug`), so drugs with many doses get one vote. The output is laid out like a run, so `compare_runs.py` and
+`plot_performance_panels.py --extra` read it unchanged.
+
+Each fold is checked first: the held-out drugs and test perturbations rebuilt from the run's own inputs must
+match the run's (`fold<i>/test_scores_heldout.npz`, `test_drug_ranks.tsv`), otherwise it stops. On the laptop
+they do not (older labels: 835 perturbations with significant MetChange features vs thousands on the cluster; no
+`gene` network for expr / TF), so it runs on the cluster: `sbatch launch_baseline_signature_knn_A549.sh` (the three
+`_qsigtop` runs and their controls, both representations, then `compare_runs.py` per pair and
+`performance_figure/vs_baseline/`). Smoke-tested end to end here with `--allow-mismatch`: both representations,
+`compare_runs.py` (including the dose/time-stratified spec from the `.npz`) and the figure row — code path only.

@@ -72,6 +72,24 @@ held-out LINCS perturbations of the first fold from the run's own inputs and sto
 Either source can be given alone. Output: `coverage.tsv`, `spec_by_coverage.tsv`, `spearman.tsv` in `--out-dir`
 (default `<results>/metabolic_coverage`).
 
+### Signature-similarity baseline (`baseline_signature_knn.py`)
+
+Does the network add anything over plain signature similarity? For each held-out perturbation of a run (its own
+folds, queries and held-out candidates), the k most similar **training** drugs vote their targets (similarity-
+weighted, encoded like the model's prior), and the protein scores go through the model's own `DrugRanker`,
+`signature_specificity` and `centered_ranks`, so `rank_prob` / `rank_probc` / `spec_prob` mean exactly what they
+mean for the model. `--representation sources`: the model's own input (selected features, signs, on network
+nodes; cosine): network vs no network on the same input. `--representation profile`: the full continuous
+signature (Spearman): is there more in the data than the model reads? Held-out drugs never serve as references
+(ranking a drug by similarity to its own other doses would be the same-drug ceiling, not a baseline). Run on a run
+and on its `_shuff`: the shuffle is replayed, so baseline-real vs baseline-shuffled is the model's contrast. The
+output is run-shaped (`<runs_dir>/<run>__knn_<rep>_k<k>{,_shuff}/`), so `compare_runs.py` and
+`plot_performance_panels.py --extra` read it unchanged. Each fold is checked against the run (held-out drugs and
+test perturbations rebuilt from the run's inputs); locally they differ, so run it on the cluster:
+`sbatch launch_baseline_signature_knn_A549.sh [run ...]` (default: the three `_qsigtop` runs, both
+representations, k 25; `K="10 25 50"` for a sweep), which also runs the comparisons and draws
+`performance_figure/vs_baseline/`.
+
 ### Variants
 
 | variant | what changes (vs `mc` unless stated) | out_dir (real; control adds `_shuff`) | wrapper |
