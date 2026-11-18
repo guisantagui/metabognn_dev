@@ -155,3 +155,66 @@ Wall time is one expr label read, ~30-50 min (the first version re-read the labe
 representation, ~2.5-3 h; it was cancelled and replaced the same day). The single-read version reproduces the
 first one's real-side numbers exactly on the smoke test. Smoke-tested end to end here with `--allow-mismatch`: both representations,
 `compare_runs.py` (including the dose/time-stratified spec from the `.npz`) and the figure row — code path only.
+
+### 6.1 Results (cluster run, downloaded 2026-11-18)
+
+All 12 baseline directories (3 runs x sources / profile x real / `_shuff`, k = 25). **Input check passed for every
+fold of every side**: held-out drugs identical to the run's candidates, every test perturbation found. The
+baselines are on exactly the model's queries and candidates.
+
+**Ties.** With k = 25 a query votes only for its neighbours' targets, so 68-78% of candidates get a score of exactly
+0 (model: 0%, largest tie 1.5%). A true drug in that block takes its average rank (~0.63), which is why the
+baseline's `rank_prob` control sits at 0.61-0.64 instead of 0.5, and `spec` is pinned at 0.5. **`rank_prob` and `spec`
+are therefore not comparable for this baseline.** `rank_probc` standardises each candidate over the queries, which
+breaks the ties without bias (controls 0.49-0.51), so the comparison below uses it only.
+
+`rank_probc_heldout`, per drug (mean over its active perturbations), gap over own control with bootstrap CI;
+real / control median percentile:
+
+| | model | kNN, same input | kNN, full profile |
+|---|---|---|---|
+| MetChange (758) | 10.0 [8.2, 13.0]; 0.375 / 0.500 | 8.0 [6.4, 9.4]; 0.350 / 0.512 | 10.1 [8.7, 11.8]; **0.287** / 0.509 |
+| expression (1,358) | 8.5 [7.5, 10.9]; 0.388 / 0.491 | 7.6 [6.6, 8.9]; 0.309 / 0.498 | 7.8 [6.3, 10.1]; **0.305** / 0.512 |
+| TF (1,346) | 8.8 [6.7, 10.6]; 0.406 / 0.495 | 8.6 [7.8, 10.2]; 0.289 / 0.498 | 8.7 [7.3, 10.6]; **0.294** / 0.497 |
+
+Paired by drug, model gap minus kNN gap: MetChange −3.8 (same input, p = 0.012) / −4.8 (profile, p = 3e-6); expr
+−8.3 / −9.5 (p ≤ 7e-14); TF −8.2 / −8.5 (p ≤ 6e-13). The model wins for only 39-45% of drugs. Full profile vs same
+input: +1.7 for MetChange (p = 0.03), +0.4 / +0.3 for expr / TF (n.s.).
+
+**Complementarity.** Per-drug gaps of model and kNN correlate weakly (Spearman 0.18-0.31): they succeed on different
+drugs. A plain rank-average of the two scores (within-query ranks, then the same `rank_probc`) has a median gap of
+14-16 points (MetChange 15.9 [13.0, 19.3], expr 14.1, TF 13.7) and beats the model per drug by +5.2-5.8 (p ≤ 2e-7),
+but not the kNN alone per drug (−2.0 to −4.6). Gap statistics involving the sparse kNN are noisy because of the
+ties (the median gaps and the paired medians do not order the methods consistently), so these ensemble numbers
+are indicative.
+
+**Reading.**
+1. **On the deployment metric, a no-network nearest-neighbour baseline ranks the true drug better than the
+   trained model**: median percentile 0.29-0.31 vs 0.38-0.41 with both controls at ~0.50, and it wins for
+   55-61% of drugs. By the reading rule of STATUS 6.0b, the network is not earning its place on this metric with the
+   current data.
+2. The 100-sign input is not the bottleneck for the kNN (full profile ≈ same input, except +1.7 for MetChange),
+   which weakens the premise of STATUS 6.0b item 3 at least for similarity-based scoring.
+3. The model is not redundant with the kNN: their per-drug successes barely overlap, and combining them helps
+   the model. The model carries something the kNN does not, but by itself ranks worse.
+4. **Not final until the ties are removed.** Next: a dense version of the baseline (every training drug votes,
+   with a soft weight, e.g. softmax of the similarity), so no candidate scores exactly 0 and `rank_prob` /
+   `spec` become comparable as well. Until then, do not present the model's performance without this caveat:
+   the first question a reviewer will ask is exactly this baseline.
+
+### 6.2 Dense version (written, launched 2026-11-18)
+
+`baseline_signature_knn.py --beta B`: every training drug with active perturbations votes, weight softmax(B x z),
+z = the query's similarities z-scored over the voting drugs (scale-free, so the same B means the same concentration
+for cosine and Spearman), computed in float64 so a sharp B cannot underflow back to zeros. The only remaining exact
+zeros are **orphans**: held-out drugs none of whose directional target tokens (gene x activation / inhibition) is
+carried by any reference drug, so no target-transfer method can ever vote for them, while the network still scores
+them. Measured on the MetChange folds: 7-12% of the candidates (vs 68-78% zero scores with top-25). Each test
+perturbation carries `target_shared_with_references`, so results can be given with and without orphans (and the
+orphans are one place where the model can legitimately beat any similarity baseline).
+
+Smoke test: the zero-score candidates per query equal the token-level orphan count exactly, also at B = 10; the
+top-25 numbers reproduce the earlier run. Launcher default is now `BETA="2 5 10"` (top-k off, already done;
+`K=25` re-adds it); the figure's baseline rows use the first B. Read B = 2 (diffuse) vs 10 (close to top-k but dense)
+as a robustness check: the conclusion of 6.1 holds only if it holds across B, and on `rank_prob` / `spec` as well
+as `rank_probc`.

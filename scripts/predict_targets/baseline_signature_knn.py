@@ -26,9 +26,17 @@ per representation and reused for every k.
            Answers: is there more in the data than the model's input keeps?
 
 References: the training drugs of the fold (not validation, not held out) and their active perturbations, which is
-what the model trains on. --unit drug: a drug's similarity to the query is that of its most similar perturbation,
-and the k most similar drugs vote with weight max(similarity, 0) (uniform if none is positive). --unit pert: the k
-most similar perturbations vote (a drug with many doses / times can then take several votes).
+what the model trains on. --unit drug: a drug's similarity to the query is that of its most similar perturbation;
+--unit pert: every reference perturbation is its own voter (a drug with many doses / times then takes several).
+Two ways to weight the voters, every value given computed from one similarity matrix:
+  --k K       the K most similar vote with weight max(similarity, 0) (uniform if none is positive). Sparse: with
+              K = 25, 68-78% of candidates score exactly 0 per query, which pins spec at 0.5 and pushes the
+              rank_prob control to ~0.63 (ties take their average rank); only rank_probc is comparable then.
+  --beta B    dense: every voter, weight softmax(B * z), z = the query's similarities z-scored over the voters.
+              No candidate scores 0 unless no training drug shares any of its targets ("orphans", ~7-12% of the
+              candidates: no target-transfer method can vote for them). Use this for rank_prob / spec.
+Each test perturbation is flagged with target_shared_with_references (False for an orphan drug), so results can
+be reported with and without them.
 
 Never the held-out drug's own perturbations: the drug is held out, as for the model. Ranking held-out drugs by
 similarity to their own other doses / times would measure the same-drug reproducibility ceiling
@@ -40,8 +48,8 @@ must equal the candidate list in fold<i>/test_scores_heldout.npz, and every scor
 otherwise the inputs differ from the training ones and the script stops (--allow-mismatch to continue, for smoke
 tests only). The two sides' configs must agree on everything but the shuffle.
 
-Output: <out-root>/<run>__knn_<representation>_k<k>[_pert] for the run and ..._shuff for its control (out-root
-defaults to the run's parent directory), i.e. pairs the other tools treat as a run and its control:
+Output: <out-root>/<run>__knn_<representation>_<k<K> | soft<B>>[_pert] for the run and ..._shuff for its control
+(out-root defaults to the run's parent directory), i.e. pairs the other tools treat as a run and its control:
     python compare_runs.py --run real=<dir> --run shuffled=<dir>_shuff --control shuffled --out-dir <dir>/compare
     python plot_performance_panels.py ... --extra "mc=<run>__knn_sources_k25:MetChange kNN, same input"
 """
@@ -228,6 +236,21 @@ def knn_votes(U, k):
     return sparse.csr_matrix((w.ravel(), (rows, top.ravel())), shape=U.shape)
 
 
+def softmax_votes(U, beta):
+    """Dense: every unit with references votes, weight softmax(beta * z), z = the query's unit similarities
+    z-scored over those units (scale-free, so the same beta means the same concentration for cosine and Spearman).
+    Units without references (-inf) get 0."""
+    U = U.astype(np.float64)  # a sharp beta must not underflow to exact zeros
+    fin = np.isfinite(U)
+    V = np.where(fin, U, np.nan)
+    mu, sd = np.nanmean(V, 1, keepdims=True), np.nanstd(V, 1, keepdims=True)
+    L = np.where(fin, beta * (U - mu) / np.where(sd > 0, sd, 1), -np.inf)
+    L -= L.max(1, keepdims=True)
+    W = np.exp(L)
+    W /= W.sum(1, keepdims=True)
+    return sparse.csr_matrix(W)
+
+
 def rank_tables(S, test, rk):
     """Per perturbation and per drug: the model's rank_prob / spec_prob / rank_probc columns from scores S."""
     keys = test.drug.str.lower().to_numpy()
@@ -265,7 +288,10 @@ def main():
     ap.add_argument("--run-dir", required=True, help="a cross-validated run (its _shuff control is found next to it)")
     ap.add_argument("--sides", nargs="+", choices=("real", "shuff"), default=["real", "shuff"])
     ap.add_argument("--representation", nargs="+", choices=("sources", "profile"), default=["sources", "profile"])
-    ap.add_argument("--k", nargs="+", type=int, default=[25], help="numbers of voting neighbours")
+    ap.add_argument("--k", nargs="*", type=int, default=[25],
+                    help="top-k weighting, one output per value (give --k with no value to skip it)")
+    ap.add_argument("--beta", nargs="*", type=float, default=[],
+                    help="dense softmax weighting, one output per value (e.g. --beta 2 5)")
     ap.add_argument("--unit", choices=("drug", "pert"), default="drug", help="what a neighbour is")
     ap.add_argument("--ref-include-val", action="store_true",
                     help="also use the validation drugs as references (the model only early-stops on them)")
@@ -294,8 +320,13 @@ def main():
     out_root = os.path.abspath(args.out_root or os.path.dirname(base))
     name = os.path.basename(base)
     suffix = "_pert" if args.unit == "pert" else ""
-    log(f"run {name}: sides {sides}, mode {cfg.mode}; representations {args.representation}, k {args.k} "
-        f"{args.unit}s -> {out_root}/{name}__knn_<rep>_k<k>{suffix}[_shuff]")
+    # weightings: (tag, function of the queries x units similarity) -- top-k (sparse) and / or softmax (dense)
+    votes = [(f"k{k}", lambda U, k=k: knn_votes(U, k)) for k in args.k] + \
+            [(f"soft{b:g}", lambda U, b=b: softmax_votes(U, b)) for b in args.beta]
+    if not votes:
+        sys.exit("nothing to do: give --k and / or --beta values")
+    log(f"run {name}: sides {sides}, mode {cfg.mode}; representations {args.representation}, weightings "
+        f"{[t for t, _ in votes]} over {args.unit}s -> {out_root}/{name}__knn_<rep>_<weighting>{suffix}[_shuff]")
 
     # ---- inputs, read once for every side, representation and k
     g = mtp.Graph(cfg.nodes, cfg.edges)
@@ -319,7 +350,7 @@ def main():
             X["sources"] = source_matrix(perts, sigs, fmap, drug_mets, scfg, g.N)
         if profile0 is not None:
             X["profile"] = profile0[[row[perm[p]] for p in perts.pert]]  # each row carries its permuted signature
-        acc = {(rep, k): ([], []) for rep in X for k in args.k}
+        acc = {(rep, tag): ([], []) for rep in X for tag, _ in votes}
         check = {}
         for i in folds:
             tr, va, te = splits[i]
@@ -354,19 +385,31 @@ def main():
                 ref_unit, unit_drug = np.arange(len(ref)), list(ref.drug.str.lower())
             T = target_tokens(unit_drug, targets, n_prot)
             q_idx = test.pert.map(row).to_numpy()
+            # orphans: held-out drugs none of whose directional target tokens (gene x activation / inhibition) is
+            # carried by a voting reference drug; any target-transfer method gives them 0 from every query, while
+            # the network can still score them
+            voting = np.isin(np.arange(len(unit_drug)), np.unique(ref_unit))
+            ref_tok = set(T[voting].nonzero()[1])
+            cand_tok = {d: set(rk.DM[:, rk.col[d]].nonzero()[0]) for d in cands}
+            orphan = {d: not (cand_tok[d] & ref_tok) for d in cands}
+            shared = ~test.drug.str.lower().map(orphan).to_numpy(bool)
+            n_orph = int(sum(orphan.values()))
+            log(f"{side} fold {i}: {n_orph}/{len(cands)} candidates share no target with any reference drug "
+                f"({(~shared).sum()}/{len(test)} test perturbations)")
             for rep, M in X.items():
                 sim = M[q_idx] @ M[ref_idx].T
                 sim = np.asarray(sim.todense() if sparse.issparse(sim) else sim, np.float32)
                 U = unit_similarity(sim, ref_unit, len(unit_drug))  # once per fold and representation
-                for k in args.k:
-                    TOK = np.asarray((knn_votes(U, k) @ T).todense())  # queries x (2 * proteins)
+                for tag, vote in votes:
+                    TOK = np.asarray((vote(U) @ T).todense())  # queries x (2 * proteins)
                     S = np.empty((len(test), len(rk.drugs)), np.float32)
                     for j in range(len(test)):
                         prob = np.zeros((n_prot, 3))
                         prob[:, 1], prob[:, 2] = TOK[j, 0::2], TOK[j, 1::2]
                         S[j] = rk.prob_scores(prob)
                     pp, pdr = rank_tables(S, test, rk)
-                    out = os.path.join(out_root, f"{name}__knn_{rep}_k{k}{suffix}" +
+                    pp["target_shared_with_references"] = shared
+                    out = os.path.join(out_root, f"{name}__knn_{rep}_{tag}{suffix}" +
                                        ("_shuff" if side == "shuff" else ""))
                     od = os.path.join(out, f"fold{i}")
                     os.makedirs(od, exist_ok=True)
@@ -375,23 +418,25 @@ def main():
                     np.savez_compressed(os.path.join(od, "test_scores_heldout.npz"), pert=pp.pert.to_numpy(),
                                         drug=np.array(rk.drugs), prob=S)
                     m = dict(n_test=len(pp), n_references=int(len(ref)), n_units=len(unit_drug),
+                             n_orphan_candidates=n_orph, frac_zero_scores=float((S == 0).mean()),
                              rank_prob_heldout=float(np.median(pp.rank_prob_heldout / pp.n_candidates_heldout)),
                              rank_probc_heldout=float(np.median(pp.rank_probc_heldout / pp.n_candidates_heldout)),
                              spec_prob_heldout=float(np.nanmedian(pp.spec_prob_heldout / pp.n_spec_heldout)))
                     with open(os.path.join(od, "metrics.json"), "w") as fh:
                         json.dump(m, fh, indent=2)
-                    log(f"{side} fold {i} {rep} k {k}: {len(pp)} queries, {len(ref):,} references of "
-                        f"{len(ref_drugs)} drugs; median percentile rank_prob {m['rank_prob_heldout']:.3f}, "
-                        f"rank_probc {m['rank_probc_heldout']:.3f}, spec {m['spec_prob_heldout']:.3f}")
-                    acc[(rep, k)][0].append(pp.assign(fold=i))
-                    acc[(rep, k)][1].append(pdr.assign(fold=i))
-        for (rep, k), (pps, pds) in acc.items():
-            out = os.path.join(out_root, f"{name}__knn_{rep}_k{k}{suffix}" + ("_shuff" if side == "shuff" else ""))
+                    log(f"{side} fold {i} {rep} {tag}: {len(pp)} queries, {len(ref):,} references of "
+                        f"{len(ref_drugs)} drugs; zero scores {m['frac_zero_scores']:.1%}; median percentile "
+                        f"rank_prob {m['rank_prob_heldout']:.3f}, rank_probc {m['rank_probc_heldout']:.3f}, "
+                        f"spec {m['spec_prob_heldout']:.3f}")
+                    acc[(rep, tag)][0].append(pp.assign(fold=i))
+                    acc[(rep, tag)][1].append(pdr.assign(fold=i))
+        for (rep, tag), (pps, pds) in acc.items():
+            out = os.path.join(out_root, f"{name}__knn_{rep}_{tag}{suffix}" + ("_shuff" if side == "shuff" else ""))
             pd.concat(pps, ignore_index=True).to_csv(os.path.join(out, "cv_drug_ranks.tsv"), sep="\t", index=False)
             pd.concat(pds, ignore_index=True).to_csv(os.path.join(out, "cv_drug_ranks_per_drug.tsv"), sep="\t",
                                                      index=False)
             with open(os.path.join(out, "config.json"), "w") as fh:
-                json.dump(dict(vars(args), run=rdir, side=side, representation_used=rep, k_used=k, folds=folds,
+                json.dump(dict(vars(args), run=rdir, side=side, representation_used=rep, weighting=tag, folds=folds,
                                input_check=check, run_config={kk: v for kk, v in vars(scfg).items()}), fh, indent=2)
             log(f"saved {out}")
 

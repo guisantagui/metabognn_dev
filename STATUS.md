@@ -422,7 +422,17 @@ worse, so *which* 100 features are read barely matters; do not spend more there.
 
    (permuted-label nulls all ~0.50 / 1.0x.) So the signatures do carry target information, and expr carries more
    of it than MetChange — consistent with the model results.
-   **The predictive version is now written (2026-11-18), not yet run:** `scripts/predict_targets/
+   **RESULT (2026-11-18, report 06 section 6.1): the kNN baseline ranks the true drug BETTER than the model on
+   `rank_probc`** (median percentile 0.29-0.31 vs 0.38-0.41, controls all ~0.50; the kNN wins for 55-61% of drugs,
+   p ≤ 0.012 MetChange, ≤ 7e-14 expr / TF). Full profile ≈ same input (only MetChange +1.7). Model and kNN succeed
+   on different drugs (per-drug Spearman 0.18-0.31) and a rank-average of the two gives 14-16 points. **Caveat:**
+   with k = 25, 68-78% of candidates score exactly 0, so `rank_prob` and `spec` are not comparable and the gap
+   statistics are noisy; **next is a dense baseline** (every training drug votes, soft weight) before this goes in
+   any presentation. **Dense version written and launched 2026-11-18** (`--beta 2 5 10`, launcher default; report 06
+   6.2): no zeros except token-level orphans (~7-12% of candidates, flagged per query); check the conclusion
+   holds across B and on `rank_prob` / `spec` too. If it holds, the network does not earn its place with the current data, and the priorities
+   below change (stacking the kNN vote into the model, or rethinking the architecture, before more data).
+   **The predictive version was written (2026-11-18) and run the same day:** `scripts/predict_targets/
    baseline_signature_knn.py` + `sbatch launch_baseline_signature_knn_A549.sh` (cluster only: each fold is checked
    against the run's held-out drugs and test perturbations, and the laptop inputs differ — older labels, no `gene`
    network). For each held-out perturbation, the k = 25 most similar **training** drugs vote their targets, and the

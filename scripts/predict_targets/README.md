@@ -88,7 +88,10 @@ output is run-shaped (`<runs_dir>/<run>__knn_<rep>_k<k>{,_shuff}/`), so `compare
 `plot_performance_panels.py --extra` read it unchanged. Each fold is checked against the run (held-out drugs and
 test perturbations rebuilt from the run's inputs); locally they differ, so run it on the cluster:
 `sbatch launch_baseline_signature_knn_A549.sh [run ...]` (default: the three `_qsigtop` runs, both
-representations, k 25; `K="10 25 50"` for a sweep), which also runs the comparisons and draws
+representations, dense weighting `--beta 2 5 10`: every training drug votes with weight softmax(beta x z-scored
+similarity), so no candidate scores 0 except "orphans" no training drug shares a target with, flagged per query in
+`target_shared_with_references`; `K=25` adds the sparse top-k version, whose ties pin `spec` at 0.5 and push the
+`rank_prob` control to ~0.63, leaving only `rank_probc` comparable), which also runs the comparisons and draws
 `performance_figure/vs_baseline/`.
 
 ### Variants
