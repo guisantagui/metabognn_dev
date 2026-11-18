@@ -403,6 +403,62 @@ Re-run when a second `_qsigtop` seed exists.
 - Open, not selection: representation (continuous MetChange values or a larger `--top-n` instead of 100 signs,
   `--signature-weights`), and validation (6.2b).
 
+**6.0b How to improve performance (2026-11-18).** The current recipe beats its shuffled control by 8-10 points
+(median percentile ~0.36-0.40 vs ~0.47-0.50; true drug in the top 10% for ~12% of drugs vs ~5% control): real,
+reproducible, not strong. **Selection is exhausted** — `_qsigtop` ≈ `_min15` ≈ `_sdscale` and only `_qsig` is
+worse, so *which* 100 features are read barely matters; do not spend more there. In order:
+
+1. **Diagnostic — a predictive similarity baseline scored on the model's metric (no GPU).**
+   *Not* the model-free check, which is **already done**: `check_signature_target_similarity.py` →
+   `results/signature_similarity/A549/` (expr) and `.../A549/metchange/` ask whether drugs sharing a target
+   have similar signatures, and the answer is clearly yes:
+
+   | | expr (3,970 perts, 20,210 genes) | MetChange (2,022 perts, 5,707 features) |
+   |---|---|---|
+   | same drug, other dose/time (reproducibility ceiling) | AUROC 0.848 | 0.736 |
+   | different drugs sharing a target (same time point) | 0.672 (0.693) | 0.561 (0.568) |
+   | on drug consensus signatures | 0.590 | 0.529 |
+   | 10-NN: neighbours of other drugs sharing a target | 26.6% vs 2.7% expected (**9.9x**) | 15.1% vs 2.8% (**5.5x**) |
+
+   (permuted-label nulls all ~0.50 / 1.0x.) So the signatures do carry target information, and expr carries more
+   of it than MetChange — consistent with the model results.
+   **What is missing is the predictive version**, scored exactly like the model so the numbers are comparable:
+   for each held-out drug, rank the candidates by signature similarity to the query (or transfer targets by a
+   similarity-weighted vote of the k nearest perturbations of *other* drugs), then compute the same per-drug
+   percentile against the same `_shuff` control. The 9.9x kNN enrichment above makes this a serious contender.
+   **If it also reaches 8-10 points, the network and the whole GNN architecture are not earning their place** — which is
+   why this comes before any modelling work. Note `rank_baseline_heldout` in the run outputs is *not* this: it
+   is the protein-prior baseline (`prior_scores`), signature-independent, identical in real and shuffled runs
+   (0.508 / 0.508).
+2. **Diagnostic — split the 10 points into prior vs signature.** The model learns a protein prior (validation
+   AUPRC 0.348 real vs 0.280 shuffled, base rate 0.027; full proteome 0.0116 vs 0.0074). Retrain with
+   `--no-static` (per-protein features removed, so signature only) and, the other way round, with the signature
+   removed, and see how the gap splits. If signature-only is near chance, the weak link is signature → target
+   and **more data will not fix it**; if it holds up, the prior is just adding a constant and the signature path
+   is worth investing in.
+3. **Representation: stop throwing the magnitudes away.** `metabolic_target_prediction.py:372` is
+   `sigs[p] = (f, np.sign(v[keep].to_numpy()))` — the signature the model sees is **100 features, ±1 each**. It
+   never sees how much anything changed, nor feature 101. The `--top-n 100` default arrived with the activity
+   filter in `5a28a0f` with no recorded reason. Two small changes, the best effort-to-payoff ratio on this list
+   (and the natural reading of why selection makes no difference: the bottleneck is that there are only 100
+   signs):
+   - **`--signature-weights`** (open in section 7, not implemented): continuous weights instead of signs —
+     scaled log2FC, or signed −log10 p. Keep `--signature-scale sd` available here: scaling was neutral for
+     *selection* but matters once the value itself is the input.
+   - **`--top-n` sweep**: 100 → 300 → 1000 → all significant, each with its `_shuff` control.
+4. **Biggest data lever: train across cell lines.** Everything so far is A549 alone (~1,358 drugs); LINCS has
+   hundreds of lines and a GNN this size is probably data-starved. Pool 3-5 well-sampled lines with cell
+   identity as a covariate: a drug's targets are the same everywhere, so the label is shared while the
+   signature varies, which is exactly the contrast the model needs. Costs a label run per line
+   (`scripts/compute_labels`), so it is the expensive item — but the one most likely to move the number
+   substantially. Ties into 6.3 (data ceiling).
+5. **Objective, if 2 points at the signature path:** the FFN trains with per-protein cross-entropy while we
+   report a ranking metric; a pairwise / listwise ranking loss optimises what is actually measured.
+
+**Already tried, do not repeat:** matched negatives (`--matched-negatives`, report 01) — once the dose/time
+inputs were removed and training ran to convergence, they no longer help (report 02); signature scaling
+(`_sdscale`, neutral, 6.0); threshold-then-sample selection (`_qsig`, worse).
+
 **6.2b Validation strategy after the Schuhknecht null (report 05, sections 9–9.3).** Inferred labels do not
 agree with measured metabolomics of the same drug (8.2). **Key distinction (9.3): pool metabolomics does not
 validate the MetChange labels at all.** A MetChange label claims production / consumption *capacity*; the ground
