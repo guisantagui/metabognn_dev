@@ -33,13 +33,14 @@ parser <- add_argument(
         parser = parser,
         arg = c(
                 "--gctx_pert",
+                "--cell",
                 "--out_dir"
         ),
         help = c(
                 "Perturbation GCTX file.",
                 "Output directory where placing the results."
         ),
-        flag = c(F, F)
+        flag = c(F, F, F)
 )
 
 parsed <- parse_args(parser)
@@ -47,6 +48,7 @@ parsed <- parse_args(parser)
 # Directory stuff
 ################################################################################
 pert_f <- parsed$gctx_pert
+cell <- parsed$cell
 out_dir <- parsed$out_dir
 
 if (!dir.exists(out_dir)) {
@@ -60,6 +62,14 @@ message("Loading perturbation metadata...")
 metDat_pert <- read_gctx_meta(pert_f, dim = "column")
 message("Done")
 
+if(!is.na(cell) & cell %in% metDat_pert$cell){
+        metDat_pert <- metDat_pert[metDat_pert$cell == cell, ]
+        out_name <- sprintf(file.path(out_dir, "lincs_unique_perts_%s.tsv"), cell)
+}else{
+        out_name <- file.path(out_dir, "lincs_unique_perts.tsv")
+}
+
+
 out <- unique(
         metDat_pert[, c("pert_id", "pertname", "smiles", "inchi_key")]
 )
@@ -68,7 +78,7 @@ rownames(out) <- 1:nrow(out)
 
 writeCsvFst(
         out,
-        file = file.path(out_dir, "lincs_unique_perts.tsv"),
+        file = out_name,
         sep = '\t',
         quote = TRUE
 )
