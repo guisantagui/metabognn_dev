@@ -1,6 +1,6 @@
 #!/bin/bash
 
-pert="/Users/guillem.santamaria/Documents/postdoc/comput/metabognn_dev/data/LINCS/lincs_unique_perts.tsv"
+pert="/Users/guillem.santamaria/Documents/postdoc/comput/metabognn_dev/data/LINCS/lincs_unique_perts_HEPG2.tsv"
 
 val="/Users/guillem.santamaria/Documents/postdoc/comput/metabognn_dev/data/validation/attene_ramos/AID_720637_datatable.csv"
 
