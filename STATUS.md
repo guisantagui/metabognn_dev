@@ -1,7 +1,16 @@
-# Project state — 2026-11-18
+# Project state — 2026-11-19
 
 Handoff note for continuing in a new session. Everything described here is committed up to
 HEAD `d11744b`, except the files listed in section 8.
+
+> **2026-11-19 — validation datasets compiled and mapped (report 07).** `map_smiles.R` rewritten (salt
+> stripping, all pairs kept, stereochemistry labelled not assumed). **Attene-Ramos (mito membrane potential,
+> HepG2, ~10k compounds) is the best-powered external set: 904 LINCS HepG2 compounds mapped**, HepG2 MetChange
+> labels already on scratch. **Hallinger (Seahorse) is limited to its 270 named tier-2 actives** — the 1,042-
+> compound tier-1 screen was never registered in invitrodb (checked: analytical_qc, assay_annotations, pubchem
+> per-aeid, sc1_sc2 from the 7.5 GB summary; 0/1,051 spids), so only the authors have the plate maps. Currency
+> metabolites (ATP, NAD+/NADH, O2) **are** MetChange features but **not** network nodes: label-level tests can
+> use them, model queries cannot. See section 6.2c.
 
 > **2026-11-18 — recipe state (report 06, not frozen).** Best complete run: **expr `_qsigtop` 10.5 points**
 > (q < 0.05 then top 100 by |log2FC|, 1,358 drugs, one seed). `_qsigtop` matches `_min15` for all three signature
@@ -22,7 +31,8 @@ HEAD `d11744b`, except the files listed in section 8.
 > Earlier today: corrected MetChange matches expr and TF (report 05, section 5): per-drug gap 8.3 / 7.7
 > (seeds 0 / 1), vs expr 7.8 / 10.4 and TF 9.0 / 9.3, not significantly different.
 
-**Read first:** `reports/2026-11-18_recipe_state.md` (report 06 — where the recipe stands, what is settled and
+**Read first:** `reports/2026-11-19_validation_datasets.md` (report 07 — external validation sets, structure
+mapping, what each can test), then `reports/2026-11-18_recipe_state.md` (report 06 — where the recipe stands, what is settled and
 what is pending), then `reports/2026-11-17_signature_selection_scale.md` (report 05 — q-values unused; MetChange's
 top-100 is chosen by metabolite scale; `_qsig` / `_sdscale`; section 5: corrected MetChange results), then `reports/2026-11-16_labels_network_coverage.md` (report 04 — the label bug in the
 MetChange runs, expr on `combined`, full coverage check), then `reports/2026-11-14_seed_tf_expr.md` (report 03 — second seed, MetChange vs expr
@@ -590,6 +600,48 @@ time × dose metabolomics matrix, and the enzyme was pinned down by rescue exper
 (proteins from transcriptomes, free for thousands of LINCS compounds).
 
 R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` activates it for the R step).
+
+**6.2c External validation datasets (report 07, 2026-11-19).**
+
+| dataset | readout | cell | mapped to LINCS | status |
+|---|---|---|---|---|
+| Schuhknecht | metabolomics (pools) | A549 | 750 | done, null (report 05, 8.2) |
+| **Attene-Ramos** | **mito membrane potential** | **HepG2** | **904** | **next: section 6 of report 07** |
+| Hallinger | Seahorse OCR (flux) | HepG2 | 42 of 258 named | only 270 tier-2 actives identifiable |
+| Sarvin | metabolomics, dose x time | HCT116 | ~22-30 | raw mzXML only; enzyme ground truth |
+| Lackner | isotope labelling | breast | 1 drug class | case study |
+| LINCS shRNA / CRISPR / OE | genetic perturbation | many | — | still the one test of the labels (6.2b item 1) |
+
+**Mapping tool:** `scripts/benchmarking/map_smiles.R` (rewritten 2026-11-19): largest-fragment stripping (salts),
+all pairs kept, NA never matched, unique SMILES canonicalised once, and `--stereo both` = exact pass then a
+stereo-insensitive retry of the unmatched, every pair labelled with `match_type` / `ambiguous_stereo` so the cost
+of merging enantiomers is measured, not assumed. `data/validation/hallinger/DSSTox_CCD_dump_12092025` (CSV)
+gives DTXSID / CASRN -> SMILES / InChIKey offline from a dated release. Clowder downloads:
+`https://clowder.edap-cluster.com/api/files/<file-id>/blob` (**HEAD 404s, GET works**).
+
+**Watch out: 5,785 of 34,419 LINCS compounds (564 of 5,494 in HepG2) have neither SMILES nor InChIKey** — mostly
+unnamed `BRD-…` codes. They can never be mapped to an external dataset by structure, so the mappable HepG2
+denominator is 4,930, not 5,494.
+
+**Currency metabolites** (ATP, ADP, NAD+, NADH, NADPH, O2, H+, CoA) **are MetChange features but not network
+nodes** (they are among the 339 dropped before `select_sources`). So an energy-metabolism phenotype can be tested
+at the **label** level but cannot be built as a model **query**; queries must use the glycolysis / TCA proxies
+(lactate, pyruvate, succinate, citrate, fumarate, acetyl-CoA, glucose). This is why the enrichment test comes
+before the ranking test for MMP / respiration phenotypes.
+
+**To do (Attene-Ramos, report 07 section 6):**
+1. **Viability columns of `AID_720637_datatable.csv`** (laptop): is the cytotoxicity split possible? Most
+   compounds that collapse MMP just kill cells; the informative contrast is **MMP-down without viability loss**
+   vs inactive. Without this the test predicts cytotoxicity, not metabolism.
+2. **Real n** (HPC): mapped compounds x *active* HepG2 perturbations — not 904.
+3. **Enrichment test** (HPC, HepG2 MetChange labels at `<scratch>/results/labels/HEPG2/metchange/rank/`, ~1.5 GB
+   per matrix so do not download): per drug, summarise MetChange over glycolytic vs TCA/ETC metabolites
+   (currency metabolites included), compare MMP-active vs inactive (Mann-Whitney / AUROC), with the expression
+   baseline read the same way, and **no assumed sign** (the compensation hypothesis of report 05, 9.2).
+4. Aggregation rule for the 1,379 Attene-Ramos CIDs collapsing onto 904 compounds; run first with `exact` +
+   unambiguous pairs, then test whether the 225 ambiguous stereo pairs change anything.
+5. **Hallinger:** email Simmons (EPA/CCTE) for the `EPAPLT0033` / `EPAPLT0034` plate maps — the only remaining
+   source. The 17 GB MySQL `sample` table is a long shot (tier 1 was never registered) and not worth it on spec.
 
 **6.3 Size the data ceiling** (no GPU, ~a day):
 1. PCA of the A549 expression matrix: how many components explain 95% of variance across
