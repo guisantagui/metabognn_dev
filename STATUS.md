@@ -606,11 +606,40 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 | dataset | readout | cell | mapped to LINCS | status |
 |---|---|---|---|---|
 | Schuhknecht | metabolomics (pools) | A549 | 750 | done, null (report 05, 8.2) |
-| **Attene-Ramos** | **mito membrane potential** | **HepG2** | **904** | **next: section 6 of report 07** |
-| Hallinger | Seahorse OCR (flux) | HepG2 | 42 of 258 named | only 270 tier-2 actives identifiable |
+| **Attene-Ramos** | **mito membrane potential** | **HepG2** | **890** | **next: section 6 of report 07** |
+| Hallinger | Seahorse OCR (flux) | HepG2 | **115 (29 active / 86 inactive)** | **all 1,042 tier-1 chemicals recovered, report 07 sections 8-9** |
 | Sarvin | metabolomics, dose x time | HCT116 | ~22-30 | raw mzXML only; enzyme ground truth |
 | Lackner | isotope labelling | breast | 1 drug class | case study |
 | LINCS shRNA / CRISPR / OE | genetic perturbation | many | — | still the one test of the labels (6.2b item 1) |
+
+> **2026-11-19 (later) — Hallinger solved, two mapping bugs fixed (report 07, sections 8-9).** The paper's
+> Supplemental Table 2 lists **all 1,042 tier-1 chemicals with activity calls** (243 active / 799 inactive) and
+> the 243 actives' **mechanism and inhibited ETC complex**, so the EPAPLT plate maps are not needed; parsed by
+> `scripts/benchmarking/parse_hallinger_supp.py`. **Hallinger -> LINCS HepG2 is 115 compounds, 29 active / 86
+> inactive** (19 ETC inhibitors, 3 uncouplers, 4 ATP synthase; rotenone = complex I), up from 42 actives-only.
+> **`map_smiles.R` had two bugs** (9.2): `.I` under a filter gave subset positions used as table rows, so right
+> structures carried wrong ids; and explicit `[H]` in DSSTox SMILES broke canonicalisation, losing true matches
+> (rotenone, estradiol). Both fixed. **Attene-Ramos was re-mapped: 890 compounds, and 0 of the old 1,509 pairs
+> survive** - anything built on the old `mapped_drugs.csv` must be redone (old file kept as
+> `mapped_drugs_BUGGY_2026-11-19.csv.bak`). **Schuhknecht checked and is clean** (report 07, section 10): that
+> mapping is separate code which matches on values, so the report 05 null stands - 998 of its 1,040 pairs
+> reproduce and the only drug lost is Gramicidin, a `NA`-matched-`NA` artefact. Re-mapping it would *gain*
+> 212 drugs (1,251 total), since explicit `[H]` (228 of 1,520 Schuhknecht SMILES) and salts blocked them.
+
+> **2026-11-19 (later) — first non-null external association (report 07, section 11).** Label-level test of the
+> HepG2 MetChange labels against measured mitochondrial phenotypes, `scripts/mc_phenotype_assoc/` (40 Human-GEM
+> metabolite sets, per-drug `z` / rank statistic, Mann-Whitney + bootstrap + permutation + **size-matched
+> random-set control**, no imposed sign, model activity filter deliberately NOT applied).
+> **Attene-Ramos: MMP-down drugs have lower MetChange TCA capacity** (`tca mito_nohub` AUROC 0.364, q = 7e-6,
+> random-set p = 0.010; non-hub variants strongest, glycolysis weak at 0.43, **oxphos / ETC flat**), and
+> **MMP-up drugs have higher energy-currency capacity** (0.663, q = 2e-4). The 24 cytotoxic drugs are flat, so
+> it is not a cytotoxicity readout. **Hallinger is null** (29/86; 19 ETCi vs 86 — same direction, CIs cross 0.5,
+> uninformative at that n). **Confound, carry it with the result:** MMP-active drugs are 3.4x more likely to have
+> a responsive MetChange signature (31% vs 9%), and within the *controls alone* responsive drugs already show the
+> low-TCA pattern (0.355, p = 0.0015). Stratified, TCA holds at ~0.38 in both strata (non-responsive p = 2e-4) and
+> MMP-up/currency is clean (0.698 non-responsive, confounder absent). **Decisive next control: the same test on the
+> HepG2 expr labels (on the HPC) with GPR gene sets** - if the transcriptome does as well, the stoichiometric
+> reading added nothing.
 
 **Mapping tool:** `scripts/benchmarking/map_smiles.R` (rewritten 2026-11-19): largest-fragment stripping (salts),
 all pairs kept, NA never matched, unique SMILES canonicalised once, and `--stereo both` = exact pass then a

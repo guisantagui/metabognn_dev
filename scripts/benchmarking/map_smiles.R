@@ -42,9 +42,15 @@ largest_fragment <- function(smiles) {
         if (is.na(smiles) || !nzchar(smiles)) return(NA_character_)
         parts <- strsplit(smiles, ".", fixed = TRUE)[[1]]
         if (length(parts) == 1) return(parts[1])
+        # The whole body is guarded, not just parse.smiles: an empty fragment
+        # ("CC." or a stray separator) parses to a non-NULL molecule with no
+        # atoms, and get.atoms() then throws a Java IndexOutOfBoundsException
+        # that aborts the run instead of dropping the compound.
         sizes <- vapply(parts, function(p) {
-                mol <- tryCatch(parse.smiles(p)[[1]], error = function(e) NULL)
-                if (is.null(mol)) 0L else length(get.atoms(mol))
+                tryCatch({
+                        mol <- parse.smiles(p)[[1]]
+                        if (is.null(mol)) 0L else as.integer(length(get.atoms(mol)))
+                }, error = function(e) 0L, warning = function(w) 0L)
         }, integer(1))
         if (all(sizes == 0)) return(NA_character_)
         parts[which.max(sizes)]
@@ -53,11 +59,21 @@ largest_fragment <- function(smiles) {
 # Canonical SMILES of the largest fragment, with or without stereochemistry.
 # CDK's Canonical flavor writes canonical SMILES without stereo / isotopes;
 # adding Isomeric keeps them.
+#
+# Explicit hydrogens are suppressed first, and this is not cosmetic: a SMILES
+# written as "[H][C@@]12..." (DSSTox style) carries the H atoms as graph nodes,
+# so CDK canonicalizes it to a different string than the same molecule written
+# as "[C@H]1..." (LINCS style), and the two never match. Rotenone and
+# 17beta-estradiol are identical by InChIKey across the two sources yet were
+# lost this way. remove.hydrogens() keeps the stereo descriptors, so
+# enantiomers still differ under --stereo exact and still merge under flat
+# (checked on both notations of alanine).
 canonicalize <- function(smiles, stereo) {
         frag <- largest_fragment(smiles)
         if (is.na(frag)) return(NA_character_)
         mol <- tryCatch(parse.smiles(frag)[[1]], error = function(e) NULL)
         if (is.null(mol)) return(NA_character_)
+        mol <- tryCatch(remove.hydrogens(mol), error = function(e) mol)
         flavor <- if (stereo) smiles.flavors(c("Canonical", "Isomeric")) else
                 smiles.flavors(c("Canonical"))
         out <- tryCatch(get.smiles(mol, flavor), error = function(e) NA_character_)
@@ -81,9 +97,12 @@ canonicalize_smiles_vec <- function(smiles_vec, stereo, label) {
 }
 
 # Pairs of rows sharing a key, all combinations, NA keys dropped.
+# NB: `DT[!is.na(k), .(row = .I)]` numbers the *subset* 1..n, not the rows of DT,
+# so the row numbers are taken first and filtered after; indexing the full table
+# with subset positions silently pairs the right structures with the wrong ids.
 pairs_on <- function(prt, val, key) {
-        a <- prt[!is.na(get(key)), .(pert_row = .I, k = get(key))]
-        b <- val[!is.na(get(key)), .(val_row = .I, k = get(key))]
+        a <- prt[, .(pert_row = .I, k = get(key))][!is.na(k)]
+        b <- val[, .(val_row = .I, k = get(key))][!is.na(k)]
         merge(a, b, by = "k", allow.cartesian = TRUE)
 }
 
