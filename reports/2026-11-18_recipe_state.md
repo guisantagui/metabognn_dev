@@ -218,3 +218,61 @@ top-25 numbers reproduce the earlier run. Launcher default is now `BETA="2 5 10"
 `K=25` re-adds it); the figure's baseline rows use the first B. Read B = 2 (diffuse) vs 10 (close to top-k but dense)
 as a robustness check: the conclusion of 6.1 holds only if it holds across B, and on `rank_prob` / `spec` as well
 as `rank_probc`.
+
+### 5.2 Statistics on the forest panel (added)
+
+Each row now shows its p-value under the label. **Test:** Wilcoxon signed-rank, two-sided, on the per-drug gaps
+(control percentile − real percentile, one value per drug) against 0. Paired, because every drug is scored in the
+real run and in its own control with the same fold and candidates; drugs with a gap of exactly 0 are left out
+(scipy default). **Interval:** percentile bootstrap of the median gap, 5,000 resamples of the drugs (with replacement,
+original size, seed 0); the bar spans the 2.5th-97.5th percentile of the resampled medians. Drugs are the resampled
+unit, so the bar covers which drugs happen to be in the set, not training randomness or fold assignment (the expr
+seed spread, 7.8 vs 10.4, is wider than these bars).
+
+| metric | MetChange | expression | TF |
+|---|---|---|---|
+| `rank_probc` | 10.0 [8.2, 13.0], p = 5e-13 | 8.5 [7.5, 10.9], p = 1e-16 | 8.8 [6.7, 10.6], p = 2e-17 |
+| `spec_prob_timedose` | 10.2 [6.8, 13.5], p = 4e-11 | 10.5 [8.1, 12.6], p = 4e-16 | 7.8 [5.4, 9.8], p = 2e-11 |
+| `rank_prob` | 5.8 [4.6, 7.3], p = 6e-20 | 3.4 [2.5, 4.3], p = 4e-15 | 4.0 [3.2, 4.9], p = 3e-16 |
+
+The p-values differ slightly from `compare_runs.py`'s `paired.tsv`, which averages each drug's scores before
+ranking; the figure averages per-perturbation percentiles. Both are paired by drug.
+
+## 7. Seahorse as a query (design, nothing run)
+
+Seahorse (Agilent XF) measures two **rates**, not pools, which is what MetChange's claim is about (report 05,
+9.3): **OCR** (pmol O2/min, mitochondrial respiration) and **ECAR** (mpH/min, acidification: lactate + H+ export,
+with a CO2 contribution; as PER / glycoPER once the buffer capacity is applied). The assays derive basal and
+maximal respiration, ATP-linked respiration, proton leak, spare capacity, coupling efficiency (Mito Stress),
+glycolysis / capacity / reserve (Glyco Stress), mitochondrial vs glycolytic ATP (Real-Time ATP Rate) and fuel
+dependency on glucose / glutamine / fatty acids (Mito Fuel Flex). Coarse (whole-cell respiration and glycolysis,
+no pathway resolution), but a genuine flux readout, medium throughput and cheap per compound.
+
+**Query construction.** The first idea — OCR up -> "increased production" of every TCA and ETC metabolite, ECAR up
+-> every glycolytic metabolite — is the right shape but likely too broad: at higher flux the intermediates of a
+pathway often stay flat or fall while throughput rises, so a uniformly positive query may not resemble any real
+MetChange signature. Two tighter versions:
+- **endpoints only:** OCR up = O2 / NADH / FADH2 / acetyl-CoA consumed, CO2 / ATP produced; ECAR up = glucose
+  consumed, lactate + H+ produced;
+- **or only what the instrument actually senses** (lactate, CO2, ATP), without reconstructing the pathway.
+
+**Use the two rates together.** Their ratio is the informative part: *OXPHOS up* (OCR up, ECAR down), *glycolytic
+shift* (ECAR up, OCR down) and *both down* (general toxicity — effectively a negative control, since most
+cytotoxic compounds land there). The opposing pattern is far more specific than either rate alone.
+
+**Two possible benchmarks, testing different things:**
+
+| | (a) query -> drug rank | (b) enrichment in the MetChange signatures |
+|---|---|---|
+| what | the Schuhknecht design: 2-3 phenotype queries, where do the drugs known to cause that phenotype rank among candidates | per drug, are its significant MetChange metabolites enriched for glycolysis / TCA-ETC with the right sign, and does that agree with the measured OCR / ECAR direction |
+| tests | the tool's actual task | the labels (link b of 9.3) |
+| statistic | rank enrichment (AUROC / GSEA) of the known positives, permutation null over which drugs are positive; no per-drug value, so power comes from the number of labelled drugs | one value per drug: properly powered, reuses `scripts/schuhknecht_mc_assoc/` |
+
+**Order: (b) first** — cheap, better powered, and it says whether the labels carry the energy-metabolism signal at
+all; if they do not, (a) cannot work. Then (a) as the headline, since it is the tool's task.
+
+**Data is the binding constraint, check it before building anything.** Public Seahorse at drug-screen scale is
+scarce and usually published as summary tables, not deposited. For (a) the raw rates are not even needed: curated
+**known ETC / OXPHOS / glycolysis inhibitors** and **mitochondrial-toxicity screens** (Tox21,
+glucose-galactose assays) give labelled positives directly, which is all the rank-enrichment test requires.
+Searching for a LINCS-cell-line Seahorse dataset is the first step.

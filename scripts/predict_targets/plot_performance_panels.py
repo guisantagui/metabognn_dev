@@ -79,6 +79,7 @@ def apply_theme(name):
         "xtick.color": MUTED, "ytick.color": MUTED, "xtick.labelcolor": INK2, "ytick.labelcolor": INK2,
         "xtick.major.width": 0.8, "ytick.major.width": 0.8,
         "grid.color": GRID, "grid.linewidth": 0.6, "legend.frameon": False, "legend.labelcolor": INK2,
+        "mathtext.default": "regular",  # p-value superscripts in the same upright sans as the text
     })
 
 
@@ -134,10 +135,33 @@ def gaps(runs_dir, run, stratified_spec, col):
 
 
 def boot_ci(x, n=5000, seed=0):
+    """Median of the per-drug gaps and its 95% percentile-bootstrap interval: n resamples of the drugs, with
+    replacement and of the original size; the interval is the 2.5th and 97.5th percentile of the n resampled medians.
+    Drugs are the resampled unit (each is held out once, real and control paired on it), so the interval covers which
+    drugs happen to be in the set, not training randomness (seed) or fold assignment."""
     rng = np.random.default_rng(seed)
     x = np.asarray(x, float)
     med = np.median(rng.choice(x, (n, len(x)), replace=True), axis=1)
     return np.median(x), np.percentile(med, 2.5), np.percentile(med, 97.5)
+
+
+def gap_test(x):
+    """Wilcoxon signed-rank test (two-sided) of the per-drug gaps against 0: paired, since every drug is scored in the
+    real run and in its control with the same fold and candidates. Drugs with a gap of exactly 0 are left out
+    (scipy's default zero_method)."""
+    from scipy.stats import wilcoxon
+    x = np.asarray(x, float)
+    return float(wilcoxon(x[x != 0]).pvalue) if (x != 0).sum() > 0 else 1.0
+
+
+def fmt_p(p):
+    """p for a slide: 'p = 0.03', or 'p = 3 x 10^-10' with a real superscript (mathtext, upright)."""
+    if p <= 0:
+        return r"p < $10^{-300}$"
+    if p >= 1e-3:
+        return f"p = {p:.2g}"
+    m, e = f"{p:.0e}".split("e")
+    return rf"p = {m}$\times$10$^{{{int(e)}}}$"
 
 
 # ---------------------------------------------------------------- panels
@@ -176,7 +200,7 @@ def panel_b(ax, rows):
                     va="center", fontsize=7.5, color=INK2)
     ax.axvline(0, color=AXIS, lw=0.8, zorder=1)
     ax.set_yticks(y)
-    ax.set_yticklabels([r["label"] for r in rows], fontsize=8)
+    ax.set_yticklabels([f"{r['label']}\n{fmt_p(r['p'])}" for r in rows], fontsize=8, linespacing=1.5)
     ax.set_xlabel("per-drug gap over own shuffled control (points)")
     ax.grid(axis="x", zorder=0)
     ax.set_axisbelow(True)
@@ -259,18 +283,20 @@ def main():
     for sig in ("mc", "expr", "tf"):
         d = data[sig]
         med, lo, hi = boot_ci(d["gap"])
+        p = gap_test(d["gap"])
         tag = "" if len(d["folds"]) == 5 else f", folds {''.join(str(f) for f in d['folds'])}"
         rows.append({"sig": sig, "label": f"{LABEL[sig]}  (n = {len(d['gap'])}{tag})",
-                     "med": med, "lo": lo, "hi": hi})
-        notes[d["run"]].update(ci_low=lo, ci_high=hi)
+                     "med": med, "lo": lo, "hi": hi, "p": p})
+        notes[d["run"]].update(ci_low=lo, ci_high=hi, wilcoxon_p=p)
     for spec in args.extra:
         sig, rest = spec.split("=", 1)
         run, label = rest.split(":", 1)
         j, g, folds = gaps(args.runs_dir, run, stratified_spec, args.metric)
         med, lo, hi = boot_ci(g)
-        rows.append({"sig": sig, "label": f"{label} (n={len(g)})", "med": med, "lo": lo, "hi": hi})
+        p = gap_test(g)
+        rows.append({"sig": sig, "label": f"{label} (n={len(g)})", "med": med, "lo": lo, "hi": hi, "p": p})
         notes[run] = {"signature": sig, "n_drugs": int(len(j)), "folds": [int(f) for f in folds],
-                      "median_gap_points": float(med), "ci_low": lo, "ci_high": hi,
+                      "median_gap_points": float(med), "ci_low": lo, "ci_high": hi, "wilcoxon_p": p,
                       "frac_drugs_better": float((g > 0).mean())}
         print(f"{run}: folds {folds}, {len(g)} drugs, gap {med:.1f} points")
     rows.sort(key=lambda r: (["mc", "expr", "tf"].index(r["sig"]), -r["med"]))

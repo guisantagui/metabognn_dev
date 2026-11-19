@@ -529,6 +529,18 @@ prospective tracing only.
    enzyme. Caveat: plasma / urine pools.
 6. **Prospective**: isotope tracing / exometabolomics for a few top predictions (link d, the only direct test of
    the claim).
+7. **Seahorse (OCR / ECAR) as a query** (design in report 06 section 7, nothing run). Real flux readout, so it
+   tests the capacity claim that pools cannot; coarse (whole-cell respiration / glycolysis only). Query: not
+   "every TCA + ETC metabolite up" (at higher flux intermediates often stay flat or fall) but the **endpoints**
+   (O2 / NADH / acetyl-CoA consumed, CO2 / ATP produced; glucose consumed, lactate produced), and the two rates
+   **together** — OXPHOS up (OCR up, ECAR down), glycolytic shift (the reverse), both down (toxicity, a negative
+   control). Two benchmarks: **(b) enrichment of each drug's significant MetChange metabolites in glycolysis /
+   TCA-ETC vs its measured OCR / ECAR direction** (one value per drug, well powered, reuses
+   `scripts/schuhknecht_mc_assoc/`, tests the labels) **first**, then **(a) query -> drug rank** (the tool's task,
+   but only 2-3 queries, so it is a rank-enrichment test of the known positives against a permutation null).
+   **Binding constraint: data.** Public Seahorse at screen scale is scarce and usually only in summary tables; for
+   (a) curated known ETC / OXPHOS / glycolysis inhibitors and mitochondrial-toxicity screens (Tox21,
+   glucose-galactose) supply the positives without raw rates. Check what exists for a LINCS cell line first.
 
 **0. (Do first, cheap) Protein-level target rank in the Schuhknecht benchmark.** `scores.npz` only holds the
 drug x drug matrices, but `benchmark_schuhknecht.py` already computes the ~924 candidate-protein scores
