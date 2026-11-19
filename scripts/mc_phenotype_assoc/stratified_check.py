@@ -45,7 +45,9 @@ def main():
     ap.add_argument('--scores', required=True, help='per_drug_scores.tsv')
     ap.add_argument('--case', default='MMP_down')
     ap.add_argument('--control', default='inactive')
-    ap.add_argument('--statistic', default='auroc', choices=['auroc', 'z'])
+    ap.add_argument('--statistic', default='auroc',
+                    help='a statistic column of per_drug_scores.tsv: z / auroc '
+                         '(value mode), sign_mean / sign_dev, sig_dev / sig_signed_dev')
     ap.add_argument('--sets', default='tca_endpoints:cyto_nohub,tca:mito_nohub,'
                                      'pyruvate:mito_nohub,glycolysis:cyto_nohub,'
                                      'redox_couples:all,energy_currency:mito,oxphos:mito',
@@ -54,7 +56,15 @@ def main():
     args = ap.parse_args()
 
     rows = list(csv.DictReader(open(args.scores), delimiter='\t'))
+    if args.statistic not in rows[0]:
+        raise SystemExit('%s has no column %r; it has %s'
+                         % (args.scores, args.statistic,
+                            ', '.join(k for k in rows[0] if k not in
+                                      ('drug', 'group', 'subgroup', 'set', 'variant',
+                                       'n_perturbations', 'max_n_sig'))))
     want = [tuple(s.split(':', 1)) for s in args.sets.split(',')]
+    have = {(r['set'], r['variant']) for r in rows}
+    want = [w for w in want if w in have] or sorted(have)
 
     by = collections.defaultdict(dict)
     meta = {}

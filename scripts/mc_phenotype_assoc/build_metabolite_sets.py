@@ -23,8 +23,18 @@ Note the currency metabolites (ATP, NAD+/NADH, O2, ...) ARE MetChange features
 but are NOT network nodes, so they can be used in this label-level test and
 cannot be used to build a model query (report 07, section 5).
 
-Output: `metabolite_sets.tsv` with columns set / variant / n_members / members,
-plus `metabolite_annotation.tsv` (id, name, compartment, GEM degree, is_hub) and
+`--emit genes` instead writes the GPR **gene** sets of the same subsystems, taken
+from each reaction's `gene_reaction_rule`, so the identical association test can
+be run on the expression labels as the baseline that says whether the
+stoichiometric reading adds anything over reading the genes. The GEM states those
+rules in Ensembl IDs, which is also what the expression label matrices are indexed
+by, so no identifier mapping is involved. Genes have no compartment, so the
+variants there are `gene` and `gene_nohub` (hub = a gene used by very many
+reactions, the analogue of a currency metabolite).
+
+Output: `metabolite_sets.tsv` (or `gene_sets.tsv`) with columns
+set / variant / n_members / members, plus `metabolite_annotation.tsv` /
+`gene_annotation.tsv` (id, name, compartment, GEM degree, is_hub) and
 `sets_summary.txt`.
 """
 import argparse, collections, os, re, sys
@@ -67,6 +77,7 @@ def parse_gem(path):
     and PyYAML's omap handling is both slow and fussy here.
     """
     mets, rxns = {}, []
+    re_gpr = re.compile(r'^\s+- gene_reaction_rule: "(.*)"')
     section = None
     cur, cur_mets, in_mets = {}, [], False
     re_id = re.compile(r'^\s+- id: "(.*)"')
@@ -81,7 +92,8 @@ def parse_gem(path):
         if section == 'metabolites' and 'id' in cur:
             mets[cur['id']] = (cur.get('name', ''), cur.get('compartment', ''))
         elif section == 'reactions' and 'id' in cur:
-            rxns.append((cur['id'], cur.get('subsystem', ''), list(cur_mets)))
+            rxns.append((cur['id'], cur.get('subsystem', ''), list(cur_mets),
+                         re.findall(r'ENSG\d+', cur.get('gpr', ''))))
 
     with open(path) as fh:
         for line in fh:
@@ -107,7 +119,8 @@ def parse_gem(path):
                 cur_mets.append(m.group(1))
                 continue
             for key, rx in (('id', re_id), ('name', re_name),
-                            ('compartment', re_comp), ('subsystem', re_sub)):
+                            ('compartment', re_comp), ('subsystem', re_sub),
+                            ('gpr', re_gpr)):
                 m2 = rx.match(line)
                 if m2:
                     cur[key] = m2.group(1)
@@ -129,6 +142,8 @@ def main():
     ap.add_argument('--hub-percentile', type=float, default=99.0,
                     help='metabolites above this percentile of GEM reaction degree are hubs')
     ap.add_argument('--min-set-size', type=int, default=5)
+    ap.add_argument('--emit', choices=['metabolites', 'genes'], default='metabolites',
+                    help='genes = the subsystems\' GPR genes (Ensembl), for the expression baseline')
     ap.add_argument('--out-dir', default=os.path.join(repo, 'data/validation/metabolite_sets'))
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
@@ -147,20 +162,25 @@ def main():
 
     # degree over the whole model, for the hub cutoff
     degree = collections.Counter()
-    for _, _, ms in rxns:
-        for m in set(ms):
+    for _, _, ms, gs in rxns:
+        for m in set(gs if args.emit == 'genes' else ms):
             degree[m] += 1
     import numpy as np
     cutoff = float(np.percentile(list(degree.values()), args.hub_percentile)) if degree else 0.0
-    is_hub = {m: (degree[m] >= cutoff or mets.get(m, ('', ''))[0] in CURRENCY_NAMES)
-              for m in mets}
+    if args.emit == 'genes':
+        universe = sorted(degree)
+        mets = {g: (g, '') for g in universe}
+        is_hub = {g: degree[g] >= cutoff for g in universe}
+    else:
+        is_hub = {m: (degree[m] >= cutoff or mets.get(m, ('', ''))[0] in CURRENCY_NAMES)
+                  for m in mets}
     print('hub cutoff: degree >= %.0f (%d hubs of %d)'
           % (cutoff, sum(is_hub.values()), len(is_hub)), file=sys.stderr)
 
     by_sub = collections.defaultdict(set)
-    for _, sub, ms in rxns:
+    for _, sub, ms, gs in rxns:
         if sub:
-            by_sub[sub].update(ms)
+            by_sub[sub].update(gs if args.emit == 'genes' else ms)
 
     raw = {}
     for key, names in SUBSYSTEMS.items():
@@ -173,7 +193,7 @@ def main():
     name_to_ids = collections.defaultdict(set)
     for mid, (nm, _) in mets.items():
         name_to_ids[nm].add(mid)
-    for key, names in CURATED.items():
+    for key, names in ({} if args.emit == 'genes' else CURATED).items():
         members = set()
         for n in names:
             if n not in name_to_ids:
@@ -183,7 +203,9 @@ def main():
 
     rows, summary = [], []
     for key, members in sorted(raw.items()):
-        for comp_label, comp in (('all', None), ('mito', 'm'), ('cyto', 'c')):
+        comps = ((('gene', None),) if args.emit == 'genes'
+                 else (('all', None), ('mito', 'm'), ('cyto', 'c')))
+        for comp_label, comp in comps:
             sel = {m for m in members
                    if comp is None or mets.get(m, ('', ''))[1] == comp}
             for hub_label, keep in (('', True), ('_nohub', False)):
@@ -196,18 +218,24 @@ def main():
                 rows.append((key, variant, len(s), ','.join(sorted(s))))
                 summary.append('%-22s %-10s %4d' % (key, variant, len(s)))
 
-    out = os.path.join(args.out_dir, 'metabolite_sets.tsv')
+    out = os.path.join(args.out_dir,
+                       'gene_sets.tsv' if args.emit == 'genes' else 'metabolite_sets.tsv')
     with open(out, 'w') as fh:
         fh.write('set\tvariant\tn_members\tmembers\n')
         for r in rows:
             fh.write('%s\t%s\t%d\t%s\n' % r)
-    with open(os.path.join(args.out_dir, 'metabolite_annotation.tsv'), 'w') as fh:
-        fh.write('metabolite\tname\tcompartment\tgem_degree\tis_hub\tin_labels\n')
+    ann_path = os.path.join(args.out_dir,
+                            'gene_annotation.tsv' if args.emit == 'genes'
+                            else 'metabolite_annotation.tsv')
+    with open(ann_path, 'w') as fh:
+        fh.write('%s\tname\tcompartment\tgem_degree\tis_hub\tin_labels\n'
+                 % ('gene' if args.emit == 'genes' else 'metabolite'))
         for mid, (nm, comp) in sorted(mets.items()):
             fh.write('%s\t%s\t%s\t%d\t%s\t%s\n'
                      % (mid, nm, comp, degree[mid], int(bool(is_hub.get(mid))),
                         '' if present is None else int(mid in present)))
-    with open(os.path.join(args.out_dir, 'sets_summary.txt'), 'w') as fh:
+    with open(os.path.join(args.out_dir, 'sets_summary%s.txt'
+                           % ('_genes' if args.emit == 'genes' else '')), 'w') as fh:
         fh.write('set                    variant    size\n')
         fh.write('\n'.join(summary) + '\n')
     print('\n'.join(summary))

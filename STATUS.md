@@ -638,8 +638,56 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > a responsive MetChange signature (31% vs 9%), and within the *controls alone* responsive drugs already show the
 > low-TCA pattern (0.355, p = 0.0015). Stratified, TCA holds at ~0.38 in both strata (non-responsive p = 2e-4) and
 > MMP-up/currency is clean (0.698 non-responsive, confounder absent). **Decisive next control: the same test on the
-> HepG2 expr labels (on the HPC) with GPR gene sets** - if the transcriptome does as well, the stoichiometric
-> reading added nothing.
+> HepG2 expr labels with GPR gene sets** - needs `log2FC.csv` for HEPG2/expr (the laptop copy has only
+> `qvals.csv` / `basal.csv`), then `launch_assoc_expr_HEPG2.sh` runs it; sets via
+> `build_metabolite_sets.py --emit genes` (Ensembl both sides, no mapping).
+
+> **2026-11-19 (later still) — three modalities (report 07, section 12).** `--mode value|sign|sig`;
+> refactor verified (all 80 shared statistics reproduce exactly). **The directional reading confirms TCA and is
+> the cleanest evidence**: `sign_dev tca cyto` AUROC 0.415 (q = 0.041, rand = 0.020), non-responsive stratum
+> 0.432 (p = 0.03) and **the responsiveness confounder is absent** (0.453, p = 0.30) where it was present for
+> the magnitude statistic. `sign_mean` null, so TCA is down *relative to each drug's own mean sign*.
+> **The `sig` modality is a responsiveness artefact - do not use it pooled**: `tca mito_nohub` q = 4e-10 pooled
+> but AUROC exactly 0.500 (p = 1, all ties) among non-responsive drugs and 0.091 (p = 2e-71) for responsiveness
+> within controls alone; restricted to responsive drugs nothing survives (best p = 0.079). Always pair
+> `--mode sig` with `--min-nsig 1`. **The apparent cytotoxic signal is the same artefact** - the clean cytotox
+> control of section 11 holds only for value/sign. Expr baseline started but only in `sig` (no `log2FC.csv`):
+> no gene set beats its random-set control (rand >= 0.25), suggestive but not like-for-like.
+> **Launchers:** `scripts/mc_phenotype_assoc/launch_assoc_{metchange,expr}_HEPG2.sh` +
+> `launch_assoc_HEPG2_slurm.sh` (2-task array); config in `mc_phenotype_assoc_common.sh`, which auto-detects
+> the scratch base on the cluster.
+
+> **2026-11-19 (final) — the expression baseline is run, and it matches MetChange (report 07, section 13).**
+> HEPG2 expr `log2FC.csv` arrived; `value`+`sign` on the GPR gene sets, same contrasts. **MMP-down: expr
+> `oxphos gene` AUROC 0.410 (z, q = 0.0035) / 0.421 (sign_dev, q = 0.018) vs MetChange TCA 0.359 / 0.415;
+> MMP-up: expr `pyruvate gene` 0.615 vs MetChange currency 0.660.** So **on raw separation the stoichiometric
+> reading has NO advantage over reading the genes** - the kNN verdict (report 06, 6.1), now for the labels.
+> MetChange looks more specific on two criteria only: it beats size-matched random sets (rand 0.005-0.02 vs
+> 0.13-0.16) and its directional result is not responsiveness-confounded (0.453 ns vs expr 0.335-0.363,
+> p <= 2e-7). **Both criteria are partly artefacts of comparing two feature spaces** (20,186 genes / sets of
+> 23-106 vs 5,707 metabolites / sets of 5-73; and the confounder test has 265 vs 215 controls for expr but only
+> 44 vs 436 for MetChange, so MetChange's "no confound" has CI ~[0.36, 0.55]). **Most interesting: the two label
+> types point at different pathways** - expr at the OXPHOS *genes* (on-target, 106 genes no hubs), MetChange at
+> TCA (its own oxphos set is 24/26 hubs and null everywhere). Defensible claim for a talk: the MetChange labels
+> carry a TCA-capacity signal separating MMP-active from inactive drugs, at a magnitude the transcriptome also
+> reaches via OXPHOS genes. Hallinger null in both arms (n = 29). Next: responsiveness-MATCHED design, random
+> sets matched on universe fraction, a second cell line, and the orthogonal `APR_HepG2_MitoMembPot` readout.
+> **Set construction and a multiple-testing correction (report 07, section 14):** 11 base sets x 3 compartments
+> x 2 hub variants = 66 candidates, 26 below the 5-member floor (structurally: currency sets have no non-hub
+> member, `oxphos` is 24/26 hubs, `ppp mito` is empty), leaving 40 - of which **39 are distinct**; the gene file
+> has 10 rows but **5 distinct sets** (every `gene_nohub` equals its `gene` set). Duplicates are now collapsed,
+> with an `aliases` column. **These duplicates did NOT inflate any q-value**: BH is invariant to duplicating the
+> whole family (`q = p*m/rank`, both scale), so the section 13 expression q-values are correct as published; only
+> the MetChange family (40 -> 39, non-uniform) shifts, in the 4th significant figure. Statistics are per set
+> (features aggregated within a set within a perturbation, then per drug), never pooled across subsystems - which
+> is what makes the tca/pyruvate/glycolysis/oxphos gradient readable.
+> **Run inventory complete (report 07, section 15):** both phenotypes x both label types x all three modalities.
+> The last gap, `hallinger_expr_sig`, is null (0.582, p = 0.25), so **every Hallinger arm is null in both label
+> types and all modalities** (n = 20-29). Clarification: in the POOLED expression `sig` run `glycolysis gene`
+> does survive BH (q = 0.016) - section 12.3 said otherwise, which was true only of the responsive run. It is
+> still not evidence (rand = 0.144; responsiveness confounder 0.230 at p = 1.5e-26; q = 0.106 once restricted),
+> so the conclusion holds but the earlier statement was incomplete. Also note `attene_expr_sig*` (702 drugs) and
+> `attene_expr_valuesign` (726) differ because only the latter carried the cytotox contrast.
 
 **Mapping tool:** `scripts/benchmarking/map_smiles.R` (rewritten 2026-11-19): largest-fragment stripping (salts),
 all pairs kept, NA never matched, unique SMILES canonicalised once, and `--stereo both` = exact pass then a

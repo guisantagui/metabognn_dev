@@ -509,3 +509,328 @@ that the HepG2 MetChange labels carry a TCA-related signal that differs between 
 inactive drugs, at |AUROC − 0.5| ≈ 0.12 after the responsiveness confound is stratified out, with a cleaner
 and larger signal for the hyperpolarising group — and that the pathway-specific direction (TCA, not
 OXPHOS / ETC) is not the one a membrane-potential assay most obviously predicts.
+
+## 12. Three modalities, and the expression baseline started (added 2026-11-19, later)
+
+`mc_phenotype_assoc.py` now takes `--mode value | sign | sig` (repeatable). The refactor was verified against
+section 11: **all 80 statistics shared with the pre-refactor run reproduce identical AUROCs.**
+
+| modality | statistics | question |
+|---|---|---|
+| `value` | `z`, `auroc` | does the pathway move *at all* (magnitude) |
+| `sign` | `sign_mean`, `sign_dev` | does it move UP or DOWN (magnitude discarded) |
+| `sig` | `sig_dev`, `sig_signed_dev` | are the pathway's features *significant* more often than the drug's others |
+
+`sign_dev` subtracts the perturbation's own mean sign, so a drug that pushes everything one way does not score
+on every set; `sign_mean` is the absolute direction.
+
+### 12.1 The sign modality confirms the TCA result, and is the *cleanest* evidence for it
+
+Attene-Ramos, MMP-down vs inactive, `results/mc_phenotype_assoc/HEPG2/attene_allmodes/`:
+
+| statistic | best TCA set | AUROC | q | rand |
+|---|---|---|---|---|
+| `z` | `tca_endpoints cyto_nohub` | 0.359 | 5e-06 | 0.005 |
+| `auroc` | `tca_endpoints cyto_nohub` | 0.363 | 7e-06 | 0.005 |
+| `sign_dev` | `tca cyto` | 0.415 | 0.041 | 0.020 |
+| `sign_mean` | — | nothing at q < 0.05 | 0.87 | — |
+
+All three informative statistics agree: **the TCA metabolites are relatively DOWN in MMP-collapsing drugs.**
+`sign_mean` being null while `sign_dev` is significant says the drugs' overall direction varies, and TCA is
+down *relative to each drug's own baseline* — which is the comparison that means something.
+
+**And the sign modality is less confounded than the magnitude one.** Repeating 11.4's check:
+
+| statistic / set | pooled | responsive (45/44) | non-responsive (102/436) | confounder (controls only) |
+|---|---|---|---|---|
+| `sign_dev` / `tca cyto` | 0.415 (0.0019) | 0.409 (0.14) | **0.432 (0.032)** | **0.453 (0.30) — absent** |
+| `sign_dev` / `tca_endpoints cyto_nohub` | 0.425 (0.0062) | 0.410 (0.14) | 0.439 (0.056) | 0.513 (0.78) — absent |
+| `z` / `tca_endpoints cyto_nohub` (11.4) | 0.359 | 0.383 | 0.383 (2e-04) | 0.355 (0.0015) — **present** |
+
+So the responsiveness confound that muddies the magnitude result **does not apply to the directional one**,
+which makes sense: `sign_dev` is referenced to the drug's own mean sign, and responsiveness affects magnitudes
+far more than relative direction. **The directional reading is now the result to lead with**, even though its
+effect size is smaller (0.415 vs 0.359).
+
+### 12.2 The `sig` modality is a responsiveness artefact — do not use it as run here
+
+It produced the largest apparent effects of the whole analysis (`tca mito_nohub` AUROC 0.397, q = 4e-10) and
+they are **entirely spurious**:
+
+| | pooled | non-responsive | confounder (controls only) |
+|---|---|---|---|
+| `sig_dev` / `tca mito_nohub` | 0.397 (4e-10) | **0.500 (p = 1)** | **0.091 (p = 2e-71)** |
+| `sig_dev` / `oxphos mito` | 0.442 (5e-04) | 0.500 (p = 1) | 0.159 (p = 3e-50) |
+
+With no significant feature, the set fraction and the column fraction are both 0, so `sig_dev` is identically
+zero — hence AUROC exactly 0.5 and p = 1 in the non-responsive stratum, all ties. Since MMP-down drugs are
+3.4x more likely to be responsive, the pooled test is detecting **"has any significant feature"**, not pathway
+enrichment. Re-run on responsive perturbations only (`--min-nsig 1`, `attene_sig_responsive/`, 45 vs 44):
+**nothing survives, best p = 0.079 and every `rand` ≥ 0.09.**
+
+Two consequences:
+1. `--mode sig` must always be run with `--min-nsig 1`; the script now says so and the launchers do it.
+2. **The apparent cytotoxic-group signal is the same artefact.** In section 11 the 24 cytotoxic drugs were
+   flat (value modality). In `sig` they look strong (`sig_signed_dev tca_endpoints mito` AUROC 0.660,
+   q = 3e-05) — but cytotoxic drugs are 42% responsive against 9% of inactives. **The clean statement from
+   11.2 stands only for the value and sign modalities.**
+
+### 12.3 Expression baseline: started, and not yet decisive
+
+`results/labels/HEPG2/expr/` holds `qvals.csv` and `basal.csv` but **no `log2FC.csv` and no
+`fit_info_nsig.csv`**, so only the `sig` modality can run — the one modality 12.2 just showed to be
+uninformative. The script now copes with the missing `fit_info_nsig.csv` (drug / dose / time parsed from the
+column names, `n_sig` counted from the q-value matrix).
+
+Gene sets: `build_metabolite_sets.py --emit genes` writes the subsystems' GPR genes, 5 sets of 23–106 genes.
+The GEM states its rules in Ensembl IDs and the expression matrices are indexed by Ensembl IDs, so **no
+identifier mapping is involved**. Worth noting the asymmetry: `oxphos` has **106 genes and no hubs**, so the
+expression arm can test OXPHOS properly, which the metabolite side cannot (24 of its 26 members are hubs).
+
+Result (`attene_expr_sig_responsive/`, 98 vs 265 responsive drugs): best is `glycolysis gene` AUROC 0.579,
+p = 0.021, **but `rand` = 0.254 — it does not beat size-matched random gene sets**, and nothing survives BH.
+On the pooled version the confounder is overwhelming as expected (0.087–0.23, p to 6e-60).
+
+**So the baseline is not yet answered.** The suggestive comparison is that MetChange's TCA sets beat their
+size-matched random controls (`rand` 0.005–0.02) while no gene set does (`rand` ≥ 0.25) — but that is
+MetChange's *value/sign* result against expression's *sig* result, which is not like for like. **What is
+needed is `log2FC.csv` for the HepG2 expression labels**, then `launch_assoc_expr_HEPG2.sh` runs value and
+sign automatically and the comparison is set-for-set.
+
+### 12.4 Launchers (reproducible on the HPC)
+
+`scripts/mc_phenotype_assoc/`:
+
+- `mc_phenotype_assoc_common.sh` — sourced config. Detects the cluster and reads labels from
+  `/scratch/users/gsantamaria/test_large_files/metabognn_dev/results/labels/<cell>/...`, falling back to the
+  repo path on the laptop; the structure below the base is identical, so only the base differs. Every
+  variable is overridable by export (`cell`, `labels_base`, `n_perm`, ...).
+- `launch_assoc_metchange_HEPG2.sh` — Attene-Ramos (3 contrasts) and Hallinger (activity and by mechanism)
+  in `value`+`sign`, then `sig` with `--min-nsig 1`, then the responsive-subset sensitivity run, each
+  followed by the stratified check over every statistic produced.
+- `launch_assoc_expr_HEPG2.sh` — the same against the expression labels with the gene sets; skips value/sign
+  automatically if `log2FC.csv` is absent and says so.
+- `launch_assoc_HEPG2_slurm.sh` — `sbatch` wrapper, a 2-task array (0 = MetChange, 1 = expression),
+  4 cpus / 32 GB / 6 h.
+
+Run with `bash scripts/mc_phenotype_assoc/launch_assoc_metchange_HEPG2.sh` or
+`sbatch scripts/mc_phenotype_assoc/launch_assoc_HEPG2_slurm.sh`. One modality only:
+`modes="--mode sign" bash .../launch_assoc_metchange_HEPG2.sh`.
+
+Note on cost: six statistics triple the group-test work (3 contrasts x 40 sets x 6 statistics, each with
+bootstrap + permutation + 200 random sets). The laptop runs above used `--n-perm 1000 --n-boot 500`; the
+launchers default to 5000 / 2000, which is what the cluster should use. The Mann-Whitney and random-set
+p-values do not depend on those counts.
+
+### 12.5 Where this leaves the result
+
+**Stands, and is now better supported:** MMP-collapsing drugs have relatively lower MetChange TCA scores.
+Three statistics agree, it beats size-matched random sets, and in the *directional* reading it is free of the
+responsiveness confound (pooled 0.415, non-responsive 0.432, confounder absent).
+
+**Withdrawn from section 11's reading:** nothing, but two qualifications. The `sig`-based numbers are not
+evidence, and the clean cytotoxic control holds only for value and sign.
+
+**Still open:** the expression baseline needs `log2FC.csv`; the effect is modest (|AUROC − 0.5| ≈ 0.09–0.14);
+one cell line, one assay; `oxphos` / `etc_endpoints` remain null in every modality, so the signal is TCA-shaped
+rather than respiration-shaped.
+
+## 13. The expression baseline, run (added 2026-11-19, later still)
+
+`log2FC.csv` for `results/labels/HEPG2/expr/` arrived, so the baseline of 11.5 / 12.3 ran properly:
+`value` + `sign` on the GPR gene sets, same phenotypes, same contrasts, same pipeline
+(`attene_expr_valuesign/`, 20,186 genes, 2,186 perturbations, 726 drugs; `hallinger_expr_valuesign/`).
+A code gap was fixed on the way: a value/sign-only run never read the q-values, so `n_sig` was absent and the
+responsiveness stratification could not run. The q-matrix is now read for `n_sig` whenever there is no
+`fit_info_nsig.csv` (`--no-nsig` opts out). The rerun reproduced the first run's numbers exactly.
+
+### 13.1 Like for like
+
+| contrast / statistic | MetChange (metabolite sets) | expression (GPR gene sets) |
+|---|---|---|
+| MMP-down, `z` | `tca_endpoints cyto_nohub` **0.359**, q = 5e-06, **rand = 0.005** | `oxphos gene` **0.410**, q = 0.0035, rand = 0.154 |
+| MMP-down, `auroc` | `tca_endpoints cyto_nohub` 0.363, q = 7e-06, rand = 0.005 | `oxphos gene` 0.414, q = 0.0074, rand = 0.149 |
+| MMP-down, `sign_dev` | `tca cyto` **0.415**, q = 0.041, **rand = 0.020** | `oxphos gene` **0.421**, q = 0.018, rand = 0.129 |
+| MMP-up, `z` | `energy_currency mito` **0.660**, q = 1.9e-04, rand = 0.025 | `pyruvate gene` **0.615**, q = 0.0056, rand = 0.164 |
+| cytotoxic | flat (value / sign) | flat (best q = 0.074) |
+
+Hallinger's expression arm is null as well (best `glycolysis gene` z, AUROC 0.549, p = 0.43), matching the
+MetChange side: n = 29 resolves nothing either way.
+
+**The headline, stated plainly: the transcriptome separates these drugs about as well as MetChange does.**
+0.410 vs 0.359 for MMP-down, 0.421 vs 0.415 directionally, 0.615 vs 0.660 for MMP-up. **On raw separation the
+stoichiometric reading has no advantage over reading the genes** — the same verdict the kNN baseline returned
+for the model (report 06, 6.1), now for the labels.
+
+### 13.2 Two criteria on which MetChange does look more specific
+
+**(a) The size-matched random-set control.** MetChange's TCA sets beat random metabolite sets of their own
+size (`rand` 0.005–0.020); the gene sets mostly do not (`rand` 0.129–0.164). The natural reading is that in
+expression there is a *global* group difference — MMP-active drugs have broadly different transcriptomes, so
+an arbitrary 100-gene set separates them too — while in MetChange the TCA sets do something their size-matched
+peers do not.
+
+**(b) The responsiveness confound.** Repeating 11.4 / 12.1 on the gene sets:
+
+| statistic / set | pooled | responsive | non-responsive | confounder (controls only) |
+|---|---|---|---|---|
+| expr `z` / `oxphos gene` | 0.410 (9e-04) | 0.439 (0.076) | 0.395 (0.022) | **0.339 (p = 1.3e-09)** |
+| expr `z` / `tca gene` | 0.413 (0.0014) | 0.430 (0.041) | 0.402 (0.032) | **0.363 (p = 2.3e-07)** |
+| expr `sign_dev` / `oxphos gene` | 0.421 (0.0037) | 0.459 (0.24) | 0.395 (0.023) | **0.335 (p = 5.3e-10)** |
+| MetChange `sign_dev` / `tca cyto` (12.1) | 0.415 (0.0019) | 0.409 (0.14) | 0.432 (0.032) | 0.453 (p = 0.30) |
+
+The expression association is **strongly confounded by responsiveness in both modalities**, where the
+MetChange directional one is not. Both survive in the non-responsive stratum (expr `oxphos` 0.395, p = 0.022),
+so neither is pure confound.
+
+### 13.3 Why I would hold (a) and (b) loosely
+
+Both criteria compare two different feature spaces, and the differences between those spaces could produce
+them without any biology:
+
+1. **Different universes and set sizes.** 20,186 genes with sets of 23–106, against 5,707 metabolites with
+   sets of 5–73. A larger random set has a more stable mean, so it is *better* at capturing a global group
+   shift — which inflates expression's `rand` p-values for reasons of arithmetic, not specificity.
+2. **The confounder tests have very unequal power.** Responsive share of controls: expression 55%
+   (530/960 drug-variant rows), MetChange 9% (264/2880). So the confounder comparison rests on 265 vs 215
+   controls for expression and only **44 vs 436** for MetChange. At that n, MetChange's 0.453 has a CI of
+   roughly [0.36, 0.55] — it excludes a confounder as large as expression's 0.335 only barely. "MetChange's
+   directional result is unconfounded" is therefore **weaker than it reads**; the honest version is that its
+   confounder is smaller and not resolvable at this n.
+3. MetChange's responsiveness *imbalance* between groups is much larger (3.4x: 31% vs 9%) than expression's
+   (1.2x: 67% vs 55%), which is the opposite of what criteria (b) alone would suggest.
+
+### 13.4 The biologically interesting part
+
+**The two label types do not point at the same pathway.** Expression's best set for MMP-down is
+**`oxphos` genes** (0.410–0.421) — the respiratory-chain genes, exactly on-target for a membrane-potential
+phenotype. MetChange's signal is in **TCA**, while its `oxphos` set is null in every modality. And the
+asymmetry is structural: the MetChange `oxphos` set is 24 of 26 hub metabolites, so it *cannot* be tested
+cleanly, whereas `oxphos` has 106 genes and no hubs.
+
+So the transcriptome sees the ETC genes respond; the stoichiometric labels see TCA capacity shift. That is a
+more informative statement than either AUROC, and it is the first thing to follow up: the two are consistent
+with one mechanism (ETC transcripts respond, TCA throughput capacity falls) but the analysis here does not
+establish the link.
+
+### 13.5 What this does to the result
+
+- **Section 11's association stands** and 12.1's directional version is still the cleanest form of it.
+- **Section 11.5's decisive question is now answered, and the answer is not the favourable one:** the
+  expression baseline matches MetChange on effect size. MetChange's advantage is confined to two specificity
+  criteria that 13.3 shows are partly artefacts of comparing two feature spaces.
+- **For a presentation**, the defensible claim is: *the HepG2 MetChange labels carry a TCA-capacity signal
+  that distinguishes measured MMP-active from inactive drugs, at a magnitude the transcriptome also achieves
+  through its OXPHOS genes.* Anything stronger needs 13.3 resolved — i.e. a design where the two label types
+  are compared on matched set sizes and matched responsiveness, not on their native spaces.
+- Next, in order: (i) responsiveness-matched design rather than stratification, for both arms; (ii) random
+  sets matched on *universe fraction* rather than absolute size, which removes objection 13.3(1);
+  (iii) the same test in a second cell line for the confounder structure; (iv) the orthogonal
+  `APR_HepG2_MitoMembPot` readout.
+
+## 14. How the sets are built, and a correction on multiple testing (added 2026-11-19, final)
+
+### 14.1 The set count, in full
+
+11 base sets x 3 compartments x 2 hub variants = **66 candidates**, of which **26 fall below
+`--min-set-size 5`** after restriction to features present in the label matrix, leaving **40**. The drops are
+structural, not incidental, and they are the same fact reported in 11.2 from the other direction:
+
+| reason | examples (size) |
+|---|---|
+| a currency set has no non-hub member, by construction | `adenylates all_nohub` 0, `energy_currency {all,mito,cyto}_nohub` 0, `redox_couples all_nohub` 0 |
+| `oxphos` is almost entirely hubs | `oxphos all_nohub` 2 (ubiquinol + ubiquinone only), `mito_nohub` 2, `cyto_nohub` 0 |
+| wrong-compartment variants are empty or tiny | `ppp mito` 0 (PPP is cytosolic), `glycolysis_endpoints mito` 2, `glycolysis mito_nohub` 4 |
+| small curated sets split by compartment | `adenylates mito` 4, `redox_couples cyto` 4 |
+
+**Genes:** the same 5 subsystems through `gene_reaction_rule`, but no compartments (genes have none) and no
+curated endpoint sets (those are defined by metabolite names), so 5 x 1 x 2 = 10 rows.
+
+### 14.2 Three levels of aggregation; the test is per set
+
+```
+level 1   within one set, within one perturbation:  5,707 features -> 1 number
+          (e.g. z = (set mean log2FC - column mean) / column SD)
+level 2   within one drug: its perturbations (doses x times) -> 1 number per set
+          (plain mean; doses of one drug are not independent)
+level 3   the test, SEPARATELY PER SET: 147 case drugs vs 480 control drugs
+```
+
+Features are aggregated, but **per set, per perturbation**. Sets are never pooled with one another: each is
+its own hypothesis, 40 tests per contrast per statistic, BH across them. That is what makes the gradient of
+11.2 readable — `tca` 0.36, `pyruvate` 0.37, `glycolysis` 0.43, `oxphos` 0.49 are four independent tests, not
+four parts of one score. A single aggregated "metabolic score" could not have shown it.
+
+**The sets do overlap** (TCA and pyruvate share metabolites; the curated endpoint sets are subsets of the
+subsystem sets), so the tests within a family are correlated and BH is not the ideal correction. It does not
+affect the conclusions at q ~ 1e-6, and the one borderline row (`sign_dev tca cyto`, q = 0.041) is discussed
+in 14.3.
+
+### 14.3 Duplicate sets: collapsed, and a correction to what I first said about it
+
+Identical member lists do occur: **every one of the 5 `gene_nohub` sets equals its `gene` set** (no gene of
+these subsystems passes the hub cutoff), and on the metabolite side `glycolysis_endpoints all_nohub` equals
+`all`. So `gene_sets.tsv` has 10 rows but **5 distinct sets**, and `metabolite_sets.tsv` 40 rows but **39**.
+
+`read_sets` now collapses identical member lists, keeps the plainest variant name (`gene` over `gene_nohub`)
+and records the dropped names in a new `aliases` column.
+
+**Correction.** My first reading was that this had inflated the published q-values and that the expression
+q-values were therefore wrong. **That was incorrect.** BH computes `q = p x m / rank`; duplicating the
+*entire* family multiplies `m` and `rank` by the same factor, so every q-value is unchanged (verified
+numerically at 2x and 4x duplication). Because all five gene sets were duplicated exactly once, the
+duplication was uniform and **the expression q-values in section 13 are correct as published**. Recomputed
+explicitly:
+
+| run | rows | BH family | q-values |
+|---|---|---|---|
+| expr value/sign (Attene) | 120 -> 60 | 10 -> 5 | **unchanged** |
+| expr sig, responsive | 20 -> 10 | 10 -> 5 | **unchanged** |
+| MetChange allmodes | 720 -> 702 | 40 -> 39 | 4th significant figure only (1.61e-08 -> 1.57e-08) |
+
+The MetChange side shifts a little because only one of its 40 sets was duplicated, so there the duplication
+was *not* uniform; 2% on a q of 1e-08 changes nothing, and `sign_dev tca cyto` (q = 0.041) is untouched.
+
+So the dedupe is kept for three reasons, none of them the one I first gave: honest set counts (39 and 5, not
+40 and 10, which overstate independence), half the compute on the expression arm, and output without paired
+identical rows. **No result in sections 11-13 changes.**
+
+## 15. Run inventory and two clarifications (added 2026-11-19, final)
+
+### 15.1 Every combination that was run
+
+| phenotype | labels | `value` | `sign` | `sig` | output dir |
+|---|---|---|---|---|---|
+| Attene-Ramos | MetChange | yes | yes | yes | `attene_allmodes/`, `attene_sig_responsive/` |
+| Attene-Ramos | expression | yes | yes | yes | `attene_expr_valuesign/`, `attene_expr_sig{,_responsive}/` |
+| Hallinger | MetChange | yes | yes | yes | `hallinger_allmodes/`, `hallinger_etci/` |
+| Hallinger | expression | yes | yes | yes | `hallinger_expr_valuesign/`, `hallinger_expr_sig/` |
+
+All under `results/mc_phenotype_assoc/HEPG2/`. `hallinger_expr_sig` was the last gap and is **null**
+(best `glycolysis gene` AUROC 0.582, p = 0.25, 22 vs 71 responsive drugs), so **every Hallinger arm is null in
+both label types and all three modalities** — one consistent statement about an n of 20-29, not four
+independent ones.
+
+### 15.2 Expression `sig`, stated fully
+
+| run | set | AUROC | p | q | rand |
+|---|---|---|---|---|---|
+| pooled (147/480) | `glycolysis gene` | 0.577 | 0.0032 | **0.016** | 0.144 |
+| pooled | `oxphos gene` | 0.555 | 0.034 | 0.086 | 0.239 |
+| responsive (98/265) | `glycolysis gene` | 0.579 | 0.021 | 0.106 | 0.254 |
+| responsive | `oxphos gene` | 0.566 | 0.052 | 0.130 | 0.323 |
+
+**Clarification on section 12.3.** That section said nothing survives BH, which was true of the *responsive*
+run; in the **pooled** run `glycolysis gene` does survive at q = 0.016, and that was not stated explicitly.
+It is still not evidence, on two independent grounds: it fails the size-matched random-set control
+(rand = 0.144), and the responsiveness confounder for that same set is AUROC 0.230 at p = 1.5e-26 — the
+pooled `sig` test measures responsiveness, as 12.2 established for MetChange. Restricting to responsive drugs
+takes it to q = 0.106. **The conclusion of 12.3 is unchanged; the statement of it was incomplete.**
+
+### 15.3 The two expression runs are not on identical columns
+
+`attene_expr_sig*` covers 702 drugs / 2,074 perturbations, `attene_expr_valuesign` 726 / 2,186, because the
+`sig` runs were given only `--extra-contrast MMP_up:inactive` while the value/sign run also had
+`cytotox:inactive`, and column selection keeps only the contrasted groups. Not an error — the MMP-down vs
+inactive comparison is identical in both — but the runs are not column-for-column comparable, and a rerun
+through `launch_assoc_expr_HEPG2.sh` (which passes the same contrasts to every modality) would make them so.
