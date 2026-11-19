@@ -435,6 +435,14 @@ def main():
                     help='0 = use every perturbation (default); 1 = MetChange-responsive only')
     ap.add_argument('--min-set-size', type=int, default=5)
     ap.add_argument('--n-random-sets', type=int, default=200)
+    ap.add_argument('--random-set-sizes', default='',
+                    help='extra absolute sizes to include in the random null, beyond the '
+                         'real sets own sizes. Used to compare the SHAPE of the null '
+                         'across feature spaces at matched universe fraction (e.g. 42 of '
+                         '5,707 metabolites = 0.74%% matches 149 of 20,186 genes).')
+    ap.add_argument('--dump-random-null', action='store_true',
+                    help='write random_null.tsv: one row per random set with its group '
+                         'AUROC, so the null distributions can be compared directly')
     ap.add_argument('--n-perm', type=int, default=5000)
     ap.add_argument('--n-boot', type=int, default=2000)
     ap.add_argument('--seed', type=int, default=0)
@@ -530,7 +538,8 @@ def main():
     # random size-matched sets, identical pipeline: a pathway set must beat random
     # sets of its own size, not merely chance
     pool = [f for f in feats if f not in need_rows]
-    sizes = sorted({set_size[k] for k in scored})
+    sizes = sorted({set_size[k] for k in scored}
+                   | {int(x) for x in args.random_set_sizes.split() if x.strip()})
     rand_sets = []
     for size in sizes:
         if len(pool) <= size:
@@ -576,6 +585,27 @@ def main():
 
     rand_drug = {k: {st: per_drug(v) for st, v in stats.items()}
                  for k, stats in rand_scored.items()}
+
+    if args.dump_random_null and rand_drug:
+        with open(os.path.join(args.out_dir, 'random_null.tsv'), 'w', newline='') as fh:
+            w = csv.writer(fh, delimiter='\t')
+            w.writerow(['contrast', 'size', 'universe_fraction', 'replicate',
+                        'statistic', 'group_auroc', 'abs_effect'])
+            groups0 = np.array([pheno[d]['group'] for d in drugs])
+            for case, ctrl in contrasts:
+                ci0, cc0 = groups0 == case, groups0 == ctrl
+                for (rname, rvar), per_r in sorted(rand_drug.items()):
+                    size = int(rname.replace('__random', ''))
+                    for st, vec in per_r.items():
+                        x_, y_ = vec[ci0], vec[cc0]
+                        x_, y_ = x_[np.isfinite(x_)], y_[np.isfinite(y_)]
+                        if len(x_) < 3 or len(y_) < 3:
+                            continue
+                        a_ = auroc(x_, y_)
+                        w.writerow(['%s_vs_%s' % (case, ctrl), size,
+                                    '%.6g' % (size / float(len(feats))), rvar, st,
+                                    '%.6g' % a_, '%.6g' % abs(a_ - 0.5)])
+        print('wrote random_null.tsv', file=sys.stderr)
 
     # ------------------------------------------------------------ group tests
     groups = np.array([pheno[d]['group'] for d in drugs])

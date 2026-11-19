@@ -657,7 +657,49 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > `launch_assoc_HEPG2_slurm.sh` (2-task array); config in `mc_phenotype_assoc_common.sh`, which auto-detects
 > the scratch base on the cluster.
 
-> **2026-11-19 (final) — the expression baseline is run, and it matches MetChange (report 07, section 13).**
+> **2026-11-19 (FINAL, supersedes the banner below) — responsiveness-matched design: MetChange survives, the
+> expression baseline does not (report 07, section 16).** `matched_check.py` (1:1 greedy matching on
+> log1p(n_sig), caliper 0.25, plus a residual-on-n_sig variant; balance: 140/147 matched, imbalance p = 0.64
+> MetChange and 139/147, p = 0.97 expr). **MetChange `tca mito_nohub` z: pooled 0.364 -> matched 0.371
+> (p = 2e-04, q = 0.0039) -> residual 0.388; `tca cyto` sign_dev 0.415 -> 0.422 (p = 0.025). Expression
+> `tca gene` z: 0.413 (p = 0.0014) -> matched 0.486 (p = 0.70, q = 0.87); `oxphos gene` 0.410 -> 0.450
+> (p = 0.15).** So **the expression association is essentially all responsiveness and the MetChange TCA one is
+> not** - both designs agree, in both statistics, and the `oxphos mito` negative control stays null throughout
+> (so it is not lost power). **This corrects section 13.5's "the baseline matches MetChange".** The pooled
+> effects were similar in size but different in kind. Also: `rand_p` does NOT depend on set size (rho = +0.10,
+> p = 0.52), and at matched absolute size MetChange still beats its null (42 members, rand = 0.0099) where expr
+> does not (45, rand = 0.209) - so the universe-fraction worry of 13.3 is weak, and the matched design does not
+> use random sets at all. **Claim as it stands (narrowed by 16.5): for MMP-DOWN (147 drugs) the MetChange TCA
+> signal survives matching (0.371, p = 2e-04, q = 0.004) and the expression one does NOT (0.486, p = 0.70);
+> for MMP-UP (75 drugs) BOTH survive** - MetChange via energy currency (0.651, p = 0.0014, **magnitude only**,
+> sign_dev null) and expr via pyruvate genes (0.637-0.640, p = 0.003-0.004, both statistics). So the
+> stoichiometric reading is distinguishable from the transcriptome on ONE phenotype, not both. MetChange
+> `oxphos mito` is nominally significant for MMP-up only (0.594, p = 0.046), the hub-dominated set, consistent
+> with the currency result rather than independent of it. Still not done: a second cell line for the confounder
+> structure. **Null-shape comparison DONE (report 07, section 17):** at matched universe fraction the expression
+> null is **1.3-1.6x wider** (median |AUROC-0.5| 0.047 vs 0.029 at ~0.22%; 0.042 vs 0.033 at ~0.74%), flat in
+> size within each space. So random GENE sets separate the groups better than random metabolite sets - the
+> transcriptomic group difference is **diffuse**, MetChange's is **concentrated**: MetChange `tca mito_nohub`
+> |effect| 0.136 vs its null p95 0.090 (clears), expr `tca gene` 0.087 vs 0.121 and `oxphos gene` 0.090 vs 0.112
+> (both inside). **Claim to use:** the stoichiometric projection CONCENTRATES phenotype-relevant signal into an
+> interpretable pathway coordinate where gene space has it diffuse and responsiveness-confounded. **Stoichiometry DOES add information** (report 07, 17.4 corrects an
+> earlier objection of mine in 17.3): MetChange = LP(expression, GPR, stoichiometric matrix, directionality) via
+> COBRA/Gurobi, and the GEM is a prior NOT derivable from LINCS - a gene-level pathway mean cannot encode that in
+> A->B->C a fall in B interrupts flux to C. The comparison is well posed for this, since the expression arm
+> already uses the GEM's GPR genes and subsystems, so what differs is stoichiometry/topology/LP. Defensible form:
+> *on MMP-down, expression + stoichiometry separates the phenotype (0.371 matched, q = 0.004, clears its null)
+> where aggregating the SAME genes over the SAME subsystems does not (0.486, p = 0.70, inside its null)*.
+> Surviving caveats: MMP-down only (MMP-up both survive); the comparator is subsystem-MEAN aggregation, so the
+> claim is not "beats any expression-based method" (a topology-aware gene method such as SPIA could narrow it);
+> the MoA/chemotype confounder; one cell line. **Do NOT claim MetChange "properly
+> models" metabolic change** - this is a group-level shift (|AUROC-0.5| ~ 0.14), and the per-drug test (report 05,
+> 8.2, rho = -0.013) points the other way. **Untested and the likeliest alternative:** MMP-active compounds may be
+> enriched for a MoA/chemotype whose transcriptional response projects onto TCA; matching on n_sig equalises how
+> much a drug responds, not what kind of compound it is. A MoA- or structure-matched analysis is the next step
+> before presenting this.
+
+> **2026-11-19 — the expression baseline is run; POOLED it matches MetChange (report 07, section 13; see the
+> matched-design banner above, which supersedes this reading).**
 > HEPG2 expr `log2FC.csv` arrived; `value`+`sign` on the GPR gene sets, same contrasts. **MMP-down: expr
 > `oxphos gene` AUROC 0.410 (z, q = 0.0035) / 0.421 (sign_dev, q = 0.018) vs MetChange TCA 0.359 / 0.415;
 > MMP-up: expr `pyruvate gene` 0.615 vs MetChange currency 0.660.** So **on raw separation the stoichiometric

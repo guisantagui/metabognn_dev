@@ -834,3 +834,242 @@ takes it to q = 0.106. **The conclusion of 12.3 is unchanged; the statement of i
 `cytotox:inactive`, and column selection keeps only the contrasted groups. Not an error — the MMP-down vs
 inactive comparison is identical in both — but the runs are not column-for-column comparable, and a rerun
 through `launch_assoc_expr_HEPG2.sh` (which passes the same contrasts to every modality) would make them so.
+
+## 16. The responsiveness-matched design: section 13.5 was wrong (added 2026-11-19, final)
+
+13.5 concluded that the expression baseline "matches MetChange on effect size" and that MetChange's apparent
+advantage rested on two specificity criteria that 13.3 argued were partly artefacts of comparing a
+5,707-metabolite space with a 20,186-gene one. **The matched design shows that conclusion was wrong.** The
+pooled effects were indeed similar in size, but they were similar for different reasons: expression's is a
+bioactivity signal, MetChange's is a pathway signal, and controlling responsiveness separates them.
+
+### 16.1 `matched_check.py`
+
+Two ways of removing the confounder while keeping one estimate, instead of 11.4's two strata:
+
+- **matched** — 1:1 greedy nearest-neighbour matching of control drugs to case drugs on `log1p(n_sig)`,
+  without replacement, caliper 0.25. Balance achieved: MetChange 140 of 147 cases matched, mean
+  `log1p(n_sig)` 2.163 (cases) vs 2.144 (matched controls) vs 0.656 (all controls), residual imbalance
+  p = 0.64; expression 139 of 147, 3.761 vs 3.750 vs 2.136, p = 0.97.
+- **residual** — least squares of the per-drug statistic on `log1p(n_sig)` over all drugs, then the same test
+  on the residuals. Keeps every drug, at the price of assuming the confounder acts linearly.
+
+They fail differently (matching discards data, residualisation assumes a form), so their agreement is the
+evidence. Both read `per_drug_scores.tsv`; no access to the label matrix is needed. Each arm is matched on
+**its own** `n_sig`, since each arm's confounder is its own.
+
+### 16.2 Result
+
+| label type / set / statistic | pooled | **matched** | residual |
+|---|---|---|---|
+| MetChange `tca mito_nohub` z | 0.364 (5.9e-07) | **0.371 (2.0e-04)**, q = 0.0039 | 0.388 (4.0e-05) |
+| MetChange `tca_endpoints cyto_nohub` z | 0.359 (2.2e-07) | **0.387 (1.0e-03)** | 0.394 (1.1e-04) |
+| MetChange `pyruvate mito_nohub` z | 0.363 (4.9e-07) | **0.369 (1.5e-04)**, q = 0.0039 | — |
+| MetChange `tca cyto` sign_dev | 0.415 (0.0019) | **0.422 (0.025)** | 0.442 (0.035) |
+| MetChange `oxphos mito` z (control) | 0.476 (0.37) | 0.504 (0.91) | 0.489 (0.68) |
+| expression `tca gene` z | 0.413 (0.0014) | **0.486 (0.70)**, q = 0.87 | 0.458 (0.13) |
+| expression `oxphos gene` z | 0.410 (9.5e-04) | **0.450 (0.15)**, q = 0.74 | 0.448 (0.056) |
+| expression `oxphos gene` sign_dev | 0.421 (0.0037) | **0.466 (0.33)** | 0.459 (0.14) |
+
+**The expression association is essentially all responsiveness; the MetChange TCA association is not.**
+Matching barely moves MetChange (0.364 -> 0.371, p = 2e-04, q = 0.0039 over the 39 sets) while expression goes
+to chance (0.413 -> 0.486, q = 0.87). Matching and residualisation agree in both statistics, and the
+`oxphos mito` negative control stays null in all three designs, so the matched test has not simply lost power.
+
+### 16.3 What this does to the universe-fraction objection of 13.3
+
+Three things, in increasing importance:
+
+1. **`rand_p` does not depend on set size** in either space: Spearman(size, rand_p) = +0.10 (p = 0.52) over
+   the 40 metabolite sets, -0.36 (p = 0.55) over the 5 gene sets. The arithmetic mechanism I proposed in
+   13.3(1) - bigger sets have more stable means, so they capture a global shift better - is **not visible in
+   the data**.
+2. **At matched absolute size the contrast holds:** MetChange `tca all_nohub` (42 members) AUROC 0.381,
+   rand = 0.0099, against expression `tca gene` (45 members) 0.413, rand = 0.209. Same size, different
+   universe, different verdict.
+3. **The conclusion no longer rests on random sets at all.** The matched design uses no random sets and makes
+   no cross-space comparison: each arm is tested only against its own controls on its own responsiveness
+   scale. That sidesteps the objection rather than answering it, and it is now the primary evidence.
+
+**Not run:** the direct null-shape comparison - forcing random sets at matched *universe fractions* (about 149
+genes to 42 metabolites) and comparing the spread of the two random nulls. It needs a `--random-set-sizes`
+option and a re-stream of both matrices; given (3) it would be confirmatory, not decisive.
+
+### 16.4 The claim, as it now stands
+
+**The HepG2 MetChange labels carry a TCA-capacity signal that separates measured MMP-active from inactive
+drugs (AUROC 0.37, p = 2e-04, q = 0.004 after responsiveness matching), and the transcriptome read the same
+way does not: its apparently similar association is a bioactivity effect that matching removes.**
+
+Still true and still limiting: the effect is modest (|AUROC - 0.5| ~ 0.13); it is one cell line and one
+phenotype assay; Hallinger cannot corroborate at n = 20-29; and MetChange's `oxphos` / `etc_endpoints` sets are
+null in every modality and design, so the signal is TCA-shaped, not respiration-shaped - while expression's
+*pooled* signal sat in the OXPHOS genes (13.4), which is where the mechanistic follow-up should look even
+though that association did not survive matching.
+
+Next: the matched design should be applied to the `MMP_up` / energy-currency result as well (not yet done),
+and to a second cell line for the confounder structure.
+
+### 16.5 MMP-up, matched: here the baseline survives too (so 16.4 is narrowed)
+
+The matched design applied to the hyperpolarisation contrast (75 cases), which 16.4 listed as not yet done:
+
+| label type / set / statistic | pooled | matched | residual |
+|---|---|---|---|
+| MetChange `energy_currency mito` z | 0.660 (8.0e-06) | **0.651 (0.0014)** | 0.671 (1.9e-06) |
+| MetChange `adenylates all` z | 0.643 (6.5e-05) | **0.635 (0.0044)** | 0.644 (6.2e-05) |
+| MetChange `oxphos mito` z | 0.588 (0.015) | 0.594 (0.046) | 0.601 (0.0051) |
+| MetChange `energy_currency mito` sign_dev | 0.532 (0.38) | 0.489 (0.82) | 0.529 (0.43) |
+| expression `pyruvate gene` z | 0.615 (0.0013) | **0.637 (0.0040)** | 0.630 (2.8e-04) |
+| expression `pyruvate gene` sign_dev | 0.623 (6.4e-04) | **0.640 (0.0034)** | 0.640 (9.6e-05) |
+| expression `tca gene` z | 0.576 (0.035) | 0.591 (0.057) | 0.603 (0.0042) |
+
+**Both label types survive matching here**, so the MMP-up association is real for the transcriptome as well as
+for MetChange. Two further asymmetries worth keeping:
+
+- MetChange's MMP-up signal is **magnitude only** — `sign_dev` is null (0.489-0.532) while `z` is 0.65 — so
+  the energy-currency metabolites shift in size but not consistently in direction relative to each drug's own
+  mean sign. Its MMP-down signal appears in *both* magnitude and direction. Expression's MMP-up signal appears
+  in both.
+- MetChange `oxphos mito` is nominally significant here (0.594, p = 0.046) where it is null in every
+  MMP-down design. It is the hub-dominated set (24/26), so this is the one place the currency metabolites
+  carry something, consistent with the `energy_currency` result rather than independent of it.
+
+**Correction to 16.4.** Its claim — "the transcriptome read the same way does not [separate the groups]" — holds
+for **MMP-down only**. Stated properly:
+
+> For **MMP-down** (147 drugs), the MetChange TCA signal survives responsiveness matching (AUROC 0.371,
+> p = 2e-04, q = 0.004) and the expression association does not (0.486, p = 0.70). For **MMP-up** (75 drugs),
+> both survive: MetChange through the energy-currency metabolites (0.651, p = 0.0014, magnitude only) and
+> expression through the pyruvate-pathway genes (0.637-0.640, p = 0.003-0.004, magnitude and direction).
+
+So the stoichiometric reading is distinguishable from the transcriptome on one of the two phenotypes, not on
+both — which is a narrower and more defensible statement than 16.4's, and the one to use.
+
+## 17. Null shape at matched universe fraction (added 2026-11-19, final)
+
+16.3 left this unrun and called it confirmatory. Run now, via `--random-set-sizes` and
+`--dump-random-null` (new): random sets are drawn at sizes chosen so the two spaces are compared at the same
+*fraction of their universe* — 13 of 5,707 metabolites (0.228%) against 45 of 20,186 genes (0.223%), and
+42 (0.736%) against 149 (0.738%). Outputs `nullshape_mc/` and `nullshape_expr/`.
+
+### 17.1 The nulls differ in shape, and not because of set size
+
+`|AUROC - 0.5|` over 200 random sets per size, MMP-down vs inactive:
+
+| statistic | MetChange size / frac% | median / p95 | expression size / frac% | median / p95 |
+|---|---|---|---|---|
+| `z` | 13 / 0.228 | 0.029 / 0.094 | 45 / 0.223 | **0.047 / 0.121** |
+| `z` | 42 / 0.736 | 0.033 / 0.090 | 149 / 0.738 | **0.042 / 0.112** |
+| `sign_dev` | 13 / 0.228 | 0.027 / 0.058 | 45 / 0.223 | **0.038 / 0.097** |
+| `sign_dev` | 42 / 0.736 | 0.029 / 0.072 | 149 / 0.738 | **0.036 / 0.093** |
+
+**The expression null is 1.3-1.6x wider at matched fraction** (median) and ~1.3x wider at the 95th
+percentile. Within each space the null is flat in size — the full size sweep (metabolites, 5 to 149 members,
+30 sizes) has median |effect| between 0.028 and 0.041 with no trend, confirming the Spearman test of 16.3(1).
+
+So 13.3(1) was **half right**: the mechanism I proposed (bigger sets, more stable means) is not it, but the
+two spaces genuinely do have differently-shaped nulls, so a raw `rand_p` comparison across them is not
+apples to apples.
+
+### 17.2 Why the direction of that difference is the interesting part
+
+A wider null means **random gene sets separate MMP-active from inactive drugs better than random metabolite
+sets do**: the transcriptomic group difference is *diffuse*, spread across the genome, which is exactly the
+global effect hypothesised in 13.2(a). It is a property of the data, not an artefact of the comparison.
+
+Each real set against its own null:
+
+| | observed \|AUROC - 0.5\| | own null p95 | verdict |
+|---|---|---|---|
+| MetChange `tca mito_nohub` (19) | **0.136** | 0.090 | clears it |
+| MetChange `tca all_nohub` (42) | 0.119 | 0.090 | clears it |
+| expression `tca gene` (45) | 0.087 | 0.121 | inside the null |
+| expression `oxphos gene` (106) | 0.090 | 0.112 | inside the null |
+
+**Both label types carry a group difference; they differ in character.** Expression's is diffuse and, per
+section 16, largely responsiveness-driven. MetChange's is concentrated in TCA and survives responsiveness
+matching. That is a more informative conclusion than either the effect sizes (13.1, which looked equal) or
+the `rand_p` values alone (13.2, which looked decisive for the wrong reason).
+
+### 17.3 What may and may not be claimed from sections 11-17
+
+**Supported:**
+- The HepG2 MetChange labels separate measured MMP-active from inactive drugs through a **TCA-specific**
+  signal that survives responsiveness matching (AUROC 0.371, p = 2e-04, q = 0.004) and exceeds its own
+  size-matched null (0.136 vs p95 0.090).
+- Read through the same GEM subsystems, **the transcriptome does not** reproduce that for MMP-down: its
+  association is diffuse (inside its own null) and disappears under matching (0.486, p = 0.70).
+- For **MMP-up** both label types survive matching (16.5), so the distinction is phenotype-specific.
+- The stoichiometric projection **concentrates** phenotype-relevant signal into an interpretable pathway
+  coordinate where gene space has it diffuse and confounded with general bioactivity.
+
+**Not supported, and should not be written:**
+- That "stoichiometry / FBA adds information that expression does not encode." **MetChange is computed from
+  the expression data** (and those signatures are themselves mostly CycleGAN-inferred from 978 landmarks), so
+  it cannot contain information absent from them. The defensible claim is about *representation* -
+  concentration and interpretability - not information content.
+- That MetChange "properly models drug-induced metabolic change". This is a group-level shift of
+  |AUROC - 0.5| ~ 0.14, not per-drug accuracy; and the one per-drug test available points the other way
+  (report 05, 8.2: drug-specific rho = -0.013 against measured metabolomics, below the expression-producers
+  baseline). A group difference and no per-drug agreement are compatible.
+- That the result is about "energy metabolism". For MMP-down, `oxphos` and `etc_endpoints` are null in every
+  modality and every design; the signal is TCA. The energy-currency sets carry the MMP-*up* association
+  instead.
+
+**Untested confounder, and the most likely alternative explanation.** MMP-active compounds may be enriched for
+a mechanism class or chemotype whose transcriptional response happens to project onto TCA metabolites through
+the GEM. Matching on `n_sig` equalises *how much* a drug responds, not *what kind* of compound it is. Nothing
+run so far addresses this. A mechanism-class (MoA) or chemical-similarity matched analysis would, and it is
+the next thing I would do before presenting the result.
+
+### 17.4 Correction: the "no added information" objection in 17.3 was wrong
+
+17.3 said the claim that stoichiometry adds information expression does not encode "should not be written,
+because MetChange is computed from the expression data". **That objection was a category error and is
+withdrawn.**
+
+It conflated information in the *data* with information in the *model*. MetChange is not a function of the
+expression signature alone; it is
+
+```
+MetChange = LP( expression signature , GPR rules , stoichiometric matrix , reaction directionality )
+```
+
+solved per metabolite with COBRA + Gurobi (`scripts/metchange/run_metchange_exe{,_lp1}.py`). The GEM is a
+**prior that is not derivable from the LINCS data**. A gene-level summary of a pathway cannot represent that
+in A -> B -> C a fall in B interrupts flux to C; a constraint-based model over the stoichiometric matrix can.
+So "expression plus stoichiometry explains more than expression alone" is a coherent claim, and the
+information it refers to lives in the metabolic network, not in the measurements.
+
+**The comparison in sections 13-17 is in fact well posed for exactly this claim**, better than 17.3 implied:
+the expression arm already uses part of the GEM — its sets are the GPR genes of each subsystem's reactions —
+so both arms share the gene-to-pathway mapping and the subsystem definition, and what distinguishes them is
+stoichiometry, topology, directionality and the LP. The contrast isolates the structural contribution rather
+than the presence of a GEM.
+
+**So the defensible form of the claim is:**
+
+> On MMP-down in HepG2, combining the expression signature with the GEM's stoichiometry, GPR rules and
+> network topology (MetChange) separates measured phenotype-active from inactive drugs — AUROC 0.371 after
+> responsiveness matching (p = 2e-04, q = 0.004), clearing its own size-matched null (0.136 vs p95 0.090) —
+> where aggregating the *same* expression values over the *same* GEM subsystems does not: that association is
+> diffuse (inside its own null) and vanishes under matching (0.486, p = 0.70). The difference between the two
+> is the stoichiometric structure, not additional measurement.
+
+**The caveats that do survive**, and they are narrower than 17.3's:
+
+1. **MMP-down only.** On MMP-up both label types survive matching (16.5), so the structural advantage is
+   phenotype-specific, not general.
+2. **The comparator is one gene-level aggregation** — the mean (or rank mean) of a subsystem's GPR genes.
+   That is the natural matched baseline, but it is not the strongest conceivable expression-based method: a
+   topology-aware gene-level approach (pathway impact analysis / SPIA-style, which also uses network
+   structure) or a learned model could narrow the gap. The claim is therefore "beats subsystem-level
+   aggregation of the same genes", not "beats any method that starts from expression".
+3. **The MoA / chemotype confounder** of 17.3 still applies to MetChange's own signal, and is untested.
+4. One cell line, one phenotype assay.
+
+Claim 1 of the same discussion ("MetChange properly models real drug-induced metabolic change") is
+**unaffected by this correction** and the reservations in 17.3 stand: a group-level shift of
+|AUROC - 0.5| ~ 0.14 is not per-drug accuracy, the per-drug test available points the other way (report 05,
+8.2), and for MMP-down the signal is TCA rather than the energy / ETC sets.
