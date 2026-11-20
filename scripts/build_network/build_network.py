@@ -135,6 +135,36 @@ CURRENCY = {
     "L-carnitine",  # acyl carrier of the carnitine shuttle, like CoA (~1,000 edges across 5 compartments)
 }
 
+# Currency metabolites kept as nodes but wired with PRODUCER EDGES ONLY
+# (reaction -> metabolite), never consumer edges (metabolite -> reaction).
+#
+# Why this is safe. The model builds both a downstream and an upstream operator,
+# but `catalysis` runs protein -> reaction with NO reaction -> protein edge, so a
+# metabolite signature cannot reach a protein through the downstream pass at all:
+# measured on the combined network, a 100-metabolite signature reaches 0 of 18,760
+# proteins at every downstream hop 1-4 and 4 (0.02%, values ~6e-05) at hop 5. The
+# upstream pass is the only route - protein -> reaction -> the metabolites that
+# reaction PRODUCES - reaching 1% of proteins at hop 2, 4.4% at hop 3 and 64.8% at
+# hop 5. So consumer edges carry nothing to proteins, and keeping only producer
+# edges loses no reachable signal.
+#
+# Why it does not reintroduce the hub problem. With edges in one direction only,
+# such a node can never be an INTERMEDIARY: downstream it is terminal (nothing has
+# it as a predecessor), upstream it has no successors, so no path R1 -> C -> R2
+# exists in either pass. Unrelated pathways therefore do not become 2-hop
+# neighbours through it, which was the reason for excluding currency metabolites.
+#
+# Why these three. They are the cheapest, because they are mostly CONSUMED:
+# producing reactions in Human-GEM are ATP 87, NADPH 148, NAD+ 158, against
+# ADP 792, NADP+ 797, NADH 456 - so their partners stay excluded. The gain is a
+# capability the tool did not have: a query can now ask for increased production
+# of NAD+ or ATP and reach the enzymes that produce them.
+#
+# NOTE this does NOT make consumers reachable - PARP and the sirtuins consume NAD+
+# and remain unreachable from an NAD+ query, for the architectural reason above,
+# not because of this choice.
+CURRENCY_PRODUCER_ONLY = {"ATP", "NAD+", "NADPH"}
+
 # Reactions containing any of these are dropped entirely. thioredoxin / mitothioredoxin were also listed here
 # in the notebook; they are electron carriers (already in CURRENCY), and as bookkeeping they removed whole
 # reactions such as ribonucleotide reductase, so they are left out.
@@ -169,10 +199,60 @@ MACROMOLECULAR = {
 }
 
 
-def gem_exclusions(gem):
-    """Metabolite names removed as nodes: currency, bookkeeping, macromolecules and lipid 'pool' pseudo-metabolites."""
+def formula_pseudo_species(gem):
+    """Metabolite names that the molecular formula shows are not a single defined species.
+
+    The hand-curated lists above catch what was noticed; this catches the rest by
+    construction. A metabolite is a pseudo-species when its Human-GEM formula is
+    empty, contains an `R` (unspecified side chain) or an `X` (attachment point),
+    or is a `(...)n` repeat unit. Such a node has no measurable referent, so a
+    MetChange "production capacity" for it means nothing, and it is typically
+    low-degree, which makes that value close to a readout of the few local
+    enzymes that make it.
+
+    Added 2026-11-20 after an O-glycan metabolite set carried a phenotype
+    association as strong as the TCA one (report 08, 3.1-3.3). That set was
+    mucin-type glycan CLASSES (`core 2`-`core 8`, T / Tn / sialyl antigens, KEGG
+    `G000xx` ids) plus `Protein-Linked Serine Or Threonine Residue
+    (O-Glycosylation Site)` - none matched the lists above, because the names
+    contain neither "pool" nor "[protein]". All of them carry an `X`:
+    `T-antigen` C14H24NO10X, `core 2` C22H37N2O15X, the O-glycosylation-site
+    residue simply `XH`. Verified 11 of 11.
+    """
+    bad = set()
+    for m in gem.metabolites:
+        f = (m.formula or "").strip()
+        if not f:
+            bad.add(m.name)
+        elif re.search(r"\(.*\)n|\)n\b", f):
+            bad.add(m.name)
+        elif re.search(r"(?<![A-Za-z])R(?![a-z])", f):
+            bad.add(m.name)
+        elif re.search(r"(?<![A-Za-z])X(?![a-z])", f):
+            bad.add(m.name)
+    return bad
+
+
+def gem_exclusions(gem, formula_filter=True, producer_only=frozenset()):
+    """Metabolite names removed as nodes: currency, bookkeeping, macromolecules, lipid
+    'pool' pseudo-metabolites and - unless --no-formula-filter - everything the
+    molecular formula shows to be a class, particle, polymer or placeholder
+    rather than one compound (formula_pseudo_species)."""
     pool = {m.name for m in gem.metabolites if "pool" in m.name}
-    return CURRENCY | BOOKKEEPING | MACROMOLECULAR | pool, BOOKKEEPING
+    curated = (CURRENCY | BOOKKEEPING | MACROMOLECULAR | pool) - producer_only
+    if producer_only:
+        print(f"[exclusions] kept as producer-only nodes: {sorted(producer_only)}")
+    if not formula_filter:
+        print(f"[exclusions] {len(curated)} names (curated lists only, --no-formula-filter)")
+        return curated, BOOKKEEPING
+    byformula = formula_pseudo_species(gem)
+    extra = byformula - curated
+    n_nodes = sum(1 for m in gem.metabolites if m.name in extra)
+    print(f"[exclusions] {len(curated)} curated names + {len(extra)} further names from the "
+          f"formula filter ({n_nodes} metabolite entries)")
+    for nm in sorted(extra)[:12]:
+        print(f"[exclusions]     by formula e.g. {nm[:70]}")
+    return curated | byformula, BOOKKEEPING
 
 
 # --------------------------------------------------------------------------------------
@@ -279,7 +359,7 @@ def load_gem(path):
     return cobra.io.read_sbml_model(path)
 
 
-def build_bipartite_graph(gem, excluded_mets, bookkeeping):
+def build_bipartite_graph(gem, excluded_mets, bookkeeping, producer_only=frozenset()):
     """Metabolite <-> reaction graph. Excluded metabolites are matched on their full name (the notebook used
     base_id(met.name), which cut names containing '_', e.g. 'betaine_aldehyde' -> 'betaine')."""
     G = nx.DiGraph()
@@ -288,11 +368,14 @@ def build_bipartite_graph(gem, excluded_mets, bookkeeping):
             continue  # whole reaction dropped
         G.add_node(rxn.id, node_type="reaction", constitutive=len(rxn.genes) == 0)
         reversible = rxn.lower_bound < 0 and rxn.upper_bound > 0
+        # Producer-only metabolites get edges pointing INTO them and nothing out,
+        # in both the forward and the reverse sense of a reversible reaction.
         for met in rxn.reactants:
             if met.name in excluded_mets:
                 continue
             G.add_node(met.id, node_type="metabolite")
-            G.add_edge(met.id, rxn.id, edge_type="consumes")
+            if met.name not in producer_only:
+                G.add_edge(met.id, rxn.id, edge_type="consumes")
             if reversible:
                 G.add_edge(rxn.id, met.id, edge_type="produces_rev")
         for met in rxn.products:
@@ -300,7 +383,7 @@ def build_bipartite_graph(gem, excluded_mets, bookkeeping):
                 continue
             G.add_node(met.id, node_type="metabolite")
             G.add_edge(rxn.id, met.id, edge_type="produces")
-            if reversible:
+            if reversible and met.name not in producer_only:
                 G.add_edge(met.id, rxn.id, edge_type="consumes_rev")
     return G
 
@@ -330,10 +413,10 @@ def rule_to_symbols(rule, gene_sym):
                   rule)
 
 
-def build_gem_layer(gem, excluded_mets, bookkeeping, gene_sym):
+def build_gem_layer(gem, excluded_mets, bookkeeping, gene_sym, producer_only=frozenset()):
     """GEM nodes (reactions, metabolites) and edges (metabolic, catalysis). Catalysis sources are the symbols from
     gem_gene_symbols (Ensembl -> HGNC, falling back to the model's symbol when HGNC lists another Ensembl id)."""
-    G = build_bipartite_graph(gem, excluded_mets, bookkeeping)
+    G = build_bipartite_graph(gem, excluded_mets, bookkeeping, producer_only)
     nodes = []
     for n, data in G.nodes(data=True):
         if data["node_type"] == "reaction":
@@ -809,6 +892,17 @@ def main():
     ap.add_argument("--data-dir", required=True, help="metabognn_dev/data")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--drug-targets", help="TSV: drug, target[, effect, pertname] (build_drug_targets.py output)")
+    ap.add_argument("--currency-producer-only", default=",".join(sorted(CURRENCY_PRODUCER_ONLY)),
+                    help="comma-separated currency metabolite names kept as nodes with PRODUCER "
+                         "edges only (reaction -> metabolite). Such a node can never be a path "
+                         "intermediary, so it does not reintroduce the hub problem, and consumer "
+                         "edges carry nothing to proteins anyway (no reaction -> protein edge "
+                         "exists). Empty string restores the old behaviour of excluding them. "
+                         f"Default: {','.join(sorted(CURRENCY_PRODUCER_ONLY))}")
+    ap.add_argument("--no-formula-filter", dest="formula_filter", action="store_false",
+                    help="keep metabolites whose formula shows they are a class, particle, polymer "
+                         "or placeholder (empty / R / X / (...)n). Reproduces the pre-2026-11-20 "
+                         "network, which contained the lumped glycan classes of report 08, 3.3.")
     for name, default in DEFAULT_PATHS.items():
         ap.add_argument(f"--{name.replace('_', '-')}", default=default, help=f"relative to --data-dir ({default})")
     for f in fields(Config):
@@ -826,9 +920,15 @@ def main():
     hgnc = HGNC(paths["hgnc"])
     if cfg.network == "metabolic":
         gem = load_gem(paths["gem"])
-        excluded, bookkeeping = gem_exclusions(gem)
+        producer_only = frozenset(x.strip() for x in args.currency_producer_only.split(",") if x.strip())
+        unknown = producer_only - {m.name for m in gem.metabolites}
+        if unknown:
+            raise SystemExit(f"--currency-producer-only names not in the GEM: {sorted(unknown)}")
+        excluded, bookkeeping = gem_exclusions(gem, formula_filter=args.formula_filter,
+                                               producer_only=producer_only)
         gene_sym = gem_gene_symbols(gem, hgnc)
-        nodes_gem, edges_gem, G = build_gem_layer(gem, excluded, bookkeeping, gene_sym)
+        nodes_gem, edges_gem, G = build_gem_layer(gem, excluded, bookkeeping, gene_sym,
+                                                  producer_only)
         print(f"[GEM] {nodes_gem.node_type.value_counts().to_dict()}, {edges_gem.relation.value_counts().to_dict()}")
         node_of = messenger_nodes(paths["gem_metabolites"], set(nodes_gem.node_id))
         gem_edges = [edges_gem, gem_messenger_edges(gem, G, node_of, gene_sym)]

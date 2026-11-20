@@ -320,6 +320,18 @@ would look like a cell-line effect. The per-cell HEPG2 table stays the one repro
 tolerates as row names but silently misaligns every Python `DictReader`. Regenerated with `V1` 2026-11-20 -
 check other files written by that code path.
 
+**6.0a-arch (2026-11-20, report 08 section 9.1) — THE DOWNSTREAM PASS IS DEAD FOR METCHANGE.** `catalysis`
+runs protein -> reaction with **zero** reaction -> protein edges (23,098 vs 0; the only metabolite -> protein
+route is `second_messenger`, 59 edges). Measured on the combined network, a 100-metabolite signature reaches
+**0 of 18,760 proteins at downstream hops 1-4 and 4 (0.02%) at hop 5**, against upstream 1.0% / 4.4% / 38.9% /
+**64.8%** at hops 2-5. Consequences: (i) consumer edges (metabolite -> reaction, 20,373 of 40,786 metabolic
+edges) carry NOTHING to proteins; (ii) **every `down_*` dyn/diff/slog feature plus `up_*_hop1` is identically
+zero in MetChange mode** - about half the dynamic block - while expr/TF inject at protein nodes so both passes
+work from hop 1, i.e. the two signature types are not using the same model capacity; (iii) the informative
+signal sits at upstream hops 2-3 where only 1-4% of proteins are reachable, a plausible mechanical reason why
+the no-network kNN beat the model (report 06, 6.1). **Cheap untried experiment: drop the dead features for
+MetChange runs and re-test whether the network adds anything.**
+
 **6.0a DO THIS FIRST — finish cleaning the lumped / placeholder species out of the network.**
 The existing filter (a hand-made string-match list of aggregated species, plus the currency metabolites)
 catches the obvious cases but has gaps. Found on 2026-11-20 while chasing the O-glycan result
@@ -361,6 +373,20 @@ denotes a single chemical species with a fully specified formula; drop it if the
 `Tn-antigen` C8H14NO5**X**, `core 2` / `G00032` / `F1alpha` / `glcnac-alpha-1,4-core 1` C22H37N2O15**X**,
 `core 6` / `G00031` C16H27N2O10**X**, `sialyl-T` C25H40N2O18**X**, `disialyl-T` C36H56N3O26**X**, and the
 O-glycosylation-site residue whose formula is simply **`XH`**. 11 of 11 flagged.
+
+**IMPLEMENTED 2026-11-20 in `build_network.py` (report 08, 9.2-9.3); THE NETWORK IS NOT YET REBUILT.**
+`formula_pseudo_species()` applies exactly this criterion (`--no-formula-filter` restores the old behaviour):
+238 curated names -> 642, i.e. 599 -> 1,264 metabolite entries (7.1% -> 14.9%), and **all 11 report-08
+culprits are caught where the curated lists caught 0**. Open judgement call: 410 of the 665 new exclusions are
+`R`-flagged generic lipids (`1-alkyl-2-acylglycerol`, phosphatidylinositols) - dropping the `R` branch still
+catches all 11 culprits. Also added `CURRENCY_PRODUCER_ONLY = {ATP, NAD+, NADPH}`
+(`--currency-producer-only`): kept as nodes with producer edges ONLY - verified 103 / 223 / 266 in-edges and
+**0 out-edges** each, graph 19,894/38,564 -> 19,916/39,156. Safe because a one-directional node can never be a
+path intermediary (no `R1 -> C -> R2` in either pass), and consumer edges are inert anyway per 6.0a-arch.
+Chosen as the cheapest: 87 / 148 / 158 producing reactions, against ADP 792, NADP+ 797, NADH 456, so the
+partners stay excluded. **PARP and the sirtuins remain unreachable from an NAD+ query** - that follows from
+6.0a-arch, not from this policy, and my earlier "split each currency node into producer and consumer halves"
+suggestion is withdrawn because the consumer half would be inert.
 
 **`data/networks/combined/lumped_by_formula.tsv`** is that list applied to the network: **659 of 7,841
 metabolite nodes (8.4%), 398 distinct names** — 410 with an `R` atom, 246 with an `X`, 3 with no formula.

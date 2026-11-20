@@ -644,3 +644,93 @@ Regenerated with the `V1` header on 2026-11-20. Worth checking any other file wr
 `data/validation/metabolite_sets/` and `data/validation/phenotypes/` were the locations used for every result
 in reports 07 and 08 and are referenced as such there. They are left in place so those references resolve;
 new runs read the paths in 8.1.
+
+## 9. Network changes: lumped species out, and three currency metabolites back in as producer-only
+
+*Both implemented in `scripts/build_network/build_network.py` on 2026-11-20 and verified against the real code
+path with cobra. **The network has NOT been rebuilt** - doing so changes `select_sources`, so model runs and
+anything keyed on node identity have to be redone (STATUS 6.0a).*
+
+### 9.1 The architectural finding that drives both changes
+
+`catalysis` edges run **protein -> reaction** and there is **no reaction -> protein edge** anywhere
+(23,098 against 0; the only metabolite -> protein route is `second_messenger`, 59 edges). The model builds
+both a downstream and an upstream propagation operator and uses both as features. Measured directly on the
+combined network, propagating a 100-metabolite signature:
+
+| pass | hop1 | hop2 | hop3 | hop4 | hop5 (the `--hops` default) |
+|---|---|---|---|---|---|
+| **down** | 0 | 0 | 0 | 0 | **4 of 18,760 proteins (0.02%), values ~6e-05** |
+| **up** | 0 | 186 (1.0%) | 825 (4.4%) | 7,292 (38.9%) | **12,162 (64.8%)** |
+
+So **for a metabolite signature the downstream pass is dead**: the signal cannot reach a protein because it
+would have to traverse reaction -> protein. The only route is upstream - protein -> reaction -> the metabolites
+that reaction **produces**. Three consequences:
+
+1. **Consumer edges (metabolite -> reaction) carry nothing to proteins.** Half the metabolic edges (20,373 of
+   40,786) are inert for this task.
+2. **Roughly half the dynamic features are identically zero in MetChange mode** - every `down_*` hop / diff /
+   slog feature, plus `up_*_hop1`. For expr and TF the sources *are* proteins, so both passes work from hop 1;
+   the feature block suits that case and is half-dead for MetChange. Worth remembering when comparing the two:
+   they are not using the same model capacity.
+3. **The hop-coverage curve is steep at the default.** Upstream coverage runs 4.4% -> 38.9% -> 64.8% over hops
+   3-5, and the maximum propagated value falls from 1 at hop 2 to 0.4 at hop 5. The informative signal sits at
+   hops 2-3 where only 1-4% of proteins are reachable, which is a plausible mechanical reason why a
+   no-network kNN on the same input beat the model (report 06, 6.1).
+
+### 9.2 Lumped and placeholder species removed by formula
+
+`formula_pseudo_species()` excludes any metabolite whose Human-GEM formula is empty, contains a standalone `R`
+(unspecified side chain) or `X` (attachment point), or is a `(...)n` repeat unit. `--no-formula-filter`
+restores the old behaviour.
+
+| | names | metabolite entries |
+|---|---|---|
+| curated lists only (previous behaviour) | 238 | 599 (7.1%) |
+| **+ formula filter** | 642 | **1,264 (14.9%)** |
+| newly excluded | +404 | **+665** |
+
+**All 11 of the report-08 section 3.3 culprits are caught, and the curated lists caught 0 of them** - they
+carry an `X` (`T-antigen` C14H24NO10X, `core 2` C22H37N2O15X, the O-glycosylation-site residue simply `XH`)
+but their names contain neither "pool" nor "[protein]", which is why the hand-made list missed them.
+
+**One judgement call inside it:** 410 of the 665 are flagged by an `R`, i.e. generic lipids
+(`1-alkyl-2-acylglycerol`, `1-phosphatidyl-1D-myo-inositol-3-phosphate`). The same argument applies, but
+dropping them changes the lipid coverage of the network materially. They are currently excluded; keeping them
+means dropping the `R` branch, which still catches all 11 culprits.
+
+### 9.3 ATP, NAD+ and NADPH as producer-only nodes
+
+`CURRENCY_PRODUCER_ONLY = {"ATP", "NAD+", "NADPH"}`, configurable with `--currency-producer-only` (empty
+string restores full exclusion). These keep edges pointing **into** them (`produces`, and `produces_rev` for
+the reverse direction of a reversible reaction) and none pointing out.
+
+**This does not reintroduce the hub problem.** With edges in one direction only the node can never be a path
+*intermediary*: downstream it is terminal (nothing has it as a predecessor), upstream it has no successors, so
+no `R1 -> C -> R2` path exists in either pass and unrelated pathways do not become 2-hop neighbours through it.
+That was the entire reason for excluding currency metabolites.
+
+**Why these three.** They are the cheapest precisely because they are mostly *consumed* - producing reactions
+in Human-GEM are ATP 87, NADPH 148, NAD+ 158, against ADP 792, NADP+ 797, NADH 456, so their partners stay
+excluded. Built with cobra through the real builder:
+
+| | nodes | producer edges in | consumer edges out | worst single node |
+|---|---|---|---|---|
+| ATP | 8 | 103 | **0** | 54 |
+| NAD+ | 6 | 223 | **0** | 138 |
+| NADPH | 8 | 266 | **0** | 127 |
+
+(in-degrees exceed the producing-reaction counts because reversible reactions contribute `produces_rev`.)
+Graph size goes from 19,894 nodes / 38,564 edges to 19,916 / 39,156.
+
+**What this buys:** a query can now ask for increased production of NAD+ or ATP and reach the enzymes that
+produce them - a capability the tool did not have, since these were not nodes at all.
+
+**What it does not buy, and why it is not a choice:** PARP and the sirtuins *consume* NAD+ and remain
+unreachable from an NAD+ query. That follows from 9.1 - consumption cannot propagate to proteins in this
+architecture - not from this policy. An earlier suggestion of mine to split each currency node into
+producer and consumer halves is therefore **withdrawn**: the consumer half would be inert.
+
+**Expectation management.** Given that signature selection barely moved the CV metrics and the kNN baseline
+beats the model, this is justified as a capability rather than as a performance bet, and the residual cost is
+that a 138-edge one-hop broadcast will saturate hop-distance features when such a node is a source.
