@@ -300,6 +300,11 @@ the Slurm array to it and submits `launch_assoc_manifest_slurm.sh`. `cells="HEPG
 `scripts/mc_phenotype_assoc/logs/`** (kept in git: Slurm opens `--output` before the job runs, so a mkdir
 inside the script is too late); `submit_assoc.sh` passes that path absolutely, the single-cell wrappers use a
 relative `logs/` so submit those from `scripts/mc_phenotype_assoc`.
+**Project root is configured in ONE place:** `scripts/mc_phenotype_assoc/project_paths.conf` (candidate
+`scratch_proj_dir` lines, first existing wins, repo as fallback), sourced by common and submit_assoc and
+parsed by check_label_availability.py. It exists because the path had been hardcoded in all three and the
+checker's copy defaulted to the repo when `$labels_base` was unset - so on the cluster it read `$HOME` and
+reported "no directory" for every cell line whose labels are on scratch. Fixed 2026-11-20.
 **One mapping instead of nine:** `cell=ALL bash prepare_assoc_inputs.sh` maps against
 `lincs_unique_perts.tsv` (the union; all 5,284 HEPG2 pertnames verified inside it) and writes
 `<assoc_base>/phenotypes_ALL/`, which is cell-independent because the association script keeps only the drugs

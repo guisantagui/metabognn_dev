@@ -23,12 +23,20 @@ repo_dir="${repo_dir:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
 # Project root on scratch when it exists (cluster), the repo otherwise (laptop).
 # Keeps large intermediates off the home partition.
+# Candidate project roots come from project_paths.conf (one source of truth; it
+# used to be hardcoded here, in submit_assoc.sh and in
+# check_label_availability.py, and the three drifted apart).
 if [ -z "${scratch_proj_dir:-}" ]; then
-    if [ -d /scratch/users/gsantamaria/test_large_files/metabognn_dev ]; then
-        scratch_proj_dir=/scratch/users/gsantamaria/test_large_files/metabognn_dev
-    else
-        scratch_proj_dir="$repo_dir"
+    _conf="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/project_paths.conf"
+    if [ -f "$_conf" ]; then
+        while IFS='=' read -r _k _v; do
+            case "$_k" in
+                scratch_proj_dir)
+                    [ -d "$_v" ] && [ -z "${scratch_proj_dir:-}" ] && scratch_proj_dir="$_v" ;;
+            esac
+        done < <(grep -E '^[a-z_]+=' "$_conf")
     fi
+    : "${scratch_proj_dir:=$repo_dir}"
 fi
 labels_base="${labels_base:-$scratch_proj_dir}"
 

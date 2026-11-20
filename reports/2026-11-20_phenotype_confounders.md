@@ -574,6 +574,16 @@ be known at submit time, the set of cell lines with finished limma runs is only 
 `--output` is expanded by Slurm before the job starts and cannot contain a variable - so passing it from the
 submitter is the only way to fix the log location absolutely.
 
+**Where the big files are is configured in one place.** `scripts/mc_phenotype_assoc/project_paths.conf`
+lists candidate `scratch_proj_dir` values, most preferred first; the first that exists wins, and the
+repository is used if none do (laptop). It is sourced by `mc_phenotype_assoc_common.sh` and
+`submit_assoc.sh` and parsed by `check_label_availability.py`. **This file exists because of a bug:** the
+scratch path had been hardcoded separately in all three, and `check_label_availability.py`'s copy defaulted to
+the repository whenever `$labels_base` was unset. Run standalone on the cluster it therefore looked under
+`$HOME`, found only the one cell line with a home-directory copy, and reported `no directory` for every cell
+line whose labels live on scratch — while the files were plainly there. Override with
+`labels_base=` or `scratch_proj_dir=`.
+
 **Logs** go to `scripts/mc_phenotype_assoc/logs/`, which is kept in git (with a `.gitkeep` explaining why):
 Slurm opens the output file *before* the job script runs, so a directory created inside the script is too
 late. `submit_assoc.sh` passes that path absolutely; the single-cell wrappers use `--output=logs/...`, which

@@ -20,6 +20,29 @@ line, for a submit script to consume.
 import argparse, os, sys
 
 
+def resolve_labels_base(repo):
+    """Same resolution as mc_phenotype_assoc_common.sh, from the same file.
+
+    This function exists because an earlier version defaulted to the repository
+    whenever $labels_base was unset, so running the checker standalone on the
+    cluster reported "no directory" for every cell line whose labels live on
+    scratch.
+    """
+    env = os.environ.get('labels_base') or os.environ.get('scratch_proj_dir')
+    if env:
+        return env
+    conf = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'project_paths.conf')
+    if os.path.isfile(conf):
+        with open(conf) as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith('scratch_proj_dir='):
+                    cand = line.split('=', 1)[1].strip()
+                    if os.path.isdir(cand):
+                        return cand
+    return repo
+
+
 def arm_paths(base, cell, arm):
     sub = 'metchange/rank' if arm == 'mc' else 'expr'
     return os.path.join(base, 'results', 'labels', cell, sub)
@@ -38,14 +61,17 @@ def main():
     repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--labels-base', default=os.environ.get('labels_base', repo),
-                    help='project root holding results/labels/<cell>/... '
-                         '(scratch on the cluster)')
+    ap.add_argument('--labels-base', default=None,
+                    help='project root holding results/labels/<cell>/...; default is '
+                         '$labels_base, else the first existing scratch_proj_dir in '
+                         'project_paths.conf, else the repository')
     ap.add_argument('--cell-list', default=os.path.join(repo, 'data/LINCS/core_cell_lines.tsv'))
     ap.add_argument('--cells', default='', help='space/comma separated, overrides --cell-list')
     ap.add_argument('--list', choices=['mc', 'expr', 'both'],
                     help='print only the runnable cell names (both = runnable for either arm)')
     args = ap.parse_args()
+    if not args.labels_base:
+        args.labels_base = resolve_labels_base(repo)
 
     if args.cells.strip():
         cells = [c for c in args.cells.replace(',', ' ').split() if c]

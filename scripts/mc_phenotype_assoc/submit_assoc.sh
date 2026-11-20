@@ -36,13 +36,12 @@ repo_dir="${repo_dir:-$(cd "$here/../.." && pwd)}"
 log_dir="$here/logs"
 mkdir -p "$log_dir"
 
-# resolve the project root the same way the common config does, to find labels
+# Resolve the project root through the common config itself, so this logic has
+# exactly one implementation (it used to be copied here and into
+# check_label_availability.py, and the copies drifted). `cell` is irrelevant for
+# the resolution but common insists on it being set.
 if [ -z "${labels_base:-}" ]; then
-    if [ -d /scratch/users/gsantamaria/test_large_files/metabognn_dev ]; then
-        labels_base=/scratch/users/gsantamaria/test_large_files/metabognn_dev
-    else
-        labels_base="$repo_dir"
-    fi
+    labels_base="$(cell=_resolve; . "$here/mc_phenotype_assoc_common.sh"; printf '%s' "$labels_base")"
 fi
 export repo_dir labels_base
 
