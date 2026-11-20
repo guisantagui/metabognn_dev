@@ -166,28 +166,37 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
-    # resolve the per-cell mappings, falling back to the original HEPG2 layout
-    def pick(explicit, *candidates):
+    # Resolve the per-cell mappings. The legacy unsuffixed paths are the HEPG2
+    # mapping from before the per-cell layout, so they may ONLY be used when
+    # cell == HEPG2: falling back to them for any other cell line would build
+    # that cell's phenotype tables from HepG2's compound mapping and produce a
+    # plausible-looking wrong answer instead of an error.
+    def pick(explicit, per_cell, legacy=None):
         if explicit:
             return explicit
-        for c in candidates:
-            if os.path.exists(c):
-                return c
-        return candidates[0]
+        if os.path.exists(per_cell):
+            return per_cell
+        if legacy and os.path.exists(legacy):
+            return legacy
+        return per_cell
+    legacy_ok = args.cell.upper() == 'HEPG2'
     args.attene_mapping = pick(
         args.attene_mapping,
         os.path.join(repo, 'data/validation/attene_ramos/mapping_%s/mapped_drugs.csv' % args.cell),
-        os.path.join(repo, 'data/validation/attene_ramos/mapped_drugs.csv'))
+        os.path.join(repo, 'data/validation/attene_ramos/mapped_drugs.csv') if legacy_ok else None)
     args.hallinger_mapping = pick(
         args.hallinger_mapping,
         os.path.join(repo, 'data/validation/hallinger/mapping_%s/mapped_drugs.csv' % args.cell),
-        os.path.join(repo, 'data/validation/hallinger/mapping/mapped_drugs.csv'))
+        os.path.join(repo, 'data/validation/hallinger/mapping/mapped_drugs.csv') if legacy_ok else None)
     for lab, f in (('attene', args.attene_mapping), ('hallinger', args.hallinger_mapping)):
         if not os.path.exists(f):
             raise SystemExit(
-                'no %s mapping for cell=%s (%s).\nRun:  cell=%s bash '
-                'scripts/benchmarking/map_%s_lincs_perts.sh'
-                % (lab, args.cell, f, args.cell, lab if lab != 'attene' else 'attene'))
+                'no %s mapping for cell=%s:\n  %s\n'
+                'Build it with:\n  cell=%s bash scripts/benchmarking/map_%s_lincs_perts.sh\n'
+                '(which needs data/LINCS/lincs_unique_perts_%s.tsv from '
+                'scripts/parse_lincs_data/get_lincs_pert_info.R)'
+                % (lab, args.cell, f, args.cell,
+                   'attene' if lab == 'attene' else 'hallinger', args.cell))
     print('cell=%s\n  attene mapping   : %s\n  hallinger mapping: %s'
           % (args.cell, args.attene_mapping, args.hallinger_mapping), file=sys.stderr)
 

@@ -284,6 +284,12 @@ Paths (all under scratch on the cluster, repo on the laptop): phenotypes **per c
 built WITHOUT `--features` so they are genuinely cell-independent; absent members are dropped at scoring time
 and reported. Verified equivalent on HEPG2 (same 40 sets, same numbers). **An A549 run is the cross-cell-line
 CONTROL, not a replication** - the phenotypes are measured in HepG2 regardless of which cell line is mapped.
+The slurm wrappers are **submittable from anywhere in the repo** (they walk up from `SLURM_SUBMIT_DIR` to find
+the root and export `repo_dir`; `$0` is unusable there because Slurm spools the script) and log to
+`./mc_pheno_<cell>_%A_%a.out` in the submit dir. **Bug found and fixed 2026-11-20 while testing the A549
+path:** `build_phenotype_tables.py` fell back to the legacy unsuffixed mapping for ANY cell, so `cell=A549`
+silently built A549 tables from the HEPG2 mapping (identical 849/147/480 counts). The fallback is now allowed
+only for HEPG2; other cells require `mapping_<cell>/` and the run stops with the commands to build it.
 
 **6.0a DO THIS FIRST — finish cleaning the lumped / placeholder species out of the network.**
 The existing filter (a hand-made string-match list of aggregated species, plus the currency metabolites)

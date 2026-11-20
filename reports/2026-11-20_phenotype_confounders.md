@@ -482,6 +482,16 @@ To add a cell line, copy a slurm wrapper and change one line; the per-cell wrapp
 `export cell=`. Run an arm directly with `cell=A549 bash launch_assoc_metchange.sh`, or one modality with
 `cell=A549 modes="--mode sign" bash launch_assoc_metchange.sh`.
 
+**Submittable from anywhere in the repository.** The wrappers locate the repo root by walking up from
+`SLURM_SUBMIT_DIR` (then `$PWD`, then `$0`) looking for
+`scripts/mc_phenotype_assoc/mc_phenotype_assoc_common.sh`, and export `repo_dir` to everything below, so no
+script depends on the working directory. `$0` cannot be used for this inside an sbatch script because Slurm
+copies the batch script to a spool directory before running it; `SLURM_SUBMIT_DIR` is where `sbatch` was
+invoked. Export `repo_dir` to override. Logs follow the repo convention `./mc_pheno_<cell>_%A_%a.out` in the
+submit directory — an earlier version wrote to `logs/`, which fails silently because Slurm opens the output
+file *before* the script runs, so a `mkdir -p logs` inside the script is too late and the directory did not
+exist.
+
 ### 8.1 Where things live, and why
 
 `mc_phenotype_assoc_common.sh` resolves `scratch_proj_dir` to
@@ -525,8 +535,17 @@ cell=<CELL> bash scripts/benchmarking/map_attene_lincs_perts.sh      # -> mappin
 cell=<CELL> bash scripts/benchmarking/map_hallinger_lincs_perts.sh   # -> mapping_<CELL>/
 ```
 
-Both mapping scripts now take `cell` and write to `mapping_<cell>/`, falling back to the original HEPG2
-locations when those are what exist. `build_phenotype_tables.py` takes `--cell` and a required `--out-dir`.
+Both mapping scripts now take `cell` and write to `mapping_<cell>/`. `build_phenotype_tables.py` takes
+`--cell` and a required `--out-dir`.
+
+**One bug worth recording, because it was the very failure this layout exists to prevent.** The first version
+of `build_phenotype_tables.py` fell back to the legacy unsuffixed mapping paths
+(`data/validation/attene_ramos/mapped_drugs.csv`) for *any* cell line when the per-cell mapping was absent.
+Those legacy files are the **HEPG2** mapping, so `cell=A549` silently produced "A549" phenotype tables with
+HepG2's compounds — identical 849 drugs / 147 MMP-down / 480 inactive — a plausible-looking wrong answer rather
+than an error. The fallback is now permitted only when `cell` is HEPG2; any other cell line requires
+`mapping_<cell>/` and stops with the commands to build it. Found by running the A549 path for the first time
+while checking that the launchers no longer depend on the working directory.
 
 **Read the A549 run for what it is.** The Attene-Ramos and Hallinger phenotypes were measured in **HepG2**
 whatever cell line is mapped. Running them against A549 labels is the **cross-cell-line control** of
