@@ -38,6 +38,7 @@ parser <- add_argument(
         ),
         help = c(
                 "Perturbation GCTX file.",
+                "Cell type, if a filtered version per cell is desired.",
                 "Output directory where placing the results."
         ),
         flag = c(F, F, F)
@@ -83,4 +84,4 @@ writeCsvFst(
         quote = TRUE
 )
 
-print(sprintf("lincs_unique_perts.tsv saved in %s.", out_dir))
+print(sprintf("%s saved in %s.", basename(out_name), out_dir))
