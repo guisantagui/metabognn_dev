@@ -614,6 +614,13 @@ sign automatically and the comparison is set-for-set.
 - `launch_assoc_HEPG2_slurm.sh` — `sbatch` wrapper, a 2-task array (0 = MetChange, 1 = expression),
   4 cpus / 32 GB / 6 h.
 
+> **Renamed and parameterised by cell line on 2026-11-20** (report 08, section 8): the two arm launchers are
+> now `launch_assoc_metchange.sh` / `launch_assoc_expr.sh` with no cell line in them, the cell comes from
+> `$cell` exported by `launch_assoc_{HEPG2,A549}_slurm.sh` via `launch_assoc_slurm_generic.sh`, phenotype
+> tables moved to `<scratch>/results/mc_phenotype_assoc/<cell>/phenotypes/` and sets to
+> `<scratch>/results/mc_phenotype_assoc/metabolite_sets/`, and `prepare_assoc_inputs.sh` builds both. The
+> paths quoted in reports 07 and 08 are the pre-refactor ones and are left in place.
+
 Run with `bash scripts/mc_phenotype_assoc/launch_assoc_metchange_HEPG2.sh` or
 `sbatch scripts/mc_phenotype_assoc/launch_assoc_HEPG2_slurm.sh`. One modality only:
 `modes="--mode sign" bash .../launch_assoc_metchange_HEPG2.sh`.

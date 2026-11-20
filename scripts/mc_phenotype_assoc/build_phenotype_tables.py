@@ -28,7 +28,10 @@ A drug mapping to several external records takes the most informative label
 (MMP_down > cytotox > MMP_up > inactive; active > inactive), which is recorded in
 `n_records` / `labels_seen` so the aggregation is auditable.
 
-Output: one TSV per dataset with drug / group / subgroup / extra columns.
+Output: one TSV per dataset with drug / group / subgroup / extra columns, written
+to a PER-CELL directory, because the tables are keyed on that cell line's LINCS
+perturbation names and the mappable compound set differs between cell lines.
+Sharing them across cell lines would silently drop compounds.
 """
 import argparse, collections, csv, os, sys
 
@@ -144,20 +147,49 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--attene-datatable',
                     default=os.path.join(repo, 'data/validation/attene_ramos/AID_720637_datatable.csv'))
-    ap.add_argument('--attene-mapping',
-                    default=os.path.join(repo, 'data/validation/attene_ramos/mapped_drugs.csv'))
+    ap.add_argument('--cell', default='HEPG2',
+                    help='LINCS cell line whose perturbations the mapping used')
+    ap.add_argument('--attene-mapping', default=None,
+                    help='default: data/validation/attene_ramos/mapping_<cell>/mapped_drugs.csv')
     ap.add_argument('--hallinger-annotated',
                     default=os.path.join(repo, 'data/validation/hallinger/hallinger_tier1_all1042_annotated.csv'))
-    ap.add_argument('--hallinger-mapping',
-                    default=os.path.join(repo, 'data/validation/hallinger/mapping/mapped_drugs.csv'))
+    ap.add_argument('--hallinger-mapping', default=None,
+                    help='default: data/validation/hallinger/mapping_<cell>/mapped_drugs.csv')
     ap.add_argument('--hallinger-potency',
                     default=os.path.join(repo, 'data/validation/hallinger/hallinger_tier2_potency.csv'))
     ap.add_argument('--strict-sep', action='store_true',
                     help='demand MMP potency at least --sep-fold below viability potency')
     ap.add_argument('--sep-fold', type=float, default=3.0)
-    ap.add_argument('--out-dir', default=os.path.join(repo, 'data/validation/phenotypes'))
+    ap.add_argument('--out-dir', required=True,
+                    help='per-cell phenotype directory, e.g. '
+                         '<scratch>/results/mc_phenotype_assoc/<cell>/phenotypes')
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
+
+    # resolve the per-cell mappings, falling back to the original HEPG2 layout
+    def pick(explicit, *candidates):
+        if explicit:
+            return explicit
+        for c in candidates:
+            if os.path.exists(c):
+                return c
+        return candidates[0]
+    args.attene_mapping = pick(
+        args.attene_mapping,
+        os.path.join(repo, 'data/validation/attene_ramos/mapping_%s/mapped_drugs.csv' % args.cell),
+        os.path.join(repo, 'data/validation/attene_ramos/mapped_drugs.csv'))
+    args.hallinger_mapping = pick(
+        args.hallinger_mapping,
+        os.path.join(repo, 'data/validation/hallinger/mapping_%s/mapped_drugs.csv' % args.cell),
+        os.path.join(repo, 'data/validation/hallinger/mapping/mapped_drugs.csv'))
+    for lab, f in (('attene', args.attene_mapping), ('hallinger', args.hallinger_mapping)):
+        if not os.path.exists(f):
+            raise SystemExit(
+                'no %s mapping for cell=%s (%s).\nRun:  cell=%s bash '
+                'scripts/benchmarking/map_%s_lincs_perts.sh'
+                % (lab, args.cell, f, args.cell, lab if lab != 'attene' else 'attene'))
+    print('cell=%s\n  attene mapping   : %s\n  hallinger mapping: %s'
+          % (args.cell, args.attene_mapping, args.hallinger_mapping), file=sys.stderr)
 
     a = build_attene(args.attene_datatable, args.attene_mapping, args.strict_sep, args.sep_fold)
     write(a, os.path.join(args.out_dir, 'attene_ramos_mmp.tsv'), ['potency_uM', 'efficacy_pct'])

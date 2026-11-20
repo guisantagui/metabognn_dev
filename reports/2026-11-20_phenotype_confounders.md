@@ -464,3 +464,78 @@ high-degree central metabolites.
    e.g. LINCS perturbations of the same compound at several doses spanning its AC50, which exists for the 28%
    of these drugs profiled at 4-7 doses and could be analysed per perturbation rather than per drug (the
    per-column statistics are already in `set_member_values.npz`).
+
+## 8. Running it: the launcher chain after the 2026-11-20 refactor
+
+The cell line is now a parameter of the outermost launcher, and nothing below it names a cell line.
+
+```
+sbatch launch_assoc_HEPG2_slurm.sh   (or launch_assoc_A549_slurm.sh)
+   └── export cell=<CELL>; exec launch_assoc_slurm_generic.sh   # --array=0-1
+          ├── task 0 → launch_assoc_metchange.sh      # MetChange arm
+          └── task 1 → launch_assoc_expr.sh           # expression baseline
+                 └── both source mc_phenotype_assoc_common.sh
+                        └── mc_phenotype_assoc.py / stratified_check.py / matched_check.py
+```
+
+To add a cell line, copy a slurm wrapper and change one line; the per-cell wrappers differ only in
+`export cell=`. Run an arm directly with `cell=A549 bash launch_assoc_metchange.sh`, or one modality with
+`cell=A549 modes="--mode sign" bash launch_assoc_metchange.sh`.
+
+### 8.1 Where things live, and why
+
+`mc_phenotype_assoc_common.sh` resolves `scratch_proj_dir` to
+`/scratch/users/gsantamaria/test_large_files/metabognn_dev` when it exists and to the repo otherwise, so
+nothing large lands on the home partition:
+
+| what | path | scope |
+|---|---|---|
+| labels | `<scratch_proj_dir>/results/labels/<cell>/{metchange/rank,expr}` | per cell |
+| outputs | `<scratch_proj_dir>/results/mc_phenotype_assoc/<cell>/` | per cell |
+| **phenotype tables** | `<scratch_proj_dir>/results/mc_phenotype_assoc/<cell>/phenotypes/` | **per cell** |
+| **metabolite / gene sets** | `<scratch_proj_dir>/results/mc_phenotype_assoc/metabolite_sets/` | **per project** |
+
+**Phenotype tables are per cell line** because they are keyed on LINCS perturbation names and built from that
+cell line's structure mapping — the mappable compound set differs, so sharing them would silently drop
+compounds. That failure mode produces a plausible wrong answer rather than an error, so `require_inputs`
+hard-fails on a missing table instead of falling back, and every run prints a provenance block naming the
+cell, the label dirs, the phenotype dir and the resampling counts.
+
+**Sets are per project** because they are built from Human-GEM alone. To make that correct rather than merely
+convenient they are now built **without `--features`**, i.e. not restricted to any one label matrix;
+`mc_phenotype_assoc.py` drops members absent from the matrix it is given and **reports what it found** (e.g.
+`oxphos mito  13 of 16 members found (81%)`), and says when a set falls below `--min-set-size` for that cell.
+Previously `--features` baked one cell line's feature list into the sets, which is what made them
+cell-coupled. Verified equivalent: on HEPG2 the new layout scores the same 40 sets and reproduces the previous
+per-set numbers exactly (`glycolysis cyto_nohub` z 0.379 / auroc 0.406).
+
+### 8.2 One-off preparation per cell line
+
+```
+cell=<CELL> bash scripts/mc_phenotype_assoc/prepare_assoc_inputs.sh
+```
+
+writes the project-level sets (if absent; `rebuild_sets=true` forces) and the per-cell phenotype tables,
+including the by-mechanism Hallinger split. It needs the structure mapping for that cell line, and says so
+and stops if it is missing:
+
+```
+Rscript scripts/parse_lincs_data/get_lincs_pert_info.R          # -> lincs_unique_perts_<CELL>.tsv
+cell=<CELL> bash scripts/benchmarking/map_attene_lincs_perts.sh      # -> mapping_<CELL>/
+cell=<CELL> bash scripts/benchmarking/map_hallinger_lincs_perts.sh   # -> mapping_<CELL>/
+```
+
+Both mapping scripts now take `cell` and write to `mapping_<cell>/`, falling back to the original HEPG2
+locations when those are what exist. `build_phenotype_tables.py` takes `--cell` and a required `--out-dir`.
+
+**Read the A549 run for what it is.** The Attene-Ramos and Hallinger phenotypes were measured in **HepG2**
+whatever cell line is mapped. Running them against A549 labels is the **cross-cell-line control** of
+section 7 item 2, not a replication: if the association is as strong with A549 labels against a
+HepG2-measured phenotype, it is a compound property rather than HepG2 metabolism. The mapping scripts say so
+in their headers.
+
+### 8.3 Superseded locations
+
+`data/validation/metabolite_sets/` and `data/validation/phenotypes/` were the locations used for every result
+in reports 07 and 08 and are referenced as such there. They are left in place so those references resolve;
+new runs read the paths in 8.1.

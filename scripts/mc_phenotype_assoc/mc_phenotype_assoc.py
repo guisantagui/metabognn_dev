@@ -535,6 +535,23 @@ def main():
     scored = score_sets(sets, feat_index, cells, baselines)
     set_size = {(n, v): len([m for m in s_ if m in feat_index]) for n, v, s_ in sets}
 
+    # The sets are built from Human-GEM alone and are not restricted to any one
+    # label matrix, so report what was actually found here: a set whose members
+    # are largely absent from this cell line's matrix is scored on a fraction of
+    # itself, and that has to be visible rather than silent.
+    short = [(n, v, set_size[(n, v)], len(s_)) for n, v, s_ in sets
+             if (n, v) in set_size and set_size[(n, v)] < len(s_)]
+    if short:
+        n_bad = sum(1 for _, _, f, _ in short if f < args.min_set_size)
+        print('sets with members absent from this label matrix: %d of %d'
+              % (len(short), len(sets)), file=sys.stderr)
+        for n, v, f, tot in sorted(short, key=lambda r: r[2] / float(r[3]))[:10]:
+            print('   %-28s %-11s %d of %d members found (%.0f%%)'
+                  % (n, v, f, tot, 100.0 * f / tot), file=sys.stderr)
+        if n_bad:
+            print('   %d set(s) fall below --min-set-size here and are not scored'
+                  % n_bad, file=sys.stderr)
+
     # random size-matched sets, identical pipeline: a pathway set must beat random
     # sets of its own size, not merely chance
     pool = [f for f in feats if f not in need_rows]

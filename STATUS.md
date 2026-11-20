@@ -272,6 +272,19 @@ shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
 
 ## 6. Next steps, in priority order
 
+**6.0 Running the phenotype association (refactored 2026-11-20, report 08 section 8).**
+`sbatch scripts/mc_phenotype_assoc/launch_assoc_HEPG2_slurm.sh` (or `..._A549_slurm.sh`) -> exports `cell` ->
+`launch_assoc_slurm_generic.sh` (2-task array: 0 MetChange, 1 expression) -> `launch_assoc_metchange.sh` /
+`launch_assoc_expr.sh` (no cell line in either) -> `mc_phenotype_assoc_common.sh`. One-off per cell:
+`cell=<CELL> bash scripts/mc_phenotype_assoc/prepare_assoc_inputs.sh`, which needs
+`lincs_unique_perts_<CELL>.tsv` plus `cell=<CELL> bash scripts/benchmarking/map_{attene,hallinger}_lincs_perts.sh`.
+Paths (all under scratch on the cluster, repo on the laptop): phenotypes **per cell** at
+`results/mc_phenotype_assoc/<cell>/phenotypes/`, sets **per project** at
+`results/mc_phenotype_assoc/metabolite_sets/`, outputs at `results/mc_phenotype_assoc/<cell>/`. Sets are now
+built WITHOUT `--features` so they are genuinely cell-independent; absent members are dropped at scoring time
+and reported. Verified equivalent on HEPG2 (same 40 sets, same numbers). **An A549 run is the cross-cell-line
+CONTROL, not a replication** - the phenotypes are measured in HepG2 regardless of which cell line is mapped.
+
 **6.0a DO THIS FIRST — finish cleaning the lumped / placeholder species out of the network.**
 The existing filter (a hand-made string-match list of aggregated species, plus the currency metabolites)
 catches the obvious cases but has gaps. Found on 2026-11-20 while chasing the O-glycan result
