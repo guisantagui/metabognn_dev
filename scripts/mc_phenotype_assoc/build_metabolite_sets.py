@@ -48,6 +48,33 @@ SUBSYSTEMS = {
     'ppp':        ['Pentose phosphate pathway', 'Pentose Phosphate Pathway'],
 }
 
+# DECLARED NEGATIVE CONTROLS, chosen on biology alone and before seeing any
+# result for them. Criteria, applied to the Human-GEM subsystem list:
+#   - not a mitochondrial pathway (nothing labelled "(mitochondrial)");
+#   - no role in respiration or oxidative phosphorylation;
+#   - no role in supplying redox cofactors to the ETC (so folate, nicotinate /
+#     NAD, riboflavin / FAD, pantothenate / CoA, ubiquinone synthesis, lipoic
+#     acid, porphyrin / heme and ROS detoxification are all excluded);
+#   - not central carbon catabolism (so glycolysis, PPP, pyruvate, propanoate,
+#     butanoate, galactose, fructose and starch are excluded);
+#   - not plausibly linked to the drug classes in this library either, which
+#     rules out the steroid pathways (the library is rich in glucocorticoid and
+#     estrogen receptor ligands);
+#   - large enough to be testable in the HepG2 label matrix.
+# What is left is glycan and glycosaminoglycan metabolism. If a phenotype
+# association shows up in these as well, the signal is global rather than
+# pathway-specific.
+#
+# NOTE these are deliberately kept in their own output file so that they do not
+# enlarge the BH family of the hypotheses of interest.
+NEG_CONTROL = {
+    'negctrl_keratan_degradation':  ['Keratan sulfate degradation'],
+    'negctrl_keratan_biosynthesis': ['Keratan sulfate biosynthesis'],
+    'negctrl_blood_group':          ['Blood group biosynthesis'],
+    'negctrl_cs_hs_biosynthesis':   ['Chondroitin / heparan sulfate biosynthesis'],
+    'negctrl_o_glycan':             ['O-glycan metabolism'],
+}
+
 # Curated endpoint sets, by metabolite name as Human-GEM spells it.
 CURATED = {
     # what an ETC block / uncoupling acts on directly
@@ -142,8 +169,11 @@ def main():
     ap.add_argument('--hub-percentile', type=float, default=99.0,
                     help='metabolites above this percentile of GEM reaction degree are hubs')
     ap.add_argument('--min-set-size', type=int, default=5)
-    ap.add_argument('--emit', choices=['metabolites', 'genes'], default='metabolites',
-                    help='genes = the subsystems\' GPR genes (Ensembl), for the expression baseline')
+    ap.add_argument('--emit', choices=['metabolites', 'genes', 'negative-controls'],
+                    default='metabolites',
+                    help="genes = the subsystems' GPR genes (Ensembl), for the expression "
+                         'baseline; negative-controls = the declared-irrelevant subsystems '
+                         'of NEG_CONTROL, written to their own file')
     ap.add_argument('--out-dir', default=os.path.join(repo, 'data/validation/metabolite_sets'))
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
@@ -163,7 +193,7 @@ def main():
     # degree over the whole model, for the hub cutoff
     degree = collections.Counter()
     for _, _, ms, gs in rxns:
-        for m in set(gs if args.emit == 'genes' else ms):
+        for m in set(gs if args.emit == 'genes' else ms):  # noqa: E501  (metabolites for negative-controls too)
             degree[m] += 1
     import numpy as np
     cutoff = float(np.percentile(list(degree.values()), args.hub_percentile)) if degree else 0.0
@@ -182,8 +212,9 @@ def main():
         if sub:
             by_sub[sub].update(gs if args.emit == 'genes' else ms)
 
+    subsystems = NEG_CONTROL if args.emit == 'negative-controls' else SUBSYSTEMS
     raw = {}
-    for key, names in SUBSYSTEMS.items():
+    for key, names in subsystems.items():
         members = set()
         for n in names:
             members |= by_sub.get(n, set())
@@ -193,7 +224,8 @@ def main():
     name_to_ids = collections.defaultdict(set)
     for mid, (nm, _) in mets.items():
         name_to_ids[nm].add(mid)
-    for key, names in ({} if args.emit == 'genes' else CURATED).items():
+    for key, names in ({} if args.emit in ('genes', 'negative-controls')
+                       else CURATED).items():
         members = set()
         for n in names:
             if n not in name_to_ids:
@@ -219,7 +251,9 @@ def main():
                 summary.append('%-22s %-10s %4d' % (key, variant, len(s)))
 
     out = os.path.join(args.out_dir,
-                       'gene_sets.tsv' if args.emit == 'genes' else 'metabolite_sets.tsv')
+                       {'genes': 'gene_sets.tsv',
+                        'negative-controls': 'metabolite_sets_negctrl.tsv'}
+                       .get(args.emit, 'metabolite_sets.tsv'))
     with open(out, 'w') as fh:
         fh.write('set\tvariant\tn_members\tmembers\n')
         for r in rows:
@@ -235,7 +269,8 @@ def main():
                      % (mid, nm, comp, degree[mid], int(bool(is_hub.get(mid))),
                         '' if present is None else int(mid in present)))
     with open(os.path.join(args.out_dir, 'sets_summary%s.txt'
-                           % ('_genes' if args.emit == 'genes' else '')), 'w') as fh:
+                           % {'genes': '_genes', 'negative-controls': '_negctrl'}
+                           .get(args.emit, '')), 'w') as fh:
         fh.write('set                    variant    size\n')
         fh.write('\n'.join(summary) + '\n')
     print('\n'.join(summary))

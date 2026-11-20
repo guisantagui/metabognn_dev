@@ -477,7 +477,8 @@ responsiveness stratum, and by measuring the confounder on its own: responsive v
    drugs, while the responsiveness confounder is absent and if anything points the other way (0.439, ns).
    This is the stronger of the two results, which is the opposite of what one would expect from an artefact,
    since `MMP_up` is the smaller group (75).
-3. **`oxphos` is null in every stratum**, so the nulls are not a power artefact of the stratification.
+3. **`oxphos` is null in every stratum**, so the nulls are not a power artefact of the stratification. (Not a
+   negative control, though - report 08, 3.1.)
 4. The responsive stratum is underpowered throughout (45 vs 44), so its p-values are not the evidence; the
    agreement of its *effect sizes* with the non-responsive stratum is.
 
@@ -866,7 +867,7 @@ evidence. Both read `per_drug_scores.tsv`; no access to the label matrix is need
 | MetChange `tca_endpoints cyto_nohub` z | 0.359 (2.2e-07) | **0.387 (1.0e-03)** | 0.394 (1.1e-04) |
 | MetChange `pyruvate mito_nohub` z | 0.363 (4.9e-07) | **0.369 (1.5e-04)**, q = 0.0039 | — |
 | MetChange `tca cyto` sign_dev | 0.415 (0.0019) | **0.422 (0.025)** | 0.442 (0.035) |
-| MetChange `oxphos mito` z (control) | 0.476 (0.37) | 0.504 (0.91) | 0.489 (0.68) |
+| MetChange `oxphos mito` z (power diagnostic, not a negative control: report 08, 3.1) | 0.476 (0.37) | 0.504 (0.91) | 0.489 (0.68) |
 | expression `tca gene` z | 0.413 (0.0014) | **0.486 (0.70)**, q = 0.87 | 0.458 (0.13) |
 | expression `oxphos gene` z | 0.410 (9.5e-04) | **0.450 (0.15)**, q = 0.74 | 0.448 (0.056) |
 | expression `oxphos gene` sign_dev | 0.421 (0.0037) | **0.466 (0.33)** | 0.459 (0.14) |
@@ -874,7 +875,9 @@ evidence. Both read `per_drug_scores.tsv`; no access to the label matrix is need
 **The expression association is essentially all responsiveness; the MetChange TCA association is not.**
 Matching barely moves MetChange (0.364 -> 0.371, p = 2e-04, q = 0.0039 over the 39 sets) while expression goes
 to chance (0.413 -> 0.486, q = 0.87). Matching and residualisation agree in both statistics, and the
-`oxphos mito` negative control stays null in all three designs, so the matched test has not simply lost power.
+`oxphos mito` stays null in all three designs, so the matched test has not simply lost power. (That set is a
+power diagnostic, NOT a negative control - it is the most on-target set for this phenotype and was designated
+post hoc; see report 08, 3.1, and the declared negative controls there.)
 
 ### 16.3 What this does to the universe-fraction objection of 13.3
 

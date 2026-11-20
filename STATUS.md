@@ -31,7 +31,10 @@ HEAD `d11744b`, except the files listed in section 8.
 > Earlier today: corrected MetChange matches expr and TF (report 05, section 5): per-drug gap 8.3 / 7.7
 > (seeds 0 / 1), vs expr 7.8 / 10.4 and TF 9.0 / 9.3, not significantly different.
 
-**Read first:** `reports/2026-11-19_validation_datasets.md` (report 07 — external validation sets, structure
+**Read first:** `reports/2026-11-20_phenotype_confounders.md` (report 08 — are the report 07 phenotype
+associations chemistry or metabolism: the ToxCast-subset finding that explains Hallinger's null, mechanism-class
+stratification, the absent potency gradient, and what may/may not be claimed), then
+`reports/2026-11-19_validation_datasets.md` (report 07 — external validation sets, structure
 mapping, what each can test), then `reports/2026-11-18_recipe_state.md` (report 06 — where the recipe stands, what is settled and
 what is pending), then `reports/2026-11-17_signature_selection_scale.md` (report 05 — q-values unused; MetChange's
 top-100 is chosen by metabolite scale; `_qsig` / `_sdscale`; section 5: corrected MetChange results), then `reports/2026-11-16_labels_network_coverage.md` (report 04 — the label bug in the
@@ -268,6 +271,63 @@ Pre-dating the current metrics, cannot be re-checked (no `test_scores_heldout.np
 shuffle control): `expr`, `tf`, `tf_active200`, the `*_linOnly_shuff` runs.
 
 ## 6. Next steps, in priority order
+
+**6.0a DO THIS FIRST — finish cleaning the lumped / placeholder species out of the network.**
+The existing filter (a hand-made string-match list of aggregated species, plus the currency metabolites)
+catches the obvious cases but has gaps. Found on 2026-11-20 while chasing the O-glycan result
+(report 08, 3.3): **`Protein-Linked Serine Or Threonine Residue (O-Glycosylation Site)` (MAM03395g) is still a
+metabolite node**, as are the **lumped glycan classes** `core 2`-`core 8`, `T-antigen`, `Tn-antigen`,
+`sialyl-T`/`sialyl-Tn`/`disialyl-T antigen`, `glcnac-alpha-1,4-core 1/2`, `F1alpha`, `G00031`, `G00032`.
+The three true `[protein]` entities ARE correctly absent, so the filter works, it is just incomplete.
+
+Why it matters: these are not single chemical species, so a MetChange "production capacity" for them has no
+measurable referent; they are low-degree, so their value is close to a readout of a few local enzymes; and
+they can be selected as sources when significant and large. In report 08, 3.3 a 21-member set of exactly
+these carried an association as strong as the TCA one (per-member median |AUROC-0.5| 0.097 vs 0.100).
+
+A second, name-based candidate list is in **`data/networks/combined/lumped_candidates_for_review.tsv`**
+(560 distinct names over 772 metabolite nodes, 9.8%, by category) — useful only for catching aggregates that
+*do* have a clean formula, e.g. the lipoprotein particles. **Its patterns over-match on purpose — it is a
+review list, not a deletion list** (it flags things like a tetrahydrobenzo-phenanthro-oxirene-diol purely for
+containing a bracket). Categories in it where the aggregate reading is clear:
+
+| category | nodes | examples |
+|---|---|---|
+| glycan core / antigen classes | 66 | `core 2`-`core 8`, `T-antigen`, `Tn-antigen`, `I-Antigen`, `F1alpha` |
+| KEGG glycan ids | 37 | `G00005`, `G00020`, `G00031`, `G00032` |
+| lipoprotein particles | 15 | `HDL`, `LDL`, `VLDL`, `IDL`, `chylomicron`, `* remnant` |
+| protein-linked residues / sites | a few of the 49 | the O-glycosylation-site residue above |
+| explicit pool, polynucleotide | 5 | `Gm4-Pool`, `polynucleotide` |
+
+Needs judgement, probably KEEP (chemically defined despite the pattern match): `[ACP]` thioesters
+(`(2E)-decenoyl-[ACP]`...), the GAG and glycolipid series with specified linkages
+(`III3Fuc-nLc4Cer`, `chondroitin sulfate A (GalNAc4S-GlcA)`...), chain-specified lipids
+(`cholesterol-ester-10,13,16-docosa`).
+
+**Criterion to use — verified, not just suggested: the Human-GEM molecular formula.** Keep a node if it
+denotes a single chemical species with a fully specified formula; drop it if the formula is empty, contains an
+`R` (unspecified side chain) or an `X` (attachment point), or is a `(...)n` repeat unit. The formula is in
+`Human-GEM.yml` per metabolite (NOT in `metabolites.tsv`, which has no formula column).
+
+**This catches every culprit found on 2026-11-20**, all via the `X` atom: `T-antigen` C14H24NO10**X**,
+`Tn-antigen` C8H14NO5**X**, `core 2` / `G00032` / `F1alpha` / `glcnac-alpha-1,4-core 1` C22H37N2O15**X**,
+`core 6` / `G00031` C16H27N2O10**X**, `sialyl-T` C25H40N2O18**X**, `disialyl-T` C36H56N3O26**X**, and the
+O-glycosylation-site residue whose formula is simply **`XH`**. 11 of 11 flagged.
+
+**`data/networks/combined/lumped_by_formula.tsv`** is that list applied to the network: **659 of 7,841
+metabolite nodes (8.4%), 398 distinct names** — 410 with an `R` atom, 246 with an `X`, 3 with no formula.
+Prefer this file over the regex list below; it is principled and complete where the string match was neither.
+
+Decide separately what to do with the `R`-atom group, which is a different kind of case: generic lipids such
+as `1-alkyl-2-acylglycerol`, `1-phosphatidyl-1D-myo-inositol-3-phosphate`, `1-(1-alkenyl)-sn-glycerol`. They
+are unspecified in composition for the same reason, so the same argument applies, but there are 410 of them
+and dropping them changes the lipid coverage of the network substantially.
+
+**Knock-on effects to plan for before running it:** the label matrices do NOT need recomputing (MetChange is
+computed per metabolite and limma ran over the whole matrix, which is why these appear in `log2FC.csv` at
+all), but **`select_sources` output changes, so model runs and any analysis keyed on node identity would need
+redoing**. Decide the criterion first, apply once, and note the network version in the run metadata.
+
 
 **6.1 Corrected MetChange: done** (report 05, section 5: MetChange ≈ expr ≈ TF, both seeds).
 Leftovers:
@@ -656,6 +716,66 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > **Launchers:** `scripts/mc_phenotype_assoc/launch_assoc_{metchange,expr}_HEPG2.sh` +
 > `launch_assoc_HEPG2_slurm.sh` (2-task array); config in `mc_phenotype_assoc_common.sh`, which auto-detects
 > the scratch base on the cluster.
+
+> **2026-11-20 — confounder analysis of the phenotype association (report 08).** **The association is carried
+> entirely by the drug-like part of the library**: restricted to the 115 compounds shared with Hallinger
+> (= ToxCast) the Attene effect is 0.447 (p = 0.39, n = 38/55), outside them 0.352 (p = 1.8e-06, n = 109/425).
+> **That, not n, is why Hallinger is null** - its point estimates for the Attene-signal sets are 0.47-0.55, not
+> 0.37, and power at 29/86 for 0.371 is 54%. **Mechanism class does NOT explain it:** within 9 coarse MoA
+> families `tca mito_nohub` is 0.380 (Holm p = 0.0054) and `energy_currency mito` 0.657 (Holm p = 0.0010),
+> essentially unattenuated; the negative control `oxphos mito` stays null everywhere. Narrow (fine) MoA strata
+> give p = 0.13-0.57 but are 27 tiny strata in a receptor-drug population - untestable, not negative.
+> **No potency gradient survives correction** (best Holm 0.076, and the negative-control set shows an
+> equal-sized gradient), so there is no dose-response support. Similarity matching is uninformative (median
+> Tanimoto 0.27). **An earlier within-MoA reading of mine ("fits a compound-class effect") was an artefact of
+> double-counted strata, an unpaired test and no correction - withdrawn, see report 08 section 3.**
+> **Dose/potency line exhausted (report 08, 5.1-5.3):** `Ratio Potency` is the qHTS AC50 (half of the compound's
+> own fitted max, ~15-point titration to ~92 uM); across actives it spans 3.9 decades but the interquartile
+> range is only 0.75, and **the max LINCS dose has an interquartile spread of 0.00 decades (~all 10 uM)**.
+> **48% of MMP-down cases were profiled BELOW their own AC50** - a real design fact - but splitting on it gives
+> identical effects (`tca mito_nohub` 0.361 exposed vs 0.367 sub-threshold, p = 0.68, rho = +0.002), and where a
+> gradient appears (`tca cyto sign_dev` rho = -0.193) the negative control `oxphos mito` shows a stronger one
+> (-0.217). The test is also NOT independent of the potency test (constant dose => driven by AC50 alone) and the
+> MMP AC50 is not a threshold for a 6-24 h metabolic change. So this dataset cannot provide a dose-response test
+> at all; no further potency analysis of it is worthwhile.
+> **DECLARED NEGATIVE CONTROLS change the interpretation (report 08, 3.1).** `oxphos mito` was NEVER a valid
+> negative control - it is the most on-target set for this phenotype, was designated post hoc because it came
+> out null, and is 11/13 hubs; it is a POWER DIAGNOSTIC and is relabelled as such in reports 07 and 08. Five
+> proper controls (glycan / glycosaminoglycan subsystems, criteria fixed before looking):
+> **4 of 5 are null, but `negctrl_o_glycan` gives AUROC 0.596-0.631 (p = 4e-4 to 1e-6), beats its size-matched
+> random null (rand = 0.0099, same as TCA's), and survives coarse-MoA (0.613, Holm 0.0097) and similarity
+> matching.** Same magnitude as TCA (|0.13|), opposite direction. **So beating a size-matched null is NOT
+> sufficient to implicate a pathway, and the defensible claim is a MULTI-PATHWAY difference between
+> phenotype-active and inactive compounds (TCA down, O-glycan up, 34/40 primary sets below 0.5), not a
+> TCA-specific metabolic response.** **Tested the obvious rescue and it FAILED (report 08, 3.2):**
+> if o_glycan were coupled to TCA via the hexosamine pathway its nucleotide sugars (UDP-GlcNAc/GalNAc/Gal,
+> CMP-NeuAc, serine) would carry the signal - they are **null** (0.488, p = 0.66) and the signal is entirely
+> in the **glycan dead ends** (core 2-8, T/Tn/sialyl antigens, degree 2-12: 0.649, p = 4e-08).
+> **But the same split on TCA goes the other way:** `tca_core_cycle` (citrate, AKG, succinate, fumarate,
+> malate, OAA, isocitrate, cis-aconitate, succinyl-CoA; degree 8-39) gives 0.367 (p = 1.1e-06, rand = 0.005),
+> stronger than `tca_peripheral` 0.393. So the two associations are **different in kind** - TCA in high-degree
+> central metabolites (a capacity interpretation means something), o_glycan only in low-degree terminal
+> structures (MetChange there is ~a readout of a few glycosyltransferase genes). **General diagnostic from now
+> on: for any significant set, check whether the signal sits in its high-degree or its low-degree members.**
+> **Refined (report 08, 3.3): per member the two effects are the SAME SIZE** (median |AUROC-0.5| 0.100 TCA vs
+> 0.097 o_glycan; 8/9 vs 21/21 members at p < 0.05), so o_glycan is not the weaker finding - the difference is
+> interpretability. **Important caveat on `rand_p` throughout reports 07-08:** the o_glycan cores are
+> near-collinear (mean pairwise rho 0.799 vs 0.511 for TCA), i.e. ~1 effective d.o.f. measured 21 times, so a
+> near-collinear set beats a size-matched random set partly BECAUSE its average is less noisy. The random-set
+> control assumes comparable within-set correlation; always report per-member statistics alongside set ones.
+> The o_glycan set is mucin-type O-glycan cores / Thomsen-Friedenreich antigens, mostly **lumped glycan classes**
+> plus 4 **GEM placeholders** (`[protein]`, `[protein]-L-serine`, the O-glycosylation-site residue) which carry
+> the same AUROC as the real glycans - so it reads as **glycosyltransferase expression**, not metabolite capacity
+> (its nucleotide-sugar precursors are null, so substrate supply is unchanged).
+> **Placeholders cannot reach the model** (user, 2026-11-20): the 291/5,707 pool and placeholder features are in
+> the limma matrix only because MetChange is computed for every model metabolite and limma ran on the whole
+> matrix; they are filtered during network construction along with the currency metabolites (hubs, no real
+> biology), so they cannot be sources or queries. Verified for this set: the three `[protein]` entities are
+> absent from `networks/combined/nodes.tsv` - but 18/21 remain nodes, including the O-glycosylation-site residue
+> and the lumped glycan classes, so lumped pseudo-species are NOT filtered. Cheap check outstanding: how often
+> pool/lumped names appear among the 100 selected sources.
+> **Decisive next experiment: the LINCS genetic perturbations - a knockdown has no chemotype, no MoA and no
+> dose-response requirement, so every confounder here is unavailable by construction.**
 
 > **2026-11-19 (FINAL, supersedes the banner below) — responsiveness-matched design: MetChange survives, the
 > expression baseline does not (report 07, section 16).** `matched_check.py` (1:1 greedy matching on

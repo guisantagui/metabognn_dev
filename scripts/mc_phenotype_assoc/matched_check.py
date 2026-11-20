@@ -44,6 +44,24 @@ def mw(case, ctrl):
     return u / (len(case) * len(ctrl)), p, len(case), len(ctrl)
 
 
+def paired_test(case, ctrl):
+    """Wilcoxon signed-rank on the within-pair differences: the test a 1:1 matched
+    design calls for. The unpaired Mann-Whitney used alongside it ignores the
+    pairing the matching created, so it is reported only for comparability with
+    the unmatched rows. Returns (fraction of pairs with case < control, p,
+    n_pairs, median difference); the fraction is on the same scale as an AUROC.
+    """
+    d = np.array([c - k for c, k in zip(case, ctrl)], float)
+    d = d[np.isfinite(d)]
+    if len(d) < 6 or sps is None:
+        return np.nan, np.nan, len(d), np.nan
+    nz = d[d != 0]
+    if len(nz) < 6:
+        return np.nan, np.nan, len(d), float(np.median(d))
+    _, p = sps.wilcoxon(nz, alternative='two-sided')
+    return float(np.mean(d < 0)), p, len(d), float(np.median(d))
+
+
 def greedy_match(case_ns, ctrl_ns, caliper, seed=0):
     """1:1 greedy nearest-neighbour match on log1p(n_sig), no replacement.
 
@@ -144,9 +162,12 @@ def main():
         # 1. unmatched, for reference
         a, p, nc, nk = mw([v[d] for d, _ in case_ns], [v[d] for d, _ in ctrl_ns])
         rec = [('pooled (reference)', a, p, nc, nk)]
-        # 2. matched
+        # 2. matched, unpaired (comparable with the pooled row) and PAIRED
         a2, p2, nc2, nk2 = mw([v[d] for d in matched_case], [v[d] for d in matched_ctrl])
-        rec.append(('responsiveness-matched', a2, p2, nc2, nk2))
+        rec.append(('matched (unpaired)', a2, p2, nc2, nk2))
+        fr, pp, npair, md = paired_test([v[d] for d in matched_case],
+                                        [v[d] for d in matched_ctrl])
+        rec.append(('matched (PAIRED signed-rank)', fr, pp, npair, npair))
         # 3. residual on log1p(n_sig)
         ds = [d for d in drugs if meta[d][0] in (args.case, args.control)
               and np.isfinite(v.get(d, np.nan))]
