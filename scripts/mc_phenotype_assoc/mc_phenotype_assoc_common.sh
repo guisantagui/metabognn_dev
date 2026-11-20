@@ -39,7 +39,29 @@ expr_labels="${expr_labels:-$labels_base/results/labels/$cell/expr}"
 
 assoc_base="${assoc_base:-$scratch_proj_dir/results/mc_phenotype_assoc}"
 out_base="${out_base:-$assoc_base/$cell}"
-pheno_dir="${pheno_dir:-$assoc_base/$cell/phenotypes}"
+# Phenotypes: a per-cell directory wins when it exists (built from that cell
+# line's own structure mapping); otherwise the shared union tables are used,
+# built once with cell=ALL from lincs_unique_perts.tsv. The union tables are
+# cell-independent on purpose - the association script keeps only the drugs that
+# have labels in the cell line being run - so they are the cheap way to cover
+# many cell lines. Which one was used is printed by `provenance`.
+if [ -z "${pheno_dir:-}" ]; then
+    if [ "$cell" = "ALL" ]; then
+        pheno_dir="$assoc_base/phenotypes_ALL"
+        pheno_scope="union build target"
+    elif [ -f "$assoc_base/$cell/phenotypes/attene_ramos_mmp.tsv" ]; then
+        pheno_dir="$assoc_base/$cell/phenotypes"
+        pheno_scope="per-cell"
+    elif [ -f "$assoc_base/phenotypes_ALL/attene_ramos_mmp.tsv" ]; then
+        pheno_dir="$assoc_base/phenotypes_ALL"
+        pheno_scope="union (cell=ALL)"
+    else
+        pheno_dir="$assoc_base/$cell/phenotypes"
+        pheno_scope="per-cell (absent)"
+    fi
+else
+    pheno_scope="explicit"
+fi
 sets_dir="${sets_dir:-$assoc_base/metabolite_sets}"
 
 met_sets="${met_sets:-$sets_dir/metabolite_sets.tsv}"
@@ -67,7 +89,7 @@ cell line        : $cell
 project root     : $scratch_proj_dir
 metchange labels : $mc_labels
 expression labels: $expr_labels
-phenotypes       : $pheno_dir
+phenotypes       : $pheno_dir  [$pheno_scope]
 metabolite sets  : $sets_dir
 outputs          : $out_base
 resampling       : n_perm=$n_perm n_boot=$n_boot n_random_sets=$n_random_sets

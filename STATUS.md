@@ -291,6 +291,30 @@ path:** `build_phenotype_tables.py` fell back to the legacy unsuffixed mapping f
 silently built A549 tables from the HEPG2 mapping (identical 849/147/480 counts). The fallback is now allowed
 only for HEPG2; other cells require `mapping_<cell>/` and the run stops with the commands to build it.
 
+**Running ALL cell lines (report 08, 8.4-8.5).** `bash scripts/mc_phenotype_assoc/submit_assoc.sh` discovers
+which cell lines actually have limma labels (`check_label_availability.py` over `core_cell_lines.tsv`; checks
+`log2FC.csv` required, `qvals.csv` / `fit_info_nsig.csv` optional, and warns when neither exists because then
+`--mode sig` AND the responsiveness stratification are unavailable), writes a `(cell, arm)` manifest, sizes
+the Slurm array to it and submits `launch_assoc_manifest_slurm.sh`. `cells="HEPG2 A549"` restricts,
+`dry_run=true` previews. Cell lines missing labels or phenotypes are skipped, not failed. **Logs land in
+`scripts/mc_phenotype_assoc/logs/`** (kept in git: Slurm opens `--output` before the job runs, so a mkdir
+inside the script is too late); `submit_assoc.sh` passes that path absolutely, the single-cell wrappers use a
+relative `logs/` so submit those from `scripts/mc_phenotype_assoc`.
+**One mapping instead of nine:** `cell=ALL bash prepare_assoc_inputs.sh` maps against
+`lincs_unique_perts.tsv` (the union; all 5,284 HEPG2 pertnames verified inside it) and writes
+`<assoc_base>/phenotypes_ALL/`, which is cell-independent because the association script keeps only the drugs
+with labels in the cell line being run. Common prefers a per-cell dir and falls back to the union, printing
+which. Union mapping: Hallinger 176 compounds vs 115, Attene 1,865 vs 918; union tables hold 1,763 Attene and 177
+Hallinger drugs. **NOT a drop-in replacement** - restricted to drugs with HEPG2 labels the union table gives
+144 vs 147 MMP-down, 475 vs 480 inactive, 27 vs 29 Hallinger-active, because mapping against 34,419 perts
+instead of 5,494 lets compounds match further pert_ids and a few aggregated labels resolve differently.
+**So for ANY cross-cell comparison use `use_union=true bash submit_assoc.sh`**, which forces one identical
+table onto every cell line; otherwise cells mix per-cell and union tables and a 2-3% assignment difference
+would look like a cell-line effect. The per-cell HEPG2 table stays the one reproducing reports 07-08.
+**Data note:** `lincs_unique_perts.tsv` originally had 4 header fields for 5 data columns (no `V1`), which R
+tolerates as row names but silently misaligns every Python `DictReader`. Regenerated with `V1` 2026-11-20 -
+check other files written by that code path.
+
 **6.0a DO THIS FIRST — finish cleaning the lumped / placeholder species out of the network.**
 The existing filter (a hand-made string-match list of aggregated species, plus the currency metabolites)
 catches the obvious cases but has gaps. Found on 2026-11-20 while chasing the O-glycan result

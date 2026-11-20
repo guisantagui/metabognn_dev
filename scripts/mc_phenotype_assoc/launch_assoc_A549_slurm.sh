@@ -4,10 +4,17 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --time=06:00:00
-#SBATCH --output=./mc_pheno_A549_%A_%a.out
+#SBATCH --output=logs/mc_pheno_A549_%A_%a.out
 # MetChange / phenotype association for A549.
 #
-#   sbatch scripts/mc_phenotype_assoc/launch_assoc_A549_slurm.sh
+#   cd scripts/mc_phenotype_assoc && sbatch launch_assoc_A549_slurm.sh
+#
+# SUBMIT FROM scripts/mc_phenotype_assoc: `--output` is expanded by Slurm before
+# the job starts and cannot hold a variable, so `logs/` is relative to the submit
+# directory. The logs/ directory is kept in git for that reason. For several cell
+# lines at once, and to have the log path set absolutely, use submit_assoc.sh
+# instead, which also skips cell lines whose labels or phenotype tables are
+# missing rather than failing a task.
 #
 # Can be submitted from anywhere inside the repository: the repo root is located
 # by walking up from the submit directory. (Slurm copies the batch script to a

@@ -9,7 +9,15 @@ set -uo pipefail
 cell="${cell:-HEPG2}"
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 
-pert="${pert:-$repo/data/LINCS/lincs_unique_perts_${cell}.tsv}"
+# cell=ALL maps against the UNION of all cell lines (lincs_unique_perts.tsv), which
+# is what makes a cell-independent phenotype table possible: the association
+# script already restricts to the drugs that have labels in whichever cell line
+# it is given, so one mapping serves them all and 9 R runs become 1.
+if [ "$cell" = "ALL" ]; then
+    pert="${pert:-$repo/data/LINCS/lincs_unique_perts.tsv}"
+else
+    pert="${pert:-$repo/data/LINCS/lincs_unique_perts_${cell}.tsv}"
+fi
 val="${val:-$repo/data/validation/hallinger/hallinger_tier1_all1042_annotated.csv}"
 
 out_dir="${out_dir:-$repo/data/validation/hallinger/mapping_${cell}}"

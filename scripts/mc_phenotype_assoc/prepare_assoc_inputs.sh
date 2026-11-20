@@ -1,8 +1,15 @@
 #!/bin/bash
 # Build the inputs the association launchers need, for one cell line.
 #
-#   cell=HEPG2 bash prepare_assoc_inputs.sh
-#   cell=A549  bash prepare_assoc_inputs.sh
+#   cell=HEPG2 bash prepare_assoc_inputs.sh    # phenotypes for one cell line
+#   cell=ALL   bash prepare_assoc_inputs.sh    # ONE union table for every cell line
+#
+# cell=ALL maps the external datasets against lincs_unique_perts.tsv (the union
+# over cell lines) and writes <assoc_base>/phenotypes_ALL/. The association
+# script keeps only the drugs that have labels in whichever cell line it runs
+# on, so that one table covers all of them and needs a single map_smiles.R run
+# instead of one per cell line. A per-cell directory, when present, takes
+# precedence over it.
 #
 # Writes:
 #   <assoc_base>/metabolite_sets/{metabolite_sets,gene_sets,metabolite_sets_negctrl}.tsv

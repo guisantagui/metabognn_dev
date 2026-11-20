@@ -553,6 +553,82 @@ section 7 item 2, not a replication: if the association is as strong with A549 l
 HepG2-measured phenotype, it is a compound property rather than HepG2 metabolism. The mapping scripts say so
 in their headers.
 
+### 8.4 Running every cell line that has labels
+
+Added 2026-11-20 (later). Three pieces:
+
+**Discovery, not hardcoding.** `check_label_availability.py` reads
+`data/LINCS/core_cell_lines.tsv` and reports, per cell line and per arm, whether `log2FC.csv` (required),
+`qvals.csv` and `fit_info_nsig.csv` (both optional) exist and are non-empty. A cell line is runnable for an
+arm when `log2FC.csv` is there. It warns when a cell line has neither `qvals.csv` nor `fit_info_nsig.csv`,
+because then `--mode sig` is unavailable **and** `n_sig` is unknown, so the responsiveness stratification -
+the main confounder control of section 3 - cannot run for it. `--list {mc,expr,both}` prints just the names,
+for scripting.
+
+**Submission.** `submit_assoc.sh` (login node, not a batch script) discovers the runnable cell lines, writes a
+`(cell, arm)` manifest to `logs/`, sizes the Slurm array to it and submits `launch_assoc_manifest_slurm.sh`,
+where each array task reads its own manifest line. Cell lines whose labels or phenotype tables are missing are
+reported and skipped rather than failing a task. `cells="HEPG2 A549"` restricts it; `dry_run=true` shows the
+submission without making it. This exists rather than one batch script per cell because the array size has to
+be known at submit time, the set of cell lines with finished limma runs is only known at run time, and
+`--output` is expanded by Slurm before the job starts and cannot contain a variable - so passing it from the
+submitter is the only way to fix the log location absolutely.
+
+**Logs** go to `scripts/mc_phenotype_assoc/logs/`, which is kept in git (with a `.gitkeep` explaining why):
+Slurm opens the output file *before* the job script runs, so a directory created inside the script is too
+late. `submit_assoc.sh` passes that path absolutely; the single-cell wrappers use `--output=logs/...`, which
+is relative to the submit directory, so **submit those from `scripts/mc_phenotype_assoc`**.
+
+### 8.5 One union mapping instead of one per cell line
+
+The phenotype tables were per cell line because the structure mapping was run against
+`lincs_unique_perts_<cell>.tsv`. For nine cell lines that is nine `map_smiles.R` runs, each canonicalising
+tens of thousands of SMILES.
+
+`cell=ALL` instead maps against **`lincs_unique_perts.tsv`, the union over cell lines** (34,419 compounds;
+verified that all 5,284 HepG2 pertnames and pert_ids are contained in it), and
+`cell=ALL bash prepare_assoc_inputs.sh` writes one set of tables to
+`<assoc_base>/phenotypes_ALL/`. That table is **cell-independent by construction**, because
+`mc_phenotype_assoc.py` keeps only the drugs that have labels in whichever cell line it is given - the
+restriction that used to be baked into the mapping now happens at scoring time. `mc_phenotype_assoc_common.sh`
+prefers a per-cell directory when one exists and falls back to the union, printing which it used
+(`phenotypes : ... [union (cell=ALL)]`).
+
+Union mapping yields, against the per-cell HepG2 figures: Hallinger **176** compounds (164 exact pairs)
+vs 115, Attene-Ramos **1,865** vs 918; the union phenotype tables hold **1,763** Attene drugs (237 MMP-down /
+1,105 inactive / 127 MMP-up / 43 cytotoxic) and **177** Hallinger drugs (44 active / 133 inactive).
+
+**It is not a drop-in replacement, and this has to be handled.** Restricted to the drugs that have HepG2
+labels, the union table does not reproduce the per-cell groupings exactly:
+
+| group | per-cell table | union table | diff |
+|---|---|---|---|
+| Attene MMP-down | 147 | **144** | -3 |
+| Attene inactive | 480 | **475** | -5 |
+| Attene MMP-up | 75 | 76 | +1 |
+| Attene cytotoxic | 24 | 22 | -2 |
+| Hallinger active | 29 | **27** | -2 |
+| Hallinger inactive | 86 | 86 | 0 |
+
+Cause: mapping against 34,419 perturbations instead of one cell line's 5,494 lets some external compounds
+match further `pert_id`s, so a drug's aggregated label (the most informative of its records, by the priority
+in `build_phenotype_tables.py`) can resolve differently - `incon` goes from 123 to 125, and a few drugs move
+between groups. Neither version is wrong; they are different aggregations of the same evidence, the union one
+using more of it.
+
+**Consequence for cross-cell work: pass `use_union=true` to `submit_assoc.sh`.** By default each cell line
+uses its per-cell table when one exists and the union otherwise, which is fine for single-cell runs but
+*mixed* across cell lines - and a 2-3% difference in group assignment would masquerade as a cell-line effect
+in exactly the gradient the comparison is meant to read. `use_union=true` exports one `pheno_dir` to every
+array task so all cell lines are scored against the identical table. The per-cell HepG2 table remains the one
+that reproduces the numbers in reports 07 and 08.
+
+**One caveat on `lincs_unique_perts.tsv`.** As originally written it had **4 header fields and 5 data
+columns** - no name for the leading row-index column that the per-cell files call `V1`. R's `read.csv` silently
+treats the first column as row names, so `map_smiles.R` was unaffected, but any Python `DictReader` consumer
+misaligns every column (which is how it was found: `vorinostat` appeared to be absent from the union file).
+Regenerated with the `V1` header on 2026-11-20. Worth checking any other file written by that code path.
+
 ### 8.3 Superseded locations
 
 `data/validation/metabolite_sets/` and `data/validation/phenotypes/` were the locations used for every result

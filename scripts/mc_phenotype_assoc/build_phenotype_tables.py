@@ -179,6 +179,7 @@ def main():
         if legacy and os.path.exists(legacy):
             return legacy
         return per_cell
+    # cell=ALL means the union mapping: a cell-independent table, no legacy path
     legacy_ok = args.cell.upper() == 'HEPG2'
     args.attene_mapping = pick(
         args.attene_mapping,
