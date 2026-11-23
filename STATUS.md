@@ -31,7 +31,10 @@ HEAD `d11744b`, except the files listed in section 8.
 > Earlier today: corrected MetChange matches expr and TF (report 05, section 5): per-drug gap 8.3 / 7.7
 > (seeds 0 / 1), vs expr 7.8 / 10.4 and TF 9.0 / 9.3, not significantly different.
 
-**Read first:** `reports/2026-11-20_phenotype_confounders.md` (report 08 — are the report 07 phenotype
+**Read first:** `reports/2026-11-23_cross_cell_specificity.md` (report 09 — the association is HepG2-specific
+across 8 cell lines on identical drugs, which rules out the chemotype explanation; the expression arm is NOT
+cell-specific, which is the real argument for the stoichiometric layer), then
+`reports/2026-11-20_phenotype_confounders.md` (report 08 — are the report 07 phenotype
 associations chemistry or metabolism: the ToxCast-subset finding that explains Hallinger's null, mechanism-class
 stratification, the absent potency gradient, and what may/may not be claimed), then
 `reports/2026-11-19_validation_datasets.md` (report 07 — external validation sets, structure
@@ -790,6 +793,50 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > **Launchers:** `scripts/mc_phenotype_assoc/launch_assoc_{metchange,expr}_HEPG2.sh` +
 > `launch_assoc_HEPG2_slurm.sh` (2-task array); config in `mc_phenotype_assoc_common.sh`, which auto-detects
 > the scratch base on the cluster.
+
+> **2026-11-23 — CROSS-CELL: the association is HepG2-SPECIFIC (report 09).** The label-level test run over the
+> 8 core cell lines with MetChange labels, all against the single union phenotype table, then restricted to the
+> **641 drugs present in every cell line with a consistent group (125 MMP-down / 427 inactive)** so only the cell
+> line varies. **MetChange `tca mito_nohub` z: HEPG2 0.350 (p = 3.3e-07); A549 0.493, A375 0.510, HA1E 0.434,
+> HCC515 0.481, HT29 0.464, PC3 0.478, VCAP 0.485 — all null.** Responsiveness-matched per cell: HEPG2 0.365
+> (p = 3.4e-04), everything else null. **This RULES OUT the compound-class / chemotype explanation of report 08
+> section 2** — identical compounds cannot act in one cell line and not in seven — and it is not power (HEPG2 has
+> the FEWEST drugs, 717 vs up to 1,364, and the restriction makes its effect stronger). PC3's earlier nominal
+> signal (p = 0.036) was coverage and disappears on the common set (p = 0.46). **A prediction stated in advance**
+> (uniform = chemistry, HepG2-only = HepG2 biology).
+> **CORRECTED 2026-11-23 (report 09, 3.1 / 4 / 6):** (a) **MMP-UP is NOT HepG2-specific** - `energy_currency
+> mito` survives matching in HCC515 too (0.624, p = 0.011), A549 borderline (p = 0.062); the specificity claim
+> holds for **MMP-down only**, and the first version of the report generalised from the MMP-down run alone.
+> (b) The expression arm is **not** "cell-general" - that came from POOLED numbers; under matching it collapses,
+> **in HEPG2 to exactly 0.500 (p = 0.99)**, surviving only in PC3 (0.404, p = 0.0087) and HCC515 (0.408,
+> p = 0.012). **The claim to use instead, within one cell line: in HEPG2, matched, MetChange `tca mito_nohub`
+> 0.365 (p = 3.4e-04) vs expression `tca gene` 0.500 (p = 0.99)** - MetChange survives the control that removes
+> expression entirely, no cross-cell argument needed. (c) HA1E's nominal p = 0.025 does NOT survive matching
+> (0.454, p = 0.21); it has the largest responsive share of any line (64% vs 37%) and ~0.2 after Bonferroni over
+> 8 cells.
+> **The o_glycan negative control is also NOT cell-specific** (HEPG2 0.590, HA1E 0.582, VCAP 0.578), supporting
+> the glycosyltransferase-expression reading of report 08 3.3 and showing the design discriminates rather than
+> flagging everything.
+> **Still open.** The "rules out chemistry, not transcription" caveat is **WITHDRAWN** - MetChange IS an LP over
+> the transcriptional signature and the stoichiometric matrix, so "transcription projected onto TCA" describes
+> the method, not an alternative. **The real limitation is that MMP was measured only in HepG2**, so two
+> readings remain and nothing separates them: the phenotype is itself cell-specific and MetChange tracks it
+> correctly (nulls are correct negatives, result strong), or MetChange only works in HepG2 and the phenotype is
+> shared (nulls are failures). Also: HEPG2 was the discovery cell, so the evidence is the PATTERN not its own
+> p-value; effect size unchanged at |AUROC-0.5| ~ 0.15.
+> **Decisive next experiment: a second (phenotype, cell line) pair.** `APR_HepG2_MitoMembPot` cannot do it -
+> same line. **Schuhknecht (A549 metabolomics, on disk) was proposed and WITHDRAWN**: its phenotype would be
+> measured metabolite LEVELS over the same metabolites the MetChange set summarises, so the group test is the
+> already-null per-drug correlation (report 05, 8.2, rho = -0.013) coarsened into bins - and report 05, 9.3
+> (capacity is not validated by pools) applies in full. **Promoted instead: the LINCS GENETIC PERTURBATIONS**
+> (`trt_sh`/`trt_xpr`/`trt_oe` exist PER CELL LINE, so they give (phenotype, cell) pairs across many lines with
+> no new data, exact cell-independent ground truth, and no metabolite-level readout; the >=1-reaction-away
+> version is the real test since MetChange reads the perturbed transcript itself). Secondary: PRISM/DepMap
+> viability across all 9 lines - not metabolic, but tests the cell-specificity MECHANISM at large n. **Honest
+> gap:** no mitochondrial phenotype at screen scale in a non-HepG2 core line is known to us - everything touched
+> (Attene-Ramos, Hallinger, Apredica, CCTE_Simmons) is HepG2, which is itself informative. **DONE:** the
+> common-drug restriction is now `scripts/mc_phenotype_assoc/cross_cell_compare.py`, which reproduces every
+> section-3 number.
 
 > **2026-11-20 — confounder analysis of the phenotype association (report 08).** **The association is carried
 > entirely by the drug-like part of the library**: restricted to the 115 compounds shared with Hallinger
