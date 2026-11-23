@@ -426,8 +426,32 @@ than through the `n_sig` proxy used in reports 07-09. The imbalance was severe -
 | matched on `n_sig` responsiveness | 0.296 | 0.014 | 25 pairs |
 | matched on both | 0.222 | 0.010 | 15 pairs |
 
-**The association gets stronger under cytotoxicity matching, not weaker**, so cell death was suppressing it
-rather than causing it. `energy_currency` stays null under every design (0.40 to 0.48). Robustness:
+**The association survives cytotoxicity matching.** The first write-up said it "gets stronger, so cell death
+was suppressing it" - that over-read the numbers and is **withdrawn**: the matched estimate is a different
+comparison (15 cases against 15 *matched* controls, not 25 against 226), so its being lower than the pooled
+value is not evidence of anything. The claim that holds is **survival**, not strengthening.
+
+What matching does and what it costs. The groups are badly imbalanced on cytotoxicity - cases median
+**+1.91** (IQR -0.31 to 7.10, max 31.0), controls median **-0.71** (IQR -1.16 to -0.24, max 2.7) - so the
+pooled test cannot distinguish metabolism from cell death. Matching pairs each case with an unused control of
+similar cytotoxicity and compares only within pairs; the balance line `z_cytotox +6.62->-0.01` is the
+diagnostic that it worked. But the controls only span up to 2.7, so **10 of the 25 cases are too cytotoxic to
+have any counterpart and are discarded**. The matched test therefore answers a narrower question: *among
+compounds whose cytotoxicity falls inside the range the controls span*, the association holds (0.173,
+p = 0.0025). It says nothing about the 10 most cytotoxic cases.
+
+**A stratified check, which keeps all 25 cases, is the better support** and was run after the fact:
+
+| cases, split by cytotoxicity | n | median glycolysis z | vs the 226 controls |
+|---|---|---|---|
+| z_cytotox < 1 | 10 | -0.17 | AUROC 0.236, p = 0.0048 |
+| z_cytotox >= 1 | 15 | -0.10 | AUROC 0.284, p = 0.0052 |
+| (controls) | 226 | +0.06 | |
+
+**Both strata separate from the controls, to the same degree**, and within the cases glycolysis z barely
+tracks cytotoxicity at all (Spearman +0.156, p = 0.46). So the association is not carried by the dying
+compounds, and it is not carried only by the surviving ones either - it is present across the cytotoxicity
+range, which is a stronger statement than the 15-pair matched test alone. `energy_currency` stays null under every design (0.40 to 0.48). Robustness:
 leave-one-out never moves p above 3.1e-04; dropping the five most extreme cases still gives AUROC 0.321
 (p = 0.008, n = 20); and the MoA composition is heterogeneous - 9 of 25 unannotated, no class contributing
 more than 2.
@@ -542,7 +566,8 @@ Then the control that matters. Matching on naia's **measured per-compound cytoto
 | expression | glycolysis gene | 0.445 (p = 0.37) | 0.422 (p = 0.48) | 0.409 (p = 0.41) |
 
 **Expression's association with ATP loss is viability-driven: it does not survive matching on measured
-cytotoxicity (oxphos p = 0.013 -> 0.115). MetChange's is not: it strengthens (p = 1.1e-04 -> 0.0025).**
+cytotoxicity (oxphos p = 0.013 -> 0.115). MetChange's does survive (p = 1.1e-04 -> 0.0025).** See 9.2 for why
+"survives" and not "strengthens", and for the stratified check that keeps all 25 cases.
 
 This is the **same pattern as section 4, independently replicated**, and the independence is the point:
 

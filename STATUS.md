@@ -799,7 +799,7 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > (`oxphos gene` 0.314-0.348, random-set p = 0.015; `glycolysis gene` null) — the reverse ordering to MetChange,
 > so the two layers are NOT reading the same thing, and expression's ordering is the biologically expected one.
 > **But matching on naia's MEASURED cytotoxicity: expression DIES (oxphos 0.348 p = 0.013 -> 0.329 p = 0.115)
-> while MetChange STRENGTHENS (glycolysis 0.265 p = 1.1e-04 -> 0.173 p = 0.0025; ppp -> 0.156 p = 0.0014).**
+> while MetChange SURVIVES (glycolysis 0.265 p = 1.1e-04 -> 0.173 p = 0.0025; ppp -> 0.156 p = 0.0014).**
 > **This is section 4's pattern independently replicated across FOUR differences:** phenotype (MMP -> ATP),
 > phenotype cell line (HepG2 -> SH-SY5Y), library (Tox21 -> Prestwick), and the confounder control (`n_sig`
 > PROXY -> MEASURED cytotoxicity). Matched: MetChange 0.365 / 0.173, expression 0.500 / 0.329.
