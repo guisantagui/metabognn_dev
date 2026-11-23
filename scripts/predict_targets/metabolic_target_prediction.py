@@ -469,6 +469,42 @@ class FeatureBuilder:
         self.names = (dyn + diff + slog + stats + (self.static_names if self.use_static else []) + dist
                       + ["shared_subsystems_with_sources"]
                       + (["rel_log_dose", "log_time", "log_n_sig"] if self.use_globals else []))
+        self.all_names = list(self.names)
+        self.keep = None          # None = keep every column; set by fit_keep()
+        self.dropped_names = []
+
+    def fit_keep(self, sources, globals_):
+        """Find feature columns that are exactly constant over a sample of perturbations and
+        drop them for the rest of the run (--drop-constant-features).
+
+        Motivating case: `catalysis` runs protein -> reaction with no reaction -> protein edge,
+        so a signature injected at METABOLITE nodes cannot reach a protein through the
+        downstream operator at all. Measured on the combined network, a 100-metabolite
+        signature reaches 0 of 18,760 proteins at downstream hops 1-4 and 4 (0.02%) at hop 5,
+        so in `--mode metchange` every `down_*` hop / diff / slog feature, and `up_*_hop1`,
+        is identically zero - roughly half the dynamic block. expr / TF inject at protein
+        nodes, where both passes work from hop 1, so nothing is dropped for them. Detected
+        rather than hardcoded, so it also catches any other degenerate column (e.g. distance
+        features pinned at the cap) and stays correct if the network changes.
+
+        The mask is fitted once and applied to train, validation and test alike, so the
+        columns the FFN sees never change within a run.
+        """
+        X = self._build_raw(sources, globals_)
+        const = X.max(0) == X.min(0)
+        self.keep = ~const
+        self.dropped_names = [n for n, c in zip(self.all_names, const) if c]
+        self.names = [n for n, c in zip(self.all_names, const) if not c]
+        if self.dropped_names:
+            by_prefix = {}
+            for n in self.dropped_names:
+                by_prefix[n.split("_")[0]] = by_prefix.get(n.split("_")[0], 0) + 1
+            log(f"dropping {len(self.dropped_names)} constant features of {len(self.all_names)} "
+                f"(by prefix: {by_prefix})")
+            log(f"  e.g. {', '.join(self.dropped_names[:6])}")
+        else:
+            log(f"no constant features among the {len(self.all_names)}")
+        return self.keep
 
     def _static(self, act):
         g = self.g
@@ -507,7 +543,14 @@ class FeatureBuilder:
         log(f"distances from {len(source_nodes):,} source nodes in {time.time() - t0:.0f}s")
 
     def build(self, sources, globals_):
-        """sources: list of (node_idx, weight) per perturbation -> (P * n_prot, F) float32, perturbation-major."""
+        """sources: list of (node_idx, weight) per perturbation -> (P * n_prot, F) float32,
+        perturbation-major. Constant columns found by fit_keep() are removed here, so every
+        caller sees the same feature set."""
+        X = self._build_raw(sources, globals_)
+        return X if self.keep is None else np.ascontiguousarray(X[:, self.keep])
+
+    def _build_raw(self, sources, globals_):
+        """The full feature matrix, before any column is dropped."""
         g, K, P, n = self.g, self.K, len(sources), len(self.g.prot)
         S = np.zeros((g.N, P, 2), np.float32)
         for j, (idx, w) in enumerate(sources):
@@ -1121,6 +1164,16 @@ def main():
     io.add_argument("--out-dir", required=True)
     fe = ap.add_argument_group("features")
     fe.add_argument("--hops", type=int, default=5)
+    fe.add_argument("--drop-constant-features", action="store_true",
+                    help="drop feature columns that are exactly constant over a sample of "
+                         "perturbations, fitted once and applied to train / val / test alike. In "
+                         "--mode metchange this removes every down_* hop/diff/slog feature and "
+                         "up_*_hop1 (about half the dynamic block): a metabolite signature cannot "
+                         "reach a protein through the downstream operator, because catalysis runs "
+                         "protein -> reaction with no reverse edge. Nothing is dropped for expr / "
+                         "tf, whose sources are proteins. Sample size: --drop-constant-sample.")
+    fe.add_argument("--drop-constant-sample", type=int, default=64,
+                    help="perturbations sampled to fit --drop-constant-features (default 64)")
     fe.add_argument("--max-sources", type=int, default=100)
     fe.add_argument("--qvalue", type=float, default=0.05)
     fe.add_argument("--ignore-qvalue", action="store_true", help="use the top-n features by |value| instead")
@@ -1305,6 +1358,18 @@ def main():
 
     used = np.unique(np.concatenate([fmap[f] for p in pd.concat([perts.pert, unlabeled.pert]) for f in sigs[p][0]]))
     fb = FeatureBuilder(g, act, membership_matrix(g), used, args)
+    if args.drop_constant_features:
+        n_s = min(args.drop_constant_sample, len(perts))
+        samp = perts.sample(n=n_s, random_state=args.seed) if n_s < len(perts) else perts
+        srcs = []
+        for j, pt, d in zip(samp.index, samp.pert, samp.drug):
+            rng_s = np.random.default_rng(args.seed + j)
+            srcs.append(select_sources(*sigs[pt], fmap, drug_mets.get(d.lower(), set()),
+                                       args.max_sources, rng_s))
+        fb.fit_keep(srcs, globals_[samp.index.to_numpy()])
+        if fb.dropped_names:
+            with open(os.path.join(args.out_dir, "dropped_features.txt"), "w") as fh:
+                fh.write("\n".join(fb.dropped_names) + "\n")
     with open(os.path.join(args.out_dir, "feature_names.txt"), "w") as fh:
         fh.write("\n".join(fb.names) + "\n")
     log(f"{len(fb.names)} base features per protein")
