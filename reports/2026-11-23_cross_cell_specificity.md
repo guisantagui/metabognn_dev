@@ -234,3 +234,365 @@ session was cleaned up; that is why this exists.
 The underlying runs are reproducible with `use_union=true bash scripts/mc_phenotype_assoc/submit_assoc.sh`
 (report 08, 8.4-8.5). The expression and negative-control arms in sections 4-5 use the same script with
 `--run attene_expr` / `--run attene_negctrl` and the corresponding set names.
+
+## 8. Three new candidate datasets, and what each can and cannot do
+
+*Added 2026-11-23 after `data/validation/{naia,nyffeler,xu}/` arrived. Section 6 asked for a second
+(phenotype, cell line) pair; these are the first candidates, and one of them can supply it. Overlap figures
+below are InChIKey-first-block matches against `lincs_unique_perts.tsv`, which is a **floor** - the proper
+mapping needs `map_smiles.R` with salt stripping and stereo handling, which typically recovers more.*
+
+| | naia | nyffeler | xu |
+|---|---|---|---|
+| cell line | **SH-SY5Y** (differentiated neuroblastoma) | **U2OS** | AC16 cardiomyocytes |
+| in LINCS `cellinfo_beta`? | **yes** (`SHSY5Y`) | **yes** (`U2OS`) | **no** |
+| phenotype | cellular ATP + cytotoxicity, z-scores | cell painting, 10 `Mito_*` feature categories | **mitochondrial membrane potential** |
+| design | single concentration | **concentration-response (BMD)** | AC50 + active/inactive call |
+| compounds | 1,199 | 462 (APCRA, 24 h, test chemicals) | 247 |
+| **matching LINCS** | **683** (+29 by name) | 87 with a mito-selectivity value | 53 |
+| source | Naia et al., *BMC Biol* 2021, PMC7989211 | EPA Nyffeler, U2OS HTPP | Xu et al., `10.1021/EHP.6c00052` table S10 |
+
+### 8.1 naia - DISQUALIFIED for the symmetric test: 10 compounds overlap
+
+**Resolved 2026-11-23 by the gating check of 8.4, with `data/LINCS/lincs_unique_perts_SHSY5Y.tsv`.** LINCS has
+only **224 perturbations in SHSY5Y** against 5,494 in HEPG2, and the Prestwick FDA-approved library barely
+touches that panel:
+
+| naia compounds | n |
+|---|---|
+| screened | 1,199 |
+| resolved to a structure | 1,193 |
+| **matching LINCS SHSY5Y** | **10** |
+| matching LINCS HEPG2 (reference) | 340 |
+
+Of those 10: **1 ATP-down, 0 ATP-up, 4 ATP-flat.** The design of the rest of this section is impossible - and
+the single ATP-down compound is **D-cycloserine** (z ATP -2.11), a peptidoglycan-synthesis inhibitor, i.e. one
+of the implausible hits flagged below as probable single-concentration noise.
+
+**The gating check earned its keep.** The 683 whole-LINCS structure matches said nothing about whether those
+compounds were ever profiled in the cell line that matters, and the differentiation worry below turned out to
+be moot.
+
+**What naia is still good for: it replaces xu as the falsification test, with 6x the power.** 340 of its
+compounds are in the HEPG2 panel, so the converse question can be asked - *do HepG2 labels predict an ATP
+phenotype measured in a different cell line?* That is a better version of 8.2: a metabolic readout rather than
+membrane potential, an independent cytotoxicity covariate, and 340 compounds instead of 53. **Read the
+direction carefully**, because it is not the same design as section 3:
+
+- section 3 fixes the phenotype (HepG2 MMP) and varies the **label** cell line - only HepG2 labels worked;
+- this test fixes the labels (HepG2) and varies the **phenotype** cell line.
+
+If HepG2 labels do predict SH-SY5Y ATP, the two results together are an odd asymmetry - other lines' labels
+cannot predict HepG2's phenotype, yet HepG2's labels predict other lines' phenotypes - which would point at
+**reading 2 of section 6**: HepG2 labels are simply the better-quality set, and MetChange works where the LINCS
+data is deepest. That is the alternative this report could not exclude, so the test is worth running for the
+same reason xu is: it can damage the conclusion.
+
+### 8.1a The original assessment, retained for the record
+
+SH-SY5Y is in LINCS and **683 of 1,199 compounds match**, so this is the one dataset that could give a second
+(phenotype, cell line) pair. Two further advantages:
+
+- **The phenotype is ATP itself** - a metabolite in the `energy_currency` set, now producer-only in the
+  network (report 08, 9). The correspondence between readout and predictor is more direct than for membrane
+  potential.
+- **It ships an independent cytotoxicity z-score per compound**, which is a *better* confounder control than
+  the `n_sig` responsiveness proxy used throughout reports 07-09. And it is genuinely independent:
+  **Spearman(z ATP, z cytotox) = -0.083** (p = 0.004) over all 1,199 compounds, so ATP loss here is *not*
+  simply cell death. That is unusual and valuable.
+
+Weaknesses, which are real:
+
+- **Single concentration**, so no potency and more noise than a BMD design. The noise is visible: three
+  peptidoglycan-synthesis inhibitors sit in the ATP-down non-cytotoxic set, and beta-lactams have no mammalian
+  target, so some of that group is measurement noise.
+- **The case groups shrink fast.** ATP-down (z <= -2) is 116 compounds, 55 of them LINCS-matched; requiring
+  non-cytotoxic (|z cytotox| < 1) leaves 48, of which roughly 27 are LINCS-matched. Against a flat-ATP control
+  group of about 280 (160 matched) that is much less power than Attene's 125/427 - an effect the size of the
+  HepG2 one (AUROC 0.35) would land near p = 0.02 rather than 3e-07. **A null would therefore be weak evidence
+  of absence.**
+- It was designed as an **enhancer** screen, so the authors' own finding is ATP-*up* (60 compounds, 42
+  non-cytotoxic, about 40 LINCS-matched). That direction is as usable as the down direction and should be
+  tested as its own contrast, not pooled.
+
+**And a mismatch that may matter more than the power problem.** Naia screened **differentiated** SH-SY5Y
+(the abstract says "differentiated human neuroblastoma cells"), while LINCS `SHSY5Y` signatures are
+undifferentiated. This is not a cosmetic difference for a mitochondrial ATP phenotype: differentiation shifts
+SH-SY5Y from predominantly glycolytic to oxidative metabolism, which is precisely the axis the phenotype
+measures. So "cell-matched" here means matched on cell *line*, not on metabolic state - and a null could then
+mean the labels describe a glycolytic cell while the phenotype was measured in an oxidative one. Worth
+confirming the differentiation protocol in the paper's methods before treating this as the symmetric test;
+it is the one caveat that could disqualify naia even with good LINCS depth.
+
+### 8.2 xu - cannot do the cell-matched test, but is the sharpest test *against* this report
+
+AC16 is **not in LINCS**, so no AC16 labels can be computed and the symmetric design is impossible. Its value
+is the opposite: it is **membrane potential, the same phenotype as Attene-Ramos**, measured by a different
+group in a different cell type (cardiomyocytes, mitochondria-rich).
+
+That makes it a **falsification test of section 3**. If HepG2 MetChange labels predict *AC16* membrane
+potential about as well as they predict HepG2 membrane potential, then the signal travels with the compounds
+after all, the chemotype explanation revives, and the cell-specificity claim of this report is in serious
+trouble. Worth running **because it can only damage the current conclusion** - and note the asymmetry when
+reading the outcome: with 53 matched compounds (61 active / 123 inactive / 63 inconclusive before matching) a
+**positive result is informative and a null is not**.
+
+### 8.3 nyffeler - best design, not enough overlap
+
+The strongest experiment of the three and the weakest for us. It is **concentration-response**: a BMD per
+feature category, so potency rather than a hit call. And it has an internally controlled mitochondrial
+contrast - **mito-selectivity**, `min(Mito_* BMD) - min(other BMD)`, which asks whether the mitochondrial
+features respond at a *lower* concentration than everything else and therefore nets out general bioactivity,
+the confounder that has dominated reports 07-09.
+
+But: only **87 of 457** compounds with a mito-selectivity value match LINCS, and of those only **19 are
+mito-selective** against 68 not, so a binary design is dead. There is also effectively **no inactive group** -
+457 of 462 test chemicals have at least one responding `Mito_*` category, because this is a curated bioactive
+library. The usable form is a *continuous* rank correlation between mito-selectivity and a MetChange set score
+over those 87 drugs, which is worth an afternoon but will not settle anything on its own.
+
+### 8.4 The gating check, before any of this is worth doing
+
+`cellinfo_beta.txt` lists **every** cell line LINCS ever touched, including lines with a handful of
+signatures. It says nothing about depth, and we have no `siginfo` locally. **If SHSY5Y has only a few dozen
+compounds profiled, naia is dead regardless of its 683 structure matches**, and the same for U2OS and
+nyffeler. On the HPC, where the full LINCS data lives:
+
+```bash
+awk -F'\t' 'NR==1{for(i=1;i<=NF;i++)h[$i]=i; next}
+            $h["pert_type"]=="trt_cp" && ($h["cell_iname"]=="SHSY5Y" || $h["cell_iname"]=="U2OS") \
+            {n[$h["cell_iname"]]++; seen[$h["cell_iname"]" "$h["pert_id"]]=1}
+            END{for(c in n) print c, n[c] " signatures";
+                for(k in seen){split(k,a," "); d[a[1]]++} for(c in d) print c, d[c] " distinct pert_ids"}' \
+    /scratch/users/gsantamaria/test_large_files/metabognn_dev/data/LINCS/siginfo_beta.txt
+```
+
+The number that matters is **distinct `pert_id`s overlapping the validation set**, not total signatures. For
+naia that needs to be in the hundreds for the design in 8.1 to have the power described; for U2OS, 87 is
+already the ceiling.
+
+## 9. The falsification test, run: POSITIVE, but through a different pathway
+
+*Naia SH-SY5Y ATP phenotype scored against **HEPG2** MetChange labels, the converse design of section 8.1.
+Built with `scripts/mc_phenotype_assoc/build_naia_phenotype.py` (new), run with the unchanged
+`mc_phenotype_assoc.py`, controls with `scripts/mc_phenotype_assoc/covariate_matched_check.py` (new).
+Phenotype `results/mc_phenotype_assoc/phenotypes_ALL/naia_atp.tsv`, results
+`results/mc_phenotype_assoc/HEPG2/naia_atp/`.*
+
+Groups, from the ATP z-score with a symmetric dead band (case |z| >= 2, control |z| < 1), mapped to the HEPG2
+panel: **25 ATP_down, 27 ATP_up, 226 inactive** (340 of 1,199 naia compounds matched by InChIKey, 18 more by
+name, 90 excluded as intermediate).
+
+### 9.1 Result
+
+`ATP_down vs inactive`, statistic `z`, with the size-matched random-set control that reports 07-09 treat as the
+real test:
+
+| set | variant | AUROC | MW p | perm p | **random-set p** | BH q |
+|---|---|---|---|---|---|---|
+| **glycolysis** | cyto | **0.265** | 1.1e-04 | 2e-04 | **0.005** | **0.005** |
+| glycolysis_endpoints | all | 0.280 | 3.1e-04 | 6e-04 | 0.005 | 0.006 |
+| ppp | all | 0.303 | 0.0012 | 0.001 | 0.030 | 0.012 |
+| pyruvate | cyto | 0.306 | 0.0015 | 0.0014 | 0.025 | 0.012 |
+| tca | cyto | 0.337 | 0.0075 | 0.008 | **0.080** | 0.025 |
+| tca | mito_nohub | 0.352 | 0.015 | 0.014 | **0.194** | 0.032 |
+| oxphos | mito | 0.428 | 0.24 | 0.24 | 0.61 | 0.28 |
+| **energy_currency** | all | **0.482** | 0.77 | 0.77 | 0.89 | 0.81 |
+| redox_couples | all | **0.648** | 0.015 | 0.016 | 0.100 | 0.032 |
+
+**`ATP_up vs inactive` is null everywhere** - every BH q = 0.94, AUROC 0.44 to 0.56. So only ATP *loss* is
+predicted, not the enhancement the paper was looking for.
+
+Three features of that table matter more than the headline:
+
+1. **It is glycolysis and the cytosolic sets, not TCA or OXPHOS.** TCA is nominally significant by
+   Mann-Whitney but **fails the random-set control** (p = 0.08 to 0.19), which is the control that has
+   governed every claim in reports 07-09. `oxphos mito` is flatly null.
+2. **`energy_currency` is null (0.482, p = 0.77)** even though the phenotype *is* ATP and ATP is a member of
+   that set. Whatever is being detected, it is not a direct read-out of the ATP node.
+3. **`redox_couples` moves in the opposite direction** (0.648). A single "this compound is bioactive" factor
+   would push every set the same way; these do not move together.
+
+### 9.2 It is not cytotoxicity, and it is not a few compounds
+
+naia ships a measured per-compound cytotoxicity z-score, so viability can be controlled **directly** rather
+than through the `n_sig` proxy used in reports 07-09. The imbalance was severe - the ATP-down group averaged
++6.62 z-units more cytotoxic than the controls - and matching removes it:
+
+| `glycolysis cyto`, ATP_down | AUROC | p | n |
+|---|---|---|---|
+| pooled | 0.265 | 1.1e-04 | 25/226 |
+| **matched on measured cytotoxicity** | **0.173** | **0.0025** | 15 pairs |
+| matched on `n_sig` responsiveness | 0.296 | 0.014 | 25 pairs |
+| matched on both | 0.222 | 0.010 | 15 pairs |
+
+**The association gets stronger under cytotoxicity matching, not weaker**, so cell death was suppressing it
+rather than causing it. `energy_currency` stays null under every design (0.40 to 0.48). Robustness:
+leave-one-out never moves p above 3.1e-04; dropping the five most extreme cases still gives AUROC 0.321
+(p = 0.008, n = 20); and the MoA composition is heterogeneous - 9 of 25 unannotated, no class contributing
+more than 2.
+
+The case group is also chemically plausible in a way the full screen was not: it contains **hexachlorophene**
+and **triclosan** (both classical uncouplers), **proscillaridin, digoxin and digoxigenin** (cardiac
+glycosides, which raise ATP demand through Na+/K+-ATPase), **chloroxine** and **parthenolide**. The
+peptidoglycan-synthesis inhibitors that made the unmapped portion look noisy (8.1) are not in the mapped set.
+
+### 9.3 What this does to section 3
+
+**The strong reading of this report is refuted.** HepG2 labels are *not* specific to HepG2-measured
+phenotypes: they predict an ATP phenotype measured in a different cell line, at q = 0.005, surviving a direct
+viability control. And the asymmetry predicted in 8.1 is now observed - other lines' labels cannot predict
+HepG2 MMP (section 3), yet HepG2 labels do predict SH-SY5Y ATP.
+
+**But the two associations are not the same signal**, which is what stops this from collapsing into the
+chemotype explanation:
+
+| | section 3 (MMP, HepG2) | section 9 (ATP, SH-SY5Y) |
+|---|---|---|
+| strongest set | `tca mito_nohub` 0.350 | `glycolysis cyto` 0.265 |
+| TCA | **yes**, q = 4e-06 | **no** (random-set p = 0.08-0.19) |
+| glycolysis | not the hit | **yes**, q = 0.005 |
+| `energy_currency` | 0.525, null | 0.482, null |
+| compartment | mitochondrial | cytosolic |
+
+Different phenotype, different pathway, different compartment. A generic bioactivity or chemotype axis would
+have produced the *same* sets in both.
+
+**And the depth explanation - reading 2 of section 6 - is now dead.** `data/LINCS/lincs_unique_perts_*.tsv`:
+
+| cell | compounds profiled | section 3 result |
+|---|---|---|
+| **A375** | **13,314** | 0.510, p = 0.73 - the most null of all eight |
+| HEPG2 | 5,494 | 0.350, p = 3.3e-07 |
+| SHSY5Y | 224 | (too thin to test, 8.1) |
+
+A375 has **2.4x more profiled compounds than HepG2 and shows nothing**. HepG2 also had the *lowest* responsive
+share of the eight lines (28% of cases vs 7% of controls, section 3), so its labels are not "more
+significant" either. "MetChange works where the LINCS data is deepest" does not survive contact with those
+numbers.
+
+**Revised statement.** Section 3 establishes that among label cell lines, only HepG2's predict a
+HepG2-measured membrane-potential phenotype, and that this is not explained by chemistry, power, coverage,
+responsiveness or panel depth. It does **not** establish that HepG2 labels are inert elsewhere - section 9
+shows they are not. The coherent reading of both is that MetChange tracks compound-induced metabolic shifts
+with the *pathway matching the phenotype* - mitochondrial sets for membrane potential, glycolytic sets for
+ATP content - rather than that one cell line's labels are magic. **"The association is HepG2-specific" is no
+longer sayable without naming which association.**
+
+### 9.4 Caveats, including one against myself
+
+- **n = 25 cases and 15 matched pairs.** Small, and the matched estimate in particular rests on 15 pairs.
+- **The pathway assignment is post hoc.** 160 set x variant x statistic combinations were scored per contrast.
+  BH q is reported and glycolysis survives at q = 0.005, but *highlighting glycolysis* was data-driven; the
+  comparison table in 9.3 would be far stronger if the glycolysis prediction had been registered first.
+- **The glycolysis reading is biologically odd and unexplained.** Naia used *differentiated* SH-SY5Y, which
+  shifts toward oxidative metabolism, so mitochondrial sets were the a priori expectation for an ATP
+  phenotype. Getting glycolysis instead may mean the labels (HepG2, a glycolytic hepatoma line) are reporting
+  HepG2's own metabolic wiring rather than the phenotype cell's - which would be a label-side artefact that
+  happens to correlate with ATP loss. This is the most likely remaining confounder and it is not controlled.
+- **Single concentration**, so no potency axis and no dose-response confirmation.
+- The phenotype and label cell lines differ, so nothing here is a cell-matched test; section 8.1 established
+  that no cell-matched test is possible with these data.
+
+### 9.5 The two phenotypes are largely different compounds
+
+Worth recording, because it bears on whether sections 3 and 9 are one signal or two. The Attene-Ramos MMP
+table and the naia ATP table share **238 drugs**. Cross-tabulating their group calls:
+
+| naia \ Attene | MMP_down | MMP_up | cytotox | inactive | incon |
+|---|---|---|---|---|---|
+| **ATP_down** | 9 | 3 | 2 | 9 | 0 |
+| **ATP_up** | 7 | 0 | 0 | 14 | 2 |
+| **inactive** | 32 | 13 | 2 | 120 | 25 |
+
+The two readouts are **correlated but far from the same thing**: on the case/control cells alone,
+[[9, 9], [32, 120]], an ATP-down drug is **3.75x** more likely to be MMP-down than an inactive drug is
+(Fisher p = 0.016) - yet only 9 of the 23 ATP-down drugs with an MMP call are MMP-down, and 9 are
+MMP-*inactive*. Of the 48 shared MMP-down drugs only 9 are ATP-down.
+
+So section 3 and section 9 are not the same experiment re-run. They use different compound libraries
+(Tox21 vs Prestwick FDA-approved), different assays (ratiometric dye vs ATP luminescence), different cell
+lines for the phenotype, and substantially non-overlapping active sets. That they implicate different
+metabolite sets is therefore unsurprising - and it is the reason a single shared factor, chemical or
+stress-related, is a poor explanation for both at once.
+
+### 9.6 Head to head with the expression baseline: MetChange survives the viability control, expression does not
+
+*Run after 9.5, on the same phenotype table and the same 25/226 drugs.
+`results/mc_phenotype_assoc/HEPG2/naia_atp_expr/`, HEPG2 expression labels with the GPR gene sets.*
+
+**Expression also predicts SH-SY5Y ATP loss - and through a different pathway than MetChange.** Its best sets
+are mitochondrial: `oxphos gene` AUROC 0.314 to 0.348 depending on statistic (random-set p = 0.015 for
+`sign_mean`), then `ppp` 0.355, `tca` 0.347, while `glycolysis gene` is null (0.445). MetChange's ordering was
+the reverse: glycolysis first, `oxphos mito` null. So the two label types are **not** reading the same thing,
+and expression's ordering is the biologically expected one for uncoupler-driven ATP loss.
+
+Then the control that matters. Matching on naia's **measured per-compound cytotoxicity**, `ATP_down`:
+
+| labels | set | pooled | **cytotox-matched** | matched on both |
+|---|---|---|---|---|
+| **MetChange** | glycolysis cyto | 0.265 (p = 1.1e-04) | **0.173 (p = 0.0025)** | **0.222 (p = 0.010)** |
+| **MetChange** | ppp all | 0.303 (p = 0.0012) | **0.156 (p = 0.0014)** | **0.231 (p = 0.013)** |
+| **MetChange** | pyruvate cyto | 0.306 (p = 0.0015) | **0.187 (p = 0.0037)** | **0.240 (p = 0.016)** |
+| **MetChange** | tca cyto | 0.337 (p = 0.0075) | 0.280 (p = 0.042) | 0.311 (p = 0.082) |
+| MetChange | energy_currency all | 0.482 (p = 0.77) | 0.400 (p = 0.36) | 0.444 (p = 0.62) |
+| expression | **oxphos gene** | 0.348 (p = 0.013) | **0.329 (p = 0.115)** | 0.329 (p = 0.115) |
+| expression | ppp gene | 0.355 (p = 0.017) | 0.302 (p = 0.068) | 0.316 (p = 0.089) |
+| expression | tca gene | 0.397 (p = 0.091) | 0.311 (p = 0.082) | 0.378 (p = 0.26) |
+| expression | glycolysis gene | 0.445 (p = 0.37) | 0.422 (p = 0.48) | 0.409 (p = 0.41) |
+
+**Expression's association with ATP loss is viability-driven: it does not survive matching on measured
+cytotoxicity (oxphos p = 0.013 -> 0.115). MetChange's is not: it strengthens (p = 1.1e-04 -> 0.0025).**
+
+This is the **same pattern as section 4, independently replicated**, and the independence is the point:
+
+| | section 4 | section 9.6 |
+|---|---|---|
+| phenotype | membrane potential | **cellular ATP** |
+| phenotype cell line | HepG2 | **SH-SY5Y** |
+| compound library | Tox21 | **Prestwick FDA-approved** |
+| confounder control | `n_sig` responsiveness **proxy** | **measured cytotoxicity** |
+| MetChange, matched | 0.365 (p = 3.4e-04) | 0.173 (p = 0.0025) |
+| expression, matched | **0.500 (p = 0.99)** | **0.329 (p = 0.115)** |
+
+Four things differ between the two rows - phenotype, phenotype cell line, compound library, and the nature of
+the confounder control - and the same asymmetry appears in both. That is a much better basis for the claim
+that **the stoichiometric layer carries metabolic information the transcriptome does not** than report 08
+section 13, which compared unmatched magnitudes in a single cell line and concluded there was no advantage.
+
+**What it does not license.** The effect sizes are small (|AUROC - 0.5| = 0.15 to 0.33), the matched estimates
+rest on **15 pairs**, and the pathway was chosen post hoc in both arms. And two failures remain unexplained
+and must not be dropped from the account: the Schuhknecht per-drug metabolite-level correlation was null
+(report 05, 8.2, rho = -0.013) and the Hallinger OCR association was null (report 07). A claim that MetChange
+tracks real metabolism has to accommodate those, not just the positives - the most likely reconciliation
+being that set-level group contrasts are a far weaker demand than per-drug profile agreement (section 8.1's
+reasoning about why Schuhknecht could not substitute), but that is an argument, not a result.
+
+### 9.7 How to run section 9
+
+One command from the repository root reproduces every number in 9.1 to 9.6:
+
+```bash
+bash scripts/mc_phenotype_assoc/run_naia_assoc.sh          # default label cell line HEPG2
+bash scripts/mc_phenotype_assoc/run_naia_assoc.sh A375     # or any cell with labels + a panel file
+```
+
+It chains five steps, each runnable on its own:
+
+| step | script | what it produces |
+|---|---|---|
+| 1 | `build_naia_phenotype.py` | `phenotypes_ALL/naia_atp.tsv` - groups from the ATP z-score, drugs mapped to that cell's LINCS panel |
+| 2 | `compare_phenotype_tables.py` (new) | the 9.5 cross-tab and its Fisher test |
+| 3 | `mc_phenotype_assoc.py` | 9.1, MetChange labels with the metabolite sets |
+| 4 | `mc_phenotype_assoc.py` | 9.6, expression labels with the GPR gene sets |
+| 5 | `covariate_matched_check.py` (new) | the matched controls of 9.2 and 9.6; `--robustness` adds the leave-one-out, drop-5, MoA composition and case listing |
+
+`covariate_matched_check.py` generalises `matched_check.py` to any numeric phenotype column, which is what
+allows matching on naia's **measured** cytotoxicity rather than the `n_sig` responsiveness proxy - the
+difference that makes 9.6 a stronger test than report 08 section 13.
+
+**Note on provenance.** The first write-up of 9.2 and 9.5 was produced by inline one-off commands rather than
+scripts, repeating the mistake recorded in section 7. `--robustness` and `compare_phenotype_tables.py` exist
+so that nothing in section 9 depends on a command that is not in the repository; the numbers above were
+re-derived from these scripts, and the Fisher p-value in 9.5 is new because the one-off had only estimated the
+ratio.
