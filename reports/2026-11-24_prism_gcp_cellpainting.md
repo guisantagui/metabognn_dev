@@ -449,3 +449,35 @@ that survived differencing rather than of metabolic specificity.
 spread > 0.1. The groups in the table are a cell-independent median split on mean AUC and exist **only** to
 satisfy `mc_phenotype_assoc.py`'s case/control interface - they are not a hypothesis, and keeping them
 cell-independent is what guarantees every drug is scored in every cell line, which the differential requires.
+
+### 7.6 The chain is validated, and a bug the validation caught
+
+The per-cell launcher was run end to end on A549 with the local corrected labels
+(`results/labels/A549/metchange/rank`, mtime 2026-11-12): 683 of the 821 PRISM drugs have A549 labels,
+`per_drug_scores.tsv` is **2.1 MB**, confirming that bringing results home is cheap.
+
+`prism_differential.py` was then exercised on two pseudo-cells in a throwaway directory, so nothing fabricated
+was written into `results/`:
+
+- **A null case** - A549's real scores against the same scores with Gaussian jitter added, which gives a
+  non-degenerate difference vector carrying no information about the real AUC differences. The script returned
+  what it should: **0 of 40 combinations at BH q < 0.05**, all q = 0.924, and **55% carrying the predicted sign
+  against the 50% that means no signal**.
+- **A degenerate case** - identical scores in both pseudo-cells, so the difference vector is exactly zero.
+
+**The degenerate case exposed a real bug.** With `dS` constant, the correlation is `nan`, and
+`|null| >= |r|` is then False for every permutation, so the permutation p-value came out as
+`1/(1 + n_perm) = 0.0196` - **a spuriously significant value for an input containing no information at all.**
+This is not hypothetical: a set whose members are all absent from both label matrices produces exactly that
+vector, and `mc_phenotype_assoc.py` already reports that 23 of 41 sets have members missing from the A549
+matrix.
+
+Fixed: combinations whose difference vector is constant or all-missing are now **skipped and listed by name**,
+non-finite permutation values are dropped before the p-value is formed, and if nothing is scorable the script
+exits with an explanation rather than a table. Re-tested: the degenerate case now skips all 40 combinations
+and says why, and the null case is unchanged.
+
+Worth recording as a near-miss of the same family as the others in these reports - the HEPG2-labels-for-A549
+fallback, the whole-LINCS-versus-panel overlap, the stale label matrix. **Each would have produced a
+confident number rather than an error**, and each was caught by testing a case whose answer was known in
+advance rather than by reading the code.

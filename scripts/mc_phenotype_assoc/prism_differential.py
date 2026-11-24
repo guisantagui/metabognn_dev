@@ -160,7 +160,7 @@ def main():
     corr = sps.spearmanr if args.method == 'spearman' else sps.pearsonr
     rng = np.random.default_rng(args.seed)
 
-    rows = []
+    rows, degenerate = [], []
     for X, Y in pairs:
         for key in keys:
             sx, sy = scores[X][key], scores[Y][key]
@@ -171,12 +171,26 @@ def main():
                 continue
             dP = np.array([pheno[d][X] - pheno[d][Y] for d in drugs])
             dS = np.array([sx[d] - sy[d] for d in drugs])
+            # A set whose members are all absent from both label matrices gives a
+            # constant (or all-nan) difference vector. Guard it: with a non-finite r,
+            # `|null| >= |r|` is False for every permutation, so the permutation p-value
+            # would come out as 1/(1+n_perm) - a spuriously SIGNIFICANT value for an
+            # input that carries no information at all. Caught by the dS == 0 smoke test.
+            if (np.nanstd(dS) == 0 or np.nanstd(dP) == 0
+                    or not np.isfinite(dS).any() or not np.isfinite(dP).any()):
+                degenerate.append((X, Y, key))
+                continue
             r, p = corr(dS, dP)
+            if not np.isfinite(r):
+                degenerate.append((X, Y, key))
+                continue
             # permutation null: break the drug correspondence, keep both margins
             null = np.array([corr(rng.permutation(dS), dP)[0] for _ in range(args.n_perm)])
-            perm_p = (1 + np.sum(np.abs(null) >= abs(r))) / (1 + args.n_perm)
+            null = null[np.isfinite(null)]
+            perm_p = ((1 + np.sum(np.abs(null) >= abs(r))) / (1 + len(null))
+                      if len(null) else np.nan)
             sel = np.abs(dP) > args.selective_cut
-            if sel.sum() >= args.min_drugs:
+            if sel.sum() >= args.min_drugs and np.nanstd(dS[sel]) > 0:
                 r_sel, p_sel = corr(dS[sel], dP[sel])
             else:
                 r_sel, p_sel = np.nan, np.nan
@@ -187,8 +201,17 @@ def main():
                          'statistic': key[2], 'n_drugs': len(drugs), 'r_diff': r, 'p_diff': p,
                          'perm_p': perm_p, 'n_selective': int(sel.sum()),
                          'r_selective': r_sel, 'p_selective': p_sel, 'naive_r_in_x': naive})
+    if degenerate:
+        print('\nSKIPPED %d combination(s) with a constant or all-missing difference vector '
+              '(no information; reporting them would invent a p-value):' % len(degenerate))
+        for X, Y, key in degenerate[:8]:
+            print('   %s/%s  %s %s %s' % (X, Y, key[0], key[1], key[2]))
+        if len(degenerate) > 8:
+            print('   ... and %d more' % (len(degenerate) - 8))
     if not rows:
-        raise SystemExit('no cell pair had >= %d shared drugs' % args.min_drugs)
+        raise SystemExit('\nnothing scorable: every combination was degenerate or had < %d shared drugs. '
+                         'Check that the two cells\' label matrices actually contain the set members.'
+                         % args.min_drugs)
     q = bh([r['p_diff'] for r in rows])
     for r, qq in zip(rows, q):
         r['bh_q'] = qq
@@ -216,8 +239,8 @@ def main():
     print('%d pass BH q < 0.05, of which %d have the predicted positive sign'
           % (len(sig), sum(1 for r in sig if r['r_diff'] > 0)))
     print('median |naive_r| %.3f vs median |r_diff| %.3f - the naive value is the confounded one'
-          % (np.median([abs(r['naive_r_in_x']) for r in rows]),
-             np.median([abs(r['r_diff']) for r in rows])))
+          % (np.nanmedian([abs(r['naive_r_in_x']) for r in rows]),
+             np.nanmedian([abs(r['r_diff']) for r in rows])))
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)) or '.', exist_ok=True)
         with open(args.out, 'w', newline='') as fh:

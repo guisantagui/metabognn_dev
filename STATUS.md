@@ -856,7 +856,20 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > over every set incl. negative controls = a confounder that survived differencing.
 > Controls in `prism_differential.py`: `perm_p` (drug identity of the predictor differences permuted),
 > `bh_q` over the whole family, `r_selective` (the **355** drugs with between-cell AUC spread > 0.1,
-> pre-specified), and `naive_r_in_x` (the undifferenced, confounded value, printed as a foil only). **821 drugs with an AUC in all 5 cores and in LINCS;
+> pre-specified), and `naive_r_in_x` (the undifferenced, confounded value, printed as a foil only).
+> **CHAIN VALIDATED (report 10, 7.6).** A549 scored end to end on the local corrected labels: 683 of 821 PRISM
+> drugs have A549 labels, `per_drug_scores.tsv` = **2.1 MB**. Differential exercised on pseudo-cells in a
+> throwaway dir (nothing fake written to `results/`): jittered-null case gave 0 of 40 at BH q<0.05 and 55%
+> predicted sign (50% = no signal), as it should.
+> **BUG THE VALIDATION CAUGHT AND FIXED: a constant difference vector gave `r_diff = nan` but
+> `perm_p = 1/(1+n_perm) = 0.0196` — a spuriously SIGNIFICANT p-value for an input with no information**,
+> because `|null| >= |r|` is False for every permutation when r is nan. NOT hypothetical: a set whose members
+> are all absent from both matrices gives exactly that, and 23 of 41 sets have members missing from the A549
+> matrix. Now such combinations are SKIPPED and listed by name, non-finite permutation values are dropped
+> before the p-value, and an all-degenerate run exits with an explanation instead of a table.
+> Same family as the HEPG2-labels-for-A549 fallback, the whole-LINCS-vs-panel overlap and the stale matrix:
+> **each would have produced a confident number rather than an error, and each was caught by testing a case
+> whose answer was known in advance.** **821 drugs with an AUC in all 5 cores and in LINCS;
 > 361 of them cell-selective (between-cell AUC SD > 0.1) — the informative subset.** Needs MetChange labels
 > for >=2 PRISM-covered cores; locally only A549 has `metchange/rank/log2FC.csv`, the HPC has all 8.
 > **PRE-REGISTER the direction** (lower predicted nucleotide/amino-acid capacity in X vs Y -> lower AUC in X vs
