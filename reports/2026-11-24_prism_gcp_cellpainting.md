@@ -492,12 +492,32 @@ nothing showed up in local testing.
 Fixed in one place rather than per launcher. `scripts/mc_phenotype_assoc/python_env.sh` (new) resolves an
 interpreter and is sourced by `mc_phenotype_assoc_common.sh`, `submit_assoc.sh` and `run_naia_assoc.sh` -
 the three places that each had their own `python3` default, which is how this could bite only one of them.
-Resolution order, first that works winning: an exported `$py`; the current `python3`; the micromamba
-environment (its interpreter located by asking `micromamba run`, so no layout is guessed, with the shell hook
-as a fallback when the environment needs its own `LD_LIBRARY_PATH`); then `$mamba_env_prefix/bin/python3` or
-the usual micromamba roots. `project_paths.conf` gained an optional `mamba_env_prefix` for the case where
-micromamba is not on `PATH` inside batch jobs. `provenance` now prints the interpreter and how it was found,
-so a log says which Python produced the numbers.
+
+**The root prefix is the part that matters.** The environment lives under a shared project directory, not the
+default `~/micromamba`, so the working procedure here is
+
+```bash
+export MAMBA_ROOT_PREFIX=/work/projects/car_t_methylome/software/micromamba
+eval "$(micromamba shell hook --shell bash)"
+micromamba activate metabolic_drug_repurposing
+```
+
+and without that export micromamba looks in the wrong place and reports no such environment. The resolver now
+reproduces exactly that, with the root recorded once as `mamba_root_prefix` in `project_paths.conf`
+(repeatable, and only directories that exist are tried, so a path for another machine is harmless - the same
+convention `scratch_proj_dir` already uses).
+
+Resolution order, first that works winning: an exported `$py`; the current `python3`; **micromamba asked about
+itself** (`micromamba run -n`, then `info --base` to supply a candidate root); then each candidate root with
+`MAMBA_ROOT_PREFIX` exported first, trying hook-then-activate before falling back to
+`<root>/envs/<env>/bin/python3` called directly, which needs neither the hook nor micromamba on `PATH`;
+finally an explicit `mamba_env_prefix`. `provenance` now prints the interpreter and how it was found, so a log
+says which Python produced the numbers.
+
+Asking micromamba about itself was added after the first version **failed its own test**: with micromamba on
+`PATH` and configured but its root absent from the candidate list, nothing was tried at all. Verified against
+a stub micromamba in three configurations - on `PATH` with an unlisted root, `MAMBA_ROOT_PREFIX` exported with
+no micromamba on `PATH`, and neither available - which resolve, resolve, and refuse respectively.
 
 `require_python` is the loud check, and the launchers call it **before** doing work: it prints what it tried
 and the three ways to fix it, then refuses. Nothing is attempted that is going to fail partway through.

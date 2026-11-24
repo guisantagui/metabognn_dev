@@ -832,10 +832,20 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > laptop's system python3 has numpy/scipy.
 > **Fixed in ONE place: `scripts/mc_phenotype_assoc/python_env.sh` (new)**, sourced by
 > `mc_phenotype_assoc_common.sh`, `submit_assoc.sh` and `run_naia_assoc.sh` — the three that each had their own
-> `python3` default, which is why it bit only some. Order: exported `$py` -> current `python3` -> micromamba env
-> (interpreter located via `micromamba run`, so no layout guessing; shell hook as fallback) ->
-> `$mamba_env_prefix/bin/python3` or the usual roots. `project_paths.conf` gained optional `mamba_env_prefix`
-> for when micromamba is not on PATH in batch jobs. **`provenance` now prints the interpreter and how it was
+> `python3` default, which is why it bit only some.
+> **THE ROOT PREFIX IS THE CRUX: the env is under a SHARED PROJECT DIR, not `~/micromamba`, so the working
+> procedure is `export MAMBA_ROOT_PREFIX=/work/projects/car_t_methylome/software/micromamba` then
+> `eval "$(micromamba shell hook --shell bash)"` then `micromamba activate`.** Without that export micromamba
+> looks in the wrong place and says no such env. The resolver reproduces it, with the root recorded ONCE as
+> `mamba_root_prefix` in `project_paths.conf` (repeatable; only existing dirs tried, same convention as
+> `scratch_proj_dir`). Order: exported `$py` -> current `python3` -> **micromamba asked about itself**
+> (`run -n`, then `info --base` for a candidate root) -> each candidate root with MAMBA_ROOT_PREFIX exported,
+> hook-then-activate first, else `<root>/envs/<env>/bin/python3` directly (needs neither hook nor micromamba on
+> PATH) -> explicit `mamba_env_prefix`.
+> **The self-query step was added because the FIRST version FAILED ITS OWN TEST** — micromamba on PATH and
+> configured but its root not in the candidate list meant nothing was tried. Verified against a stub micromamba
+> in 3 configurations (on PATH w/ unlisted root; MAMBA_ROOT_PREFIX exported w/o micromamba on PATH; neither):
+> resolve, resolve, refuse. **`provenance` now prints the interpreter and how it was
 > found**, so logs record which Python produced the numbers. `require_python` refuses BEFORE doing work and
 > prints the three ways to fix it.
 > **THE FIX EXPOSED A WORSE BUG: with no usable interpreter `launch_assoc_slurm_generic.sh` EXITED 0** — a
