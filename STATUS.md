@@ -830,6 +830,51 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > negatives that prompted it (HCC515 -0.371, A375 -0.154) rest on 45-61 responsive drugs. Directional only.
 > Not addressed: only HEPG2-vs-X pairs, responsive n 31-68, and `z` is already within-perturbation standardised.
 
+> **2026-11-24 — THE BIGGEST GAP: BOTH "MetChange BEATS EXPRESSION" INSTANCES USE **HEPG2 LABELS**, and the
+> PRISM runs have NO EXPRESSION ARM (report 10, 10.5 / report 09, 9.6 note).**
+> **There are NO SHSY5Y labels and none are possible** (224 LINCS perturbations in SHSY5Y, only 10 naia
+> compounds among them); `results/labels/` has no SHSY5Y dir. Both `naia_atp` and `naia_atp_expr` have
+> `labels = results/labels/HEPG2/{metchange/rank,expr}` — **SH-SY5Y is the cell the PHENOTYPE was measured in,
+> nothing more.** Report 09, 9.6's column header "(ATP, SH-SY5Y)" invited the opposite reading.
+> So the two instances (report 09 section 4 MMP: MetChange 0.365 vs expression 0.500; 9.6 ATP: 0.173 vs 0.329)
+> vary phenotype, phenotype cell line, compound library and confounder control — **but NOT the label cell line.
+> Anything peculiar to HEPG2's label generation (reference level, limma fit, its LOWEST responsive share of the
+> eight lines) is common to both.** Calling them simply "independent" overstated it.
+> **FIX, and it is the cheapest test of the project's central thesis: add an expression arm to
+> `launch_prism_cell.sh`** (follows the `launch_assoc_expr.sh` pattern; `gene_sets.tsv` already has the
+> nucleotide/amino-acid GENE sets from the 9.5 rebuild). Every Attene/Hallinger run has an `_expr` counterpart;
+> `prism_viability` has none. **It would be the FIRST MetChange-vs-expression comparison on NON-HEPG2 labels —
+> five cell lines at once (A375, A549, HT29, MCF7, PC3).**
+> **THE INCREMENT QUESTION HAS NEVER BEEN ASKED IN THIS PROJECT (report 10, 10.6 note).** Every result so far
+> uses an UNCONDITIONAL statistic: sections 8/9/10 are plain Spearman of the differences, and the two existing
+> MetChange-vs-expression comparisons (report 09 sections 4 and 9.6) are **SIDE-BY-SIDE** — greedy covariate
+> matching then Mann-Whitney, run separately on each label type. **Partial Spearman has NEVER been run on real
+> data** (added 2026-11-24, tested only on a synthetic arm). MetChange surviving a control that expression fails
+> is suggestive of increment but does NOT measure it — two statistics can both be non-null while sharing all
+> their information. **So the present evidence for the central thesis is weaker IN KIND, not just in quantity,
+> than "MetChange 0.365 vs expression 0.500" suggests.**
+> **IMPLEMENTED 2026-11-24 (report 10, 10.6-10.7), with the statistic REFRAMED.** The claim is NOT that
+> MetChange beats expression in a horse race — expression being informative too is expected, since MetChange is
+> computed FROM expression. The claim is that **integrating stoichiometry and the network adds information
+> expression alone lacks**, which is a question about INCREMENT, so the statistic must be CONDITIONAL.
+> `launch_prism_cell.sh` now runs **two arms** (metchange + expr with the GPR gene sets, same drugs/pairs);
+> `arm=metchange|expr|both`, default both, passed through by `launch_prism_slurm.sh`; the expr arm self-skips
+> with a message if the cell has no `expr` dir or gene sets are missing.
+> `prism_differential.py --expr-run prism_viability_expr` adds per row: `r_expr` (same differential on the
+> matching GENE set) and **`r_partial_mc_given_expr`** (MetChange differential with the gene set PARTIALLED
+> OUT — the statistic that matters) plus `p_partial`. Only the 10 subsystem sets have same-named gene
+> counterparts, so `--expr-set-map` pairs the endpoint sets to their parent subsystem (dntp/ntp/nmp ->
+> nucleotide, amino_acid_endpoints -> amino_acid, tca_endpoints -> tca, etc.). A summary line reports what % of
+> the MetChange magnitude survives conditioning. Verified on a SYNTHETIC expr arm (plumbing only, not a result).
+> **PRE-REGISTERED BEFORE RUNNING (report 10, 10.7): primary = `r_partial_mc_given_expr` on `dntp_endpoints`,
+> nucleotide-targeting drugs, paired Wilcoxon vs complement over the 10 cell pairs. PREDICTION: retention stays
+> well above 50% and the paired test stays positive. REFUTED BY: retention near/below 50%, or the partial
+> losing significance while the raw keeps it — either means the association is transcriptional information
+> wearing a metabolic label and section 10 stops supporting the thesis WHATEVER its own p-value. NOT claimed
+> either way: `r_expr` being large (expression sharing the signal is fine; expression explaining ALL of it is
+> not). Secondary: the same columns for `nucleotide`/`purine`/`pyrimidine`/`folate`, whose gene counterparts are
+> EXACT rather than mapped — the cleanest like-for-like increment test.**
+
 > **2026-11-24 — FIRST POSITIVE PRISM RESULT: the NUCLEOTIDE arm behaves as predicted once drugs are
 > MECHANISM-MATCHED; the AMINO-ACID arm contradicts (report 10, 10).** Rescore with the 9 new sets landed same
 > day (82 sets/cell). Drug selection by ANNOTATED TARGET (user's suggestion, made before any of these results).

@@ -585,6 +585,22 @@ the confounder control - and the same asymmetry appears in both. That is a much 
 that **the stoichiometric layer carries metabolic information the transcriptome does not** than report 08
 section 13, which compared unmatched magnitudes in a single cell line and concluded there was no advantage.
 
+> **ADDED 2026-11-24, and it qualifies the above. BOTH ROWS USE HEPG2 LABELS.** There are no SH-SY5Y labels and
+> none are possible: LINCS has 224 perturbations in SHSY5Y and only 10 Naia compounds are among them (8.1).
+> `results/labels/` contains no SHSY5Y directory. Both `naia_atp` and `naia_atp_expr` have
+> `labels = results/labels/HEPG2/{metchange/rank,expr}`; SH-SY5Y is the cell the **phenotype** was measured in,
+> nothing more.
+>
+> So the two instances are independent in four respects and **dependent in the one that may matter most**. If
+> anything about HepG2's label generation systematically favours MetChange over expression - its reference
+> level, its limma fit, or the fact that it has the lowest responsive share of the eight cell lines (section 3)
+> - both instances inherit it. Describing them as simply "independent" overstated the case.
+>
+> The missing axis is a MetChange-versus-expression comparison on **non-HepG2 labels**. The PRISM runs cover
+> five such cell lines (A375, A549, HT29, MCF7, PC3) but were executed with the MetChange arm only - there is
+> no `prism_viability_expr` - so they do not yet speak to this claim at all. Adding that arm is the cheapest
+> available test of the project's central thesis (report 10, 10.5).
+
 **What it does not license.** The effect sizes are small (|AUROC - 0.5| = 0.15 to 0.33), the matched estimates
 rest on **15 pairs**, and the pathway was chosen post hoc in both arms. And two failures remain unexplained
 and must not be dropped from the account: the Schuhknecht per-drug metabolite-level correlation was null

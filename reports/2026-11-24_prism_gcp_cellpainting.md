@@ -993,3 +993,92 @@ acids) is also negative, which argues against the second explanation.
 4. **A375.** Its pairs are the two that go negative for `dntp_endpoints`, consistent with the cell-level
    coupling anomaly of 8.3. Worth checking whether excluding A375 strengthens the result - and worth being
    suspicious of a result that improves by dropping a cell line.
+
+## 10.5 The PRISM runs have no expression arm, which is the gap that matters most
+
+The project's thesis is not that MetChange labels associate with metabolic phenotypes - it is that they do so
+**in a way the transcriptome does not**, which is what justifies the stoichiometric layer before any
+investment in multi-cell-line FNN training. Two instances support that: report 09, section 4 (membrane
+potential: MetChange 0.365 matched, expression 0.500) and report 09, 9.6 (ATP: MetChange 0.173 matched,
+expression 0.329, not significant).
+
+**Both of those use HEPG2 labels.** There are no SH-SY5Y labels and none are possible (report 09, 8.1), so
+9.6's SH-SY5Y is the phenotype's cell line only. The two instances therefore vary phenotype, phenotype cell
+line, compound library and the nature of the confounder control - but **not the label cell line**. Anything
+peculiar to HepG2's label generation is common to both.
+
+**The PRISM arm could close that gap and currently does not.** `results/mc_phenotype_assoc/<cell>/` shows an
+`_expr` counterpart for every Attene and Hallinger run; `prism_viability` has none. So section 10's nucleotide
+result, whatever its eventual strength, says nothing about whether expression would track the same thing
+equally well - and it is the one analysis in the project that would test the thesis on **five non-HepG2 cell
+lines at once**.
+
+The work needed is small: `launch_prism_cell.sh` runs only the MetChange arm, and an expression arm follows
+the existing `launch_assoc_expr.sh` pattern. `gene_sets.tsv` already carries the nucleotide and amino-acid
+**gene** sets from the 9.5 rebuild (`--emit genes`), so nothing else is missing. The prediction to fix in
+advance, before running it: **if the nucleotide association is metabolic rather than transcriptional, the
+expression arm should be weaker than the MetChange arm on the same drugs, sets and cell pairs** - and if it is
+equally strong, the nucleotide result ceases to support the thesis regardless of its own p-value.
+
+### 10.6 Implemented: the expression arm, and the conditional statistic it enables
+
+**Framing first, because it changes the statistic.** The claim is not that MetChange beats the transcriptome
+in a horse race - expression being informative too is expected and unremarkable, since MetChange is computed
+*from* expression. The claim is that **integrating stoichiometry and the metabolic network yields information
+expression alone does not**. That is a question about *increment*, and the right statistic is conditional, not
+comparative.
+
+> **Which means the increment question has not yet been asked anywhere in this project.** Every result so far
+> used an unconditional statistic: sections 8, 9 and 10 are plain Spearman of the differences, and the two
+> existing MetChange-versus-expression comparisons (report 09 sections 4 and 9.6) are **side-by-side** - greedy
+> covariate matching followed by Mann-Whitney, run separately on each label type. MetChange surviving a
+> matching control that expression fails is suggestive of increment but does not measure it: two statistics can
+> both be non-null while sharing all of their information, and one can fail a control for reasons unrelated to
+> the other. `r_partial_mc_given_expr` would be the first direct measurement. That makes it more valuable than
+> a confirmation of existing results - and it means the present evidence for the central thesis is weaker *in
+> kind*, not merely in quantity, than "MetChange 0.365 against expression 0.500" suggests.
+
+`launch_prism_cell.sh` now runs **two arms**: MetChange labels with the metabolite sets, and the expression
+labels with the GPR gene sets, on the same drugs and cell pairs. `arm=metchange` or `arm=expr` runs one alone;
+the default is both. `launch_prism_slurm.sh` passes it through. The expression arm skips itself with a message
+if the cell has no `expr` label directory or if `gene_sets.tsv` is missing, rather than failing the task.
+
+`prism_differential.py --expr-run prism_viability_expr` then reports, per cell pair and set:
+
+| column | meaning |
+|---|---|
+| `r_diff` | the MetChange differential, as before |
+| `r_expr` | the same differential computed on the matching **gene** set |
+| **`r_partial_mc_given_expr`** | **MetChange differential with the gene set partialled out** - the statistic that matters |
+| `p_partial` | its p-value, partial Spearman on ranks, df = n-3 |
+
+Only the 10 subsystem sets have same-named gene counterparts; the 10 curated endpoint sets do not, so
+`--expr-set-map` pairs each to its parent subsystem. The defaults are `dntp_endpoints`, `ntp_endpoints` and
+`nmp_endpoints` -> `nucleotide`; `amino_acid_endpoints` -> `amino_acid`; `tca_endpoints` -> `tca`;
+`glycolysis_endpoints` -> `glycolysis`; `etc_endpoints`, `energy_currency`, `adenylates`, `redox_couples` ->
+`oxphos`. The summary line reports what fraction of the MetChange magnitude survives conditioning, where 100%
+means expression explains none of it and 0% means all of it.
+
+Verified on a synthetic expression arm in a throwaway directory - the mechanics run, the set pairing resolves
+and the summary computes. **That was a plumbing test on fabricated data and is not a result.** With no
+expression arm present the script says so and continues with the unconditional analysis.
+
+### 10.7 Pre-registered prediction for the expression arm, fixed before it is run
+
+Written here before the arm exists, so that §10.3's complaint about a post-hoc statistic does not recur:
+
+1. **Primary statistic:** `r_partial_mc_given_expr` on `dntp_endpoints`, nucleotide-pathway-targeting drugs,
+   aggregated across the 10 cell pairs by paired Wilcoxon against the complement - the same specification as
+   10.2, with the partial correlation substituted for the raw one.
+2. **Prediction:** the MetChange differential **retains most of its magnitude** once the matching gene set is
+   partialled out, i.e. the retention fraction stays well above 50% and the paired test remains in the
+   predicted positive direction.
+3. **What refutes it:** retention near or below 50%, or a partial correlation that loses significance while
+   the raw one keeps it. Either would mean the nucleotide association is transcriptional information wearing a
+   metabolic label, and §10 would stop supporting the thesis **whatever its own p-value**.
+4. **What is NOT claimed either way:** `r_expr` being large. Expression carrying the same signal is
+   compatible with the thesis; expression carrying *all* of it is not.
+5. **Secondary, reported but not primary:** the same three columns for the subsystem sets `nucleotide`,
+   `purine`, `pyrimidine`, `folate`, whose gene counterparts are exact rather than mapped. These are the
+   like-for-like comparisons (same subsystem, metabolites against its own GPR genes) and are the cleanest
+   test of increment, though they lack `dntp_endpoints`' mechanistic sharpness.

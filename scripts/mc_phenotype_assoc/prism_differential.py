@@ -209,6 +209,26 @@ def main():
                          'the time, so the pooled test cannot distinguish a strong mechanism-specific effect '
                          'from none at all. The complement is the built-in control: the hypothesis predicts '
                          'an effect in the matching group and NOT in the complement.')
+    ap.add_argument('--expr-run', default='',
+                    help='name of the EXPRESSION run directory under --scores-root (normally '
+                         '"prism_viability_expr"). When given, each row additionally reports the expression '
+                         'differential and, more importantly, the PARTIAL correlation of the MetChange '
+                         'differential with the phenotype CONTROLLING FOR the matching gene set. That is the '
+                         'statistic the project turns on: the claim is not that MetChange beats the '
+                         'transcriptome in a horse race - expression being informative too is expected - but '
+                         'that integrating stoichiometry and the network carries information expression '
+                         'alone does not. A MetChange association that vanishes once the gene set is '
+                         'controlled for is a transcriptional association wearing a metabolic label.')
+    ap.add_argument('--expr-set-map',
+                    default='dntp_endpoints=nucleotide,ntp_endpoints=nucleotide,nmp_endpoints=nucleotide,'
+                            'amino_acid_endpoints=amino_acid,tca_endpoints=tca,'
+                            'glycolysis_endpoints=glycolysis,etc_endpoints=oxphos,'
+                            'energy_currency=oxphos,adenylates=oxphos,redox_couples=oxphos',
+                    help='which GENE set conditions which metabolite set, for the curated endpoint sets that '
+                         'have no same-named gene counterpart (only the 10 subsystem sets do). Comma-separated '
+                         'metabolite_set=gene_set pairs; anything not listed is conditioned on its own name.')
+    ap.add_argument('--expr-variant', default='gene',
+                    help="variant of the gene sets to condition on (default 'gene')")
     ap.add_argument('--targets', default='',
                     help='data/drug_targets/combined/drug_targets.tsv. Selects drugs by ANNOTATED TARGET '
                          'rather than by MoA free text, which is both principled and tells you which '
@@ -318,6 +338,46 @@ def main():
         raise SystemExit('\nthe differential needs at least TWO cell lines; '
                          'score another with: cell=<CELL> bash scripts/mc_phenotype_assoc/launch_prism_cell.sh')
 
+    expr_scores, expr_map = {}, {}
+    if args.expr_run:
+        for kv in args.expr_set_map.split(','):
+            if '=' in kv:
+                a, b = kv.split('=', 1)
+                expr_map[a.strip()] = b.strip()
+        for c in list(scores):
+            q = os.path.join(args.scores_root, c, args.expr_run, 'per_drug_scores.tsv')
+            if os.path.isfile(q):
+                expr_scores[c] = read_scores(q)
+        if len(expr_scores) < 2:
+            print('expression run %r found for %d cell line(s) - the conditional test needs at least 2, '
+                  'so it is skipped. Run the expr arm: arm=expr bash scripts/mc_phenotype_assoc/'
+                  'launch_prism_cell.sh' % (args.expr_run, len(expr_scores)))
+            expr_scores = {}
+        else:
+            print('expression scores found for: %s  -> conditional test enabled'
+                  % ', '.join(sorted(expr_scores)))
+
+    def _expr_key(set_name, statistic):
+        return (expr_map.get(set_name, set_name), args.expr_variant, statistic)
+
+    def _partial(a, b, c):
+        """Partial Spearman of a vs b controlling for c, on ranks; returns (r, p)."""
+        ra, rb, rc = (sps.rankdata(x) for x in (a, b, c))
+        def pear(x, y):
+            x = x - x.mean(); y = y - y.mean()
+            d = np.sqrt((x * x).sum() * (y * y).sum())
+            return float((x * y).sum() / d) if d > 0 else np.nan
+        rab, rac, rbc = pear(ra, rb), pear(ra, rc), pear(rb, rc)
+        den = np.sqrt((1 - rac ** 2) * (1 - rbc ** 2))
+        if not np.isfinite(den) or den <= 0:
+            return np.nan, np.nan
+        r = (rab - rac * rbc) / den
+        n = len(a)
+        if n <= 4 or not np.isfinite(r) or abs(r) >= 1:
+            return r, np.nan
+        t = r * np.sqrt((n - 3) / max(1e-12, 1 - r ** 2))
+        return r, float(2 * sps.t.sf(abs(t), n - 3))
+
     def _is_match(d):
         if sel_drugs is not None:
             return d in sel_drugs
@@ -401,6 +461,26 @@ def main():
                              np.array([pheno[d][X] for d in drugs]))[0]
             else:
                 naive = np.nan   # undefined once drugs are collapsed into groups
+
+            # Conditional on expression: the differential of the matching GENE set, and
+            # the MetChange differential with that gene set partialled out.
+            r_expr = p_expr = r_part = p_part = np.nan
+            n_cond = 0
+            if expr_scores and group_match is None and X in expr_scores and Y in expr_scores:
+                ek = _expr_key(key[0], key[2])
+                ex, ey = expr_scores[X].get(ek), expr_scores[Y].get(ek)
+                if ex and ey:
+                    cd = [d for d in drugs if d in ex and d in ey
+                          and np.isfinite(ex[d]) and np.isfinite(ey[d])]
+                    if len(cd) >= args.min_drugs:
+                        n_cond = len(cd)
+                        ii = {d: i for i, d in enumerate(drugs)}
+                        sub = [ii[d] for d in cd]
+                        eP, eS = dP[sub], dS[sub]
+                        eE = np.array([ex[d] - ey[d] for d in cd])
+                        if np.nanstd(eE) > 0:
+                            r_expr, p_expr = corr(eE, eP)
+                            r_part, p_part = _partial(eS, eP, eE)
             # MoA strata: the matching group is where the hypothesis applies at all,
             # the complement is the built-in control.
             r_moa = p_moa = r_oth = p_oth = np.nan
@@ -423,7 +503,9 @@ def main():
                          'perm_p': perm_p, 'n_selective': int(sel.sum()),
                          'r_selective': r_sel, 'p_selective': p_sel, 'naive_r_in_x': naive,
                          'n_moa': n_moa, 'r_moa': r_moa, 'p_moa': p_moa,
-                         'n_other': n_oth, 'r_other': r_oth, 'p_other': p_oth})
+                         'n_other': n_oth, 'r_other': r_oth, 'p_other': p_oth,
+                         'n_conditional': n_cond, 'r_expr': r_expr, 'p_expr': p_expr,
+                         'r_partial_mc_given_expr': r_part, 'p_partial': p_part})
     if degenerate:
         print('\nSKIPPED %d combination(s) with a constant or all-missing difference vector '
               '(no information; reporting them would invent a p-value):' % len(degenerate))
@@ -485,6 +567,32 @@ def main():
                   '(the hypothesis predicts the first to exceed the second)'
                   % (np.nanmedian([r['r_moa'] for r in ok]),
                      np.nanmedian([r['r_other'] for r in ok])))
+    if expr_scores:
+        ok = [r for r in rows if np.isfinite(r['r_partial_mc_given_expr'])]
+        if ok:
+            print()
+            print('CONDITIONAL ON EXPRESSION: does the MetChange differential survive controlling for the '
+                  'matching gene set?')
+            h = ('%-9s %-20s %-11s %5s %9s %9s %11s %9s'
+                 % ('pair', 'set', 'variant', 'n', 'r_MetChg', 'r_expr', 'r_MC|expr', 'p'))
+            print(h)
+            print('-' * len(h))
+            for r in sorted(ok, key=lambda r: r['p_partial'])[:args.top]:
+                print('%-9s %-20s %-11s %5d %+9.3f %+9.3f %+11.3f %9.3g'
+                      % ('%s/%s' % (r['cell_x'], r['cell_y']), r['set'][:20], r['variant'],
+                         r['n_conditional'], r['r_diff'], r['r_expr'],
+                         r['r_partial_mc_given_expr'], r['p_partial']))
+            rm = np.array([r['r_diff'] for r in ok])
+            re_ = np.array([r['r_expr'] for r in ok])
+            rp = np.array([r['r_partial_mc_given_expr'] for r in ok])
+            print()
+            print('over %d combinations: median |r_MetChange| %.3f, |r_expression| %.3f, '
+                  '|r_MetChange|expression| %.3f'
+                  % (len(ok), np.nanmedian(np.abs(rm)), np.nanmedian(np.abs(re_)),
+                     np.nanmedian(np.abs(rp))))
+            keep = np.nanmedian(np.abs(rp)) / max(1e-9, np.nanmedian(np.abs(rm)))
+            print('the MetChange association retains %.0f%% of its magnitude once expression is partialled '
+                  'out (100%% = expression explains none of it, 0%% = all of it)' % (100 * keep))
     pos = sum(1 for r in rows if r['r_diff'] > 0)
     sig = [r for r in rows if r['bh_q'] < 0.05]
     print()

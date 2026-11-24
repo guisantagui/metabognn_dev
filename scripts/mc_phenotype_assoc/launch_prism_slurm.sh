@@ -26,6 +26,13 @@
 # A missing cell line fails only its own task, so run what you have and re-run the
 # rest later; prism_differential.py uses whichever cells it finds and says which.
 #
+# Each task runs BOTH arms: MetChange labels with the metabolite sets, and the
+# expression baseline with the GPR gene sets. The expression arm is what lets
+# prism_differential.py ask whether MetChange adds information the transcriptome
+# lacks - the project's actual claim - and these are the first five non-HepG2 cell
+# lines where that can be asked (report 10, 10.5). For one arm only:
+#   arm=metchange sbatch launch_prism_slurm.sh      # or arm=expr
+#
 # Override the cell list with: cells="A549 PC3" sbatch --array=0-1 launch_prism_slurm.sh
 set -uo pipefail
 
@@ -55,6 +62,6 @@ if [ "$idx" -ge "${#_cells[@]}" ]; then
     exit 1
 fi
 
-export cell="${_cells[$idx]}" repo_dir
+export cell="${_cells[$idx]}" repo_dir arm="${arm:-both}"
 echo "array task $idx -> cell=$cell"
 exec bash "$repo_dir/scripts/mc_phenotype_assoc/launch_prism_cell.sh"

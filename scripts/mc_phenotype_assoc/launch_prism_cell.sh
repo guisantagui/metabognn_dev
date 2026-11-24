@@ -11,6 +11,15 @@
 # so **this is the only file that needs downloading**; the GB-scale label matrices
 # stay on the cluster.
 #
+# TWO ARMS. This script scores the MetChange labels AND the expression baseline
+# (GPR gene sets) on the same drugs, so prism_differential.py can ask the question
+# the project actually turns on: does MetChange add information the transcriptome
+# does not have, by integrating stoichiometry and the network? It is not a horse
+# race - expression being informative too is expected and fine. Both existing
+# demonstrations (report 09 sections 4 and 9.6) use HEPG2 labels, so these five
+# cell lines are the first chance to ask it off HepG2 (report 10, 10.5).
+# Set arm=metchange or arm=expr to run one alone.
+#
 # `set_results.tsv` contains the sensitive-vs-resistant group contrast. **That is
 # the confounded naive test and must not be read as a result** (report 10, 1.1):
 # the phenotype is viability, the confounder of reports 07-09 is viability, and you
@@ -32,6 +41,7 @@ pheno="${prism_pheno:-$assoc_base/phenotypes_ALL/prism_viability.tsv}"
 n_perm="${n_perm:-200}"
 n_boot="${n_boot:-200}"
 n_random_sets="${n_random_sets:-10}"
+arm="${arm:-both}"
 
 provenance
 require_python || exit 1
@@ -57,8 +67,26 @@ if [ ! -d "$mc_labels" ]; then
     exit 1
 fi
 
-run_assoc prism_viability "$mc_labels" "$met_sets" "$pheno" sensitive resistant \
-    --mode value --mode sign
+if [ "$arm" = both ] || [ "$arm" = metchange ]; then
+    run_assoc prism_viability "$mc_labels" "$met_sets" "$pheno" sensitive resistant \
+        --mode value --mode sign
+fi
+
+# Expression baseline: same drugs, same cell pairs, subsystem gene sets in place of
+# the metabolite sets. prism_differential.py --expr-run then reports the expression
+# differential alongside the MetChange one AND the partial correlation of MetChange
+# with the phenotype controlling for expression - the direct test of whether the
+# stoichiometric layer carries anything extra.
+if [ "$arm" = both ] || [ "$arm" = expr ]; then
+    if [ ! -d "$expr_labels" ]; then
+        echo "SKIP expression arm: no expression labels at $expr_labels" >&2
+    elif [ ! -f "$gene_sets" ]; then
+        echo "SKIP expression arm: no gene sets at $gene_sets (prepare_assoc_inputs.sh builds them)" >&2
+    else
+        run_assoc prism_viability_expr "$expr_labels" "$gene_sets" "$pheno" sensitive resistant \
+            --mode value --mode sign
+    fi
+fi
 
 out="$out_base/prism_viability/per_drug_scores.tsv"
 if [ -f "$out" ]; then
@@ -66,7 +94,14 @@ if [ -f "$out" ]; then
     printf 'Download just this file for each cell line, then run locally or here:\n'
     printf '  python3 -I scripts/mc_phenotype_assoc/prism_differential.py \\\n'
     printf '      --phenotype %s \\\n' "$pheno"
-    printf '      --scores-root %s\n' "$assoc_base"
+    printf '      --scores-root %s \\\n' "$assoc_base"
+    printf '      --expr-run prism_viability_expr\n'
+    e="$out_base/prism_viability_expr/per_drug_scores.tsv"
+    if [ -f "$e" ]; then
+        printf 'expression arm written: %s (%s)\n' "$e" "$(du -h "$e" | cut -f1)"
+    else
+        printf 'NOTE: no expression arm present - the conditional test needs it\n'
+    fi
 else
     echo "FAILED: no $out" >&2
     exit 1
