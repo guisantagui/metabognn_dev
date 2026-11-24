@@ -805,6 +805,26 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > read the `labels` path in a downloaded result's `run_info.json` (a `/scratch/...` value means it was computed
 > on the HPC, not from the local copy). `results/labels/A549/compare_corrected_vs_rerun/` exists from that
 > comparison. `scripts/mc_phenotype_assoc/signature_conservation.py` (new) carries the provenance warning.
+> **VERIFIED (report 10, 6.1): the section-3 A549 null reproduces EXACTLY from the local Nov-12 labels** —
+> all 40 shared set x variant combinations identical (median AUROC diff +0.0000, max |diff| 0.0000; tca
+> mito_nohub 0.477 p=0.34 both), same 179/803 contrast. So the HPC cross-cell runs used this same generation,
+> which means the set-level conservation table is on corrected labels too. (Minor: the local matrix has 9,830
+> perturbations / 1,085 drugs vs the HPC run's 10,150 / 1,118 — the extra columns are in OTHER contrasts
+> (`MMP_up`, `cytotox`, `incon`), so don't compare those across the two.)
+> **CONSERVATION MEASURED (report 10, 6.2-6.4), answering the correct objection that shared MoA + shared core
+> metabolism make SOME transfer the EXPECTED BASELINE, not a finding.** Full signatures HEPG2 vs A549, 250
+> drugs x 5,707 metabolites: same-drug median r +0.297 vs different-drug +0.031, but **same-vs-different AUROC
+> only 0.551 (p=0.0055)** and just 10% of same-drug r above the different-drug 95th pct — **conservation is
+> REAL but WEAK; signatures are dominated by cell context, not compound identity.** Set-level, responsive-only:
+> energy_currency +0.399, glycolysis +0.474, oxphos +0.337, **tca +0.113 to +0.145 (lowest)**. **Set size does
+> NOT explain it: Spearman(members, conservation) = -0.058 (p=0.72).**
+> **CONSEQUENCE: section 3 is no longer the anomaly — weak conservation means A549 labels carrying little
+> information about a HepG2 TCA phenotype needs NO appeal to HepG2 being special.** Reframes 9.3 ("refutation
+> of the strong reading") and 10.5 ("the damaging direction") as the expected baseline being observed.
+> **WITHDRAWN OVERSTATEMENT: "TCA is not conserved at all" and the clean "what transfers doesn't predict"
+> complementarity.** On the best-powered pair TCA conservation is POSITIVE (+0.11..+0.32), merely lowest; the
+> negatives that prompted it (HCC515 -0.371, A375 -0.154) rest on 45-61 responsive drugs. Directional only.
+> Not addressed: only HEPG2-vs-X pairs, responsive n 31-68, and `z` is already within-perturbation standardised.
 
 > **2026-11-24 — THREE MORE DATASETS: PRISM, Panorama GCP, Way (report 10).**
 > **PRISM (`data/validation/prism/`) is the valuable one — 1,449 BRD compounds x 482 cell lines, 8-dose,
@@ -818,7 +838,25 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > set including the glycan negative controls.
 > **RUN INSTEAD the within-drug between-cell DIFFERENTIAL (report 10, 1.2): per drug, correlate
 > AUC(X)-AUC(Y) against setscore(X labels)-setscore(Y labels). Differencing CANCELS general potency by
-> construction**, leaving only the selectivity question. **821 drugs with an AUC in all 5 cores and in LINCS;
+> construction**, leaving only the selectivity question.
+> **IMPLEMENTED AND RUNNABLE ON THE HPC — NO LARGE FILE MOVES (report 10, 7).** `build_prism_phenotype.py`
+> runs on the LAPTOP (where the ~800 MB PRISM download is) and writes ONE 86 kB table, 821 drugs x 5 cells;
+> scp that single file to `<scratch>/results/mc_phenotype_assoc/phenotypes_ALL/`. Then on the cluster
+> `cd scripts/mc_phenotype_assoc && sbatch launch_prism_slurm.sh` (array 0-4, one task per covered core;
+> `cells="A549" sbatch --array=0-0 ...` for one; `cell=A549 bash launch_prism_cell.sh` without slurm).
+> **Bring home only `<CELL>/prism_viability/per_drug_scores.tsv`, ~3 MB each** — the GB label matrices never
+> move. Then `prism_differential.py` (runs either side) does the actual test.
+> **IGNORE each run's `set_results.tsv`: it is the sensitive-vs-resistant group contrast, i.e. the CONFOUNDED
+> NAIVE TEST.** Both launchers say so in their headers and output, and per-cell resampling is deliberately
+> minimal (n_perm=200, n_random_sets=10) because that contrast is not the point.
+> **PREDICTION RECORDED BEFORE RUNNING (report 10, 7.4), since 9.4 criticises itself for post-hoc pathway
+> choice and 10 cell pairs x ~160 combinations makes it worse here: `r_diff` POSITIVE** (lower predicted
+> capacity in X -> lower AUC in X; both differences negative together), **strongest for the biomass-precursor
+> sets rather than uniform**. A NEGATIVE r_diff CONTRADICTS the prediction; a positive result spread evenly
+> over every set incl. negative controls = a confounder that survived differencing.
+> Controls in `prism_differential.py`: `perm_p` (drug identity of the predictor differences permuted),
+> `bh_q` over the whole family, `r_selective` (the **355** drugs with between-cell AUC spread > 0.1,
+> pre-specified), and `naive_r_in_x` (the undifferenced, confounded value, printed as a foil only). **821 drugs with an AUC in all 5 cores and in LINCS;
 > 361 of them cell-selective (between-cell AUC SD > 0.1) — the informative subset.** Needs MetChange labels
 > for >=2 PRISM-covered cores; locally only A549 has `metchange/rank/log2FC.csv`, the HPC has all 8.
 > **PRE-REGISTER the direction** (lower predicted nucleotide/amino-acid capacity in X vs Y -> lower AUC in X vs

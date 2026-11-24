@@ -264,3 +264,188 @@ to 11/12, which does not change the power calculation. The falsification role it
 the **PRISM differential** (section 1.2), which has 821 drugs and cancels the viability confounder rather than
 leaving it uncontrolled as xu does - and note xu could not have controlled it anyway, since Xu reports **no
 viability readout**, so unlike naia there is no measured cytotoxicity to match on.
+
+## 6. Label generations verified, and how conserved a signature is between cell lines
+
+*Prompted by a provenance scare on 2026-11-24. MetChange labels exist in more than one generation
+distinguished only by date: **the 2026-11-12 files are the corrected ones**, the superseded buggy generation
+was 2026-11-02. Nothing in a file's name or content identifies which it is, so the matrix mtime is stated with
+every number below. A withdrawal issued earlier that day against the conservation result was mistaken - it had
+used the correct Nov-12 files - and is reversed here.*
+
+### 6.1 The section-3 A549 null reproduces exactly from the local corrected labels
+
+Re-running the Attene-Ramos MMP association against
+`results/labels/A549/metchange/rank` (`log2FC.csv`, 4,427,631,022 bytes, **mtime 2026-11-12 13:17**) and
+comparing with the HPC cross-cell run used in report 09, section 3:
+
+| set | variant | HPC run (report 09, 3) | local Nov-12 labels |
+|---|---|---|---|
+| tca | mito_nohub | 0.477 (p = 0.34) | **0.477 (p = 0.34)** |
+| tca_endpoints | cyto_nohub | 0.471 (p = 0.22) | **0.471 (p = 0.22)** |
+| tca | cyto | 0.461 (p = 0.10) | **0.461 (p = 0.10)** |
+| oxphos | mito | 0.518 (p = 0.46) | **0.518 (p = 0.46)** |
+| energy_currency | mito | 0.497 (p = 0.92) | **0.497 (p = 0.92)** |
+| glycolysis | cyto | 0.463 (p = 0.12) | **0.463 (p = 0.12)** |
+
+**All 40 shared set x variant combinations agree: median AUROC difference +0.0000, max |difference| 0.0000,
+40 of 40 identical to three decimals.** Contrast sizes are identical too (179 cases / 803 controls).
+
+Two consequences. **The A549 null of section 3 is confirmed** on labels known to be the corrected generation.
+And because the numbers are bit-identical, **the HPC cross-cell runs were themselves computed on this same
+generation**, so the set-level conservation table in 6.3 - which is derived from those runs' per-drug scores -
+is also on corrected labels.
+
+One discrepancy worth recording rather than hiding: the local matrix carries **9,830 perturbations / 1,085
+drugs** against the HPC run's **10,150 / 1,118**, about 3% fewer. The missing columns belong to groups outside
+this contrast (`MMP_up`, `cytotox`, `incon`), which is why the `MMP_down vs inactive` counts match exactly. The
+two matrices are therefore not literally the same file, and anything that uses the other contrasts should be
+run on one or the other, not compared across them.
+
+### 6.2 The question: how much of a signature is the compound, and how much is the cell?
+
+This arose from a correct objection: a compound's mechanism does not change between cell lines, and the TCA
+cycle, glycolysis and OXPHOS are common to all of them, so **some transfer of a prediction between cell lines
+is the expected baseline, not a finding.** That reframes reports 09 and 10:
+
+- section 9.3 called the transfer of HEPG2 labels to an SH-SY5Y ATP phenotype a refutation of the "strong
+  reading". It is better described as the expected baseline being observed.
+- Report 10, section 5 read the weak xu lean as "the damaging direction". Same correction: a lean toward
+  transfer is what shared mechanism predicts.
+- **What then needs explaining is section 3** - why A549 labels fail to predict a HepG2 MMP phenotype
+  (0.477, p = 0.34) if the compounds have the same mechanism in both cells.
+
+The question is therefore quantitative, and measurable from the label matrices directly.
+`scripts/mc_phenotype_assoc/signature_conservation.py` (new) computes it.
+
+### 6.3 Conservation is real, weak, and set-dependent
+
+**Full signatures**, HEPG2 vs A549, 250 shared drugs x 5,707 metabolites, perturbations averaged per drug:
+
+| | median r | IQR |
+|---|---|---|
+| **same drug** | **+0.297** | -0.640 .. +0.808 |
+| different drug (the control) | +0.031 | -0.707 .. +0.719 |
+
+Same-vs-different **AUROC 0.551, p = 0.0055**; only **10%** of same-drug correlations exceed the different-drug
+95th percentile. The median gap of +0.266 looks large but both distributions span nearly the whole range, so
+**a drug's signature in one cell line is only marginally more predictive of its signature in another than a
+random drug's is.** Read the gap and the AUROC, not the median: if some metabolites move under any
+perturbation, every pair of signatures correlates.
+
+**Set-level scores** (the quantity the association tests actually use), HEPG2 vs A549, from the cross-cell
+runs' per-drug scores:
+
+| set | members | r, all drugs | r, responsive only |
+|---|---|---|---|
+| energy_currency all | 69 | +0.179 | **+0.399** |
+| glycolysis cyto_nohub | 27 | +0.037 | +0.474 |
+| oxphos mito | 13 | +0.171 | +0.337 |
+| tca mito_nohub | 19 | +0.020 | **+0.113** |
+| tca all | 73 | +0.077 | +0.145 |
+
+**Set size does not explain the differences.** Across all 40 set x variant combinations,
+Spearman(n_members, conservation) = **-0.058 (p = 0.72)** over all drugs and **-0.191 (p = 0.24)**
+responsive-only. So the attenuation explanation - small sets give noisy per-drug scores, which depresses
+correlation - is ruled out, and TCA's low conservation is not a size artefact.
+
+### 6.4 What this does and does not support
+
+**Supported.** Conservation exists, which is why transfer happens; and it is **weak**, which makes section 3's
+cell-specificity unsurprising rather than anomalous. A549's TCA score for a given drug correlates with HepG2's
+at r = +0.11 to +0.15, so A549 labels carrying little information about a HepG2 TCA phenotype needs no appeal
+to HepG2 being special. The depth explanation was already dead (report 09, 9.3: A375 has 2.4x HepG2's panel and
+is the most null line); this supplies a positive account in its place.
+
+**An earlier overstatement, withdrawn.** It was claimed in conversation that TCA is "not conserved at all" and
+that there is a clean complementarity - what transfers does not predict, what predicts does not transfer. On
+the best-powered pair, HEPG2 vs A549, **TCA conservation is positive (+0.11 to +0.32), merely the lowest of
+the sets.** The negative values that prompted the stronger claim (-0.371 for HCC515, -0.154 for A375) come
+from pairs with only 45-61 responsive drugs and cannot carry it. The ordering holds directionally; the
+complementarity is a hypothesis, not a result.
+
+**Not addressed.** Only HEPG2-vs-X pairs were computed, never X-vs-Y. Responsive-only n is 31-68 per pair. And
+conservation of the *z* statistic is partly conservation of relative pathway positioning, since `z` is already
+standardised within a perturbation - a different normalisation could give a different answer.
+
+## 7. How to run the PRISM differential on the cluster
+
+*Written so that **no large file has to move**. The PRISM download is ~800 MB and the label matrices are
+GB-scale; the only things that travel are an 86 kB phenotype table going up and a ~3 MB scores file per cell
+line coming back.*
+
+### 7.1 The four pieces
+
+| script | runs where | why |
+|---|---|---|
+| `build_prism_phenotype.py` | **laptop** (where PRISM is) | writes one 86 kB table, 821 drugs x 5 cells |
+| `launch_prism_slurm.sh` | **cluster** | array 0-4, one task per PRISM-covered core line |
+| `launch_prism_cell.sh` | cluster (called per task, or standalone with `cell=`) | scores one cell against its MetChange labels |
+| `prism_differential.py` | **either** | the actual test; needs only the small files |
+
+### 7.2 The three commands
+
+```bash
+# 1. laptop - build the table and send that one file
+python3 -I scripts/mc_phenotype_assoc/build_prism_phenotype.py     --out results/mc_phenotype_assoc/phenotypes_ALL/prism_viability.tsv
+scp results/mc_phenotype_assoc/phenotypes_ALL/prism_viability.tsv     <host>:/scratch/users/gsantamaria/test_large_files/metabognn_dev/results/mc_phenotype_assoc/phenotypes_ALL/
+
+# 2. cluster - score every covered cell line (submit FROM scripts/mc_phenotype_assoc, see below)
+cd scripts/mc_phenotype_assoc && sbatch launch_prism_slurm.sh
+#    one line only:   cells="A549" sbatch --array=0-0 launch_prism_slurm.sh
+#    no slurm:        cell=A549 bash scripts/mc_phenotype_assoc/launch_prism_cell.sh
+
+# 3. either machine - the test
+python3 -I scripts/mc_phenotype_assoc/prism_differential.py     --out results/mc_phenotype_assoc/cross_cell/prism_differential.tsv
+```
+
+Submit step 2 from `scripts/mc_phenotype_assoc`: Slurm expands `--output` before the job starts so it cannot
+hold a variable, which is why `logs/` is relative to the submit directory and kept in git (report 08, 8.3).
+A missing cell line fails only its own array task, so partial runs are fine - `prism_differential.py` uses
+whichever cells it finds and names the ones it did not.
+
+To bring the results home, download only
+`results/mc_phenotype_assoc/<CELL>/prism_viability/per_drug_scores.tsv` - about 3 MB each, five of them.
+
+### 7.3 What to read and what to ignore
+
+Each run also writes `set_results.tsv`, the sensitive-vs-resistant group contrast. **That is the confounded
+naive test and is not a result** (1.1): the phenotype is viability, viability is the confounder of reports
+07-09, and nothing can be matched on cytotoxicity when cytotoxicity *is* the phenotype. Both launchers say so
+in their headers and in their output, and the per-cell resampling is turned down to the minimum
+(`n_perm=200`, `n_random_sets=10`) precisely because that contrast is not what is being computed - the
+differential builds its own null.
+
+`prism_differential.py` reports, per set x variant x cell pair:
+
+- **`r_diff`** - the differential correlation, the number that matters;
+- **`perm_p`** - drug identity of the predictor differences permuted, which breaks the drug-to-drug
+  correspondence while preserving both marginals;
+- **`bh_q`** - BH over the whole family, which is large: 10 unordered pairs x ~160 set x variant x statistic;
+- **`r_selective`** - the same restricted to the **355** drugs with between-cell AUC spread > 0.1, pre-specified
+  because a drug with no between-cell spread carries no signal for this design either way;
+- **`naive_r_in_x`** - the undifferenced correlation, printed only as a foil: it is the confounded quantity and
+  is expected to be larger and meaningless.
+
+It also prints the fraction of combinations carrying the predicted sign, where 50% is no signal.
+
+### 7.4 The prediction, recorded before the test is run
+
+Report 09, 9.4 criticises itself for choosing a pathway post hoc over 160 combinations. With ten cell pairs on
+top of that the risk is worse here, so the direction is fixed now and is in both scripts' docstrings:
+
+> Lower predicted production capacity for biomass precursors - nucleotides, amino acids - in cell X than in
+> cell Y should mean **more** growth inhibition in X, hence **lower** AUC in X. Both differences are negative
+> together, so **`r_diff` is expected to be POSITIVE**, and most strongly for the biomass-precursor sets rather
+> than uniformly across all of them.
+
+A negative `r_diff` contradicts the prediction; it is not the same finding with the sign flipped. And a
+positive result spread evenly over every set, negative controls included, is the signature of a confounder
+that survived differencing rather than of metabolic specificity.
+
+### 7.5 Coverage, restated
+
+821 drugs have an AUC in all five covered lines and a LINCS `pert_id`; **355** of them have between-cell AUC
+spread > 0.1. The groups in the table are a cell-independent median split on mean AUC and exist **only** to
+satisfy `mc_phenotype_assoc.py`'s case/control interface - they are not a hypothesis, and keeping them
+cell-independent is what guarantees every drug is scored in every cell line, which the differential requires.
