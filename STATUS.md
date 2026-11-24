@@ -31,7 +31,10 @@ HEAD `d11744b`, except the files listed in section 8.
 > Earlier today: corrected MetChange matches expr and TF (report 05, section 5): per-drug gap 8.3 / 7.7
 > (seeds 0 / 1), vs expr 7.8 / 10.4 and TF 9.0 / 9.3, not significantly different.
 
-**Read first:** `reports/2026-11-23_cross_cell_specificity.md` (report 09 — the association is HepG2-specific
+**Read first:** `reports/2026-11-24_prism_gcp_cellpainting.md` (report 10 — PRISM enables the first
+well-powered cell-matched test, via a within-drug between-cell DIFFERENTIAL design that cancels the viability
+confounder instead of matching it; GCP has the best rationale and a library that defeats it; the Way data is
+not actually downloaded), then `reports/2026-11-23_cross_cell_specificity.md` (report 09 — the association is HepG2-specific
 across 8 cell lines on identical drugs, which rules out the chemotype explanation; the expression arm is NOT
 cell-specific, which is the real argument for the stoichiometric layer), then
 `reports/2026-11-20_phenotype_confounders.md` (report 08 — are the report 07 phenotype
@@ -793,6 +796,74 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > **Launchers:** `scripts/mc_phenotype_assoc/launch_assoc_{metchange,expr}_HEPG2.sh` +
 > `launch_assoc_HEPG2_slurm.sh` (2-task array); config in `mc_phenotype_assoc_common.sh`, which auto-detects
 > the scratch base on the cluster.
+
+> **2026-11-24 — LABEL GENERATIONS: the 2026-11-12 files ARE the corrected ones (user). The superseded buggy
+> generation was dated 2026-11-02.** `results/labels/A549/metchange/rank/log2FC.csv` (4,427,631,022 bytes,
+> mtime Nov 12 13:17) is correct and is what the local analyses used, so **the cross-cell signature-conservation
+> result STANDS** — a withdrawal issued earlier on 2026-11-24 was unnecessary and has been reversed. Nothing in
+> a label file's name or content identifies its generation, so **state the matrix mtime in any write-up** and
+> read the `labels` path in a downloaded result's `run_info.json` (a `/scratch/...` value means it was computed
+> on the HPC, not from the local copy). `results/labels/A549/compare_corrected_vs_rerun/` exists from that
+> comparison. `scripts/mc_phenotype_assoc/signature_conservation.py` (new) carries the provenance warning.
+
+> **2026-11-24 — THREE MORE DATASETS: PRISM, Panorama GCP, Way (report 10).**
+> **PRISM (`data/validation/prism/`) is the valuable one — 1,449 BRD compounds x 482 cell lines, 8-dose,
+> AUC/IC50/EC50; `broad_id` + `ccle_name` so mapping is EXACT, no structure work. 1,103 of 1,449 in LINCS.
+> Covers 5 of 9 cores: A375 (988 LINCS drugs w/ AUC), A549 (1,053), HT29 (1,045), MCF7 (1,043), PC3 (1,008).
+> HEPG2, VCAP, HCC515 ABSENT (verified: PRISM has 14 liver lines, none is HEPG2); HA1E absent by construction.
+> HEPG2's absence is the headline limit — every positive in reports 07-09 is in HepG2, so PRISM cannot EXTEND
+> them, only test other lines.**
+> **DO NOT run the obvious design: the phenotype IS viability, which is THE confounder of reports 07-09. You
+> cannot match on cytotoxicity when cytotoxicity is the phenotype** — a naive test would likely light up every
+> set including the glycan negative controls.
+> **RUN INSTEAD the within-drug between-cell DIFFERENTIAL (report 10, 1.2): per drug, correlate
+> AUC(X)-AUC(Y) against setscore(X labels)-setscore(Y labels). Differencing CANCELS general potency by
+> construction**, leaving only the selectivity question. **821 drugs with an AUC in all 5 cores and in LINCS;
+> 361 of them cell-selective (between-cell AUC SD > 0.1) — the informative subset.** Needs MetChange labels
+> for >=2 PRISM-covered cores; locally only A549 has `metchange/rank/log2FC.csv`, the HPC has all 8.
+> **PRE-REGISTER the direction** (lower predicted nucleotide/amino-acid capacity in X vs Y -> lower AUC in X vs
+> Y): report 09, 9.4 criticises itself for not doing this and with 10 cell pairs the post-hoc risk is larger.
+> **Panorama GCP — best rationale in the project, library largely defeats it.** 28 plates, 49 histone-mark
+> probes, 24 h, 0.1-10 uM, `pert_id` exact. **7 cell lines with THE SAME compounds in each** (MCF7, A549, A375,
+> PC3 cores + NPC, YAPC, Astrocyte) — the crossed structure we have been missing. The rationale's strength is
+> that the SIGNS DIFFER BY METABOLITE and are predictable in advance (acetyl-CoA + on acetylation, NAD+ - on the
+> same marks, SAM + on methylation, 2-OG - / succinate+fumarate + on methylation). **BUT only 117 compounds and
+> the library is built around DIRECT inhibitors of the enzymes whose marks are read** — HDACi (vorinostat, TSA,
+> belinostat, MS-275, CI-994, RGFP966), HMTi (EPZ-5676/004777/5687, GSK126, CPI-169, UNC-0321/0646,
+> BIX-01294/01338, UNC1215), KDMi (GSK-J4, methylstat), BETi (JQ1, GSK525762A, GSK1210151A), HAT C646, sirtuin
+> (EX527, salermide), DNMTi (decitabine, zebularine). **Vorinostat raises H3K9ac by blocking HDACs, not because
+> acetyl-CoA rose** — run naively the test "succeeds" for non-metabolic reasons. **Salvage: exclude them
+> (~70-80 left, incl. niclosamide = protonophore, pravastatin, bafilomycin A1) and use the excluded drugs as a
+> POSITIVE CONTROL for the assay (HDACi must raise acetylation or the extraction is wrong); EX527/salermide
+> check the NAD+ arm's SIGN, since blocking NAD+-consuming deacetylases mimics low NAD+.**
+> **Way — NOT ACTUALLY DOWNLOADED. All 20 profile files are 133-byte Git LFS POINTER STUBS, and
+> `lincs-cell-painting-v1.zip` is the same commit with the same stubs.** Only `metadata/moa/repurposing_info*.tsv`,
+> `platemaps/` and `clue_manifest/` are real (worth keeping). Fix: `git lfs pull` in that dir, or fetch the
+> profiles from Zenodo 5008187. **Worth getting:** batch `2016_04_01_a549_48hr_batch1` = A549 48 h ~1,500
+> compounds, and A549 is the one non-HepG2 core with LOCAL MetChange labels -> a properly powered cell-matched
+> test. Caveat from nyffeler carries: only `Mito_*` features bear on the hypothesis, and mito-selectivity
+> (mito vs the rest) is the version that controls general bioactivity internally.
+> **ORDER (report 10, 4): 1 PRISM differential; 2 `git lfs pull` Way; 3 GCP with the epigenetic arm split out
+> and signs pre-registered.**
+> **xu — RUN 2026-11-24, and UNDERPOWERED BY CONSTRUCTION (report 10, 5). Only 11 MMP_down vs 12 inactive
+> reach the HEPG2 panel** (A375 panel 14/20; full-LINCS ceiling 17/25 — not a runnable option). **At 11/12 a
+> true AUROC of 0.350 would give p ~ 0.21**, so the test cannot reach significance even if the effect is as
+> large as the one it was meant to check. Phenotype extraction was clean (all 61 actives verified as
+> membrane-potential DECREASERS, negative curve rank and efficacy). Result: `tca cyto` 0.295 (p = 0.10,
+> randset 0.16), `tca mito_nohub` 0.311, `oxphos mito` 0.470 — nothing survives any control.
+> **READ THE DIRECTION: the lean is the DAMAGING one, not the reassuring one.** A positive xu result would mean
+> HEPG2 labels predict MMP in a cell line they know nothing about; the point estimates lean weakly that way,
+> through TCA — the SAME pathway as HepG2's own MMP result, where the SH-SY5Y ATP transfer ran through
+> glycolysis. At 11/12 it is a hint only.
+> **Cause: chemical-space mismatch.** Xu screened Tox21 ENVIRONMENTAL chemicals (4-nonylphenol,
+> 2-ethylhexylparaben, kadethrin) and LINCS is drug-focused — the same cause as the Hallinger null (report 07).
+> `map_smiles.R` cannot rescue it: a handful more compounds does not change the power.
+> **MISTAKE TO REMEMBER (report 10, 5.1): xu was recommended twice on a WHOLE-LINCS overlap of 53 without
+> checking the HEPG2-panel count — the same error as naia's 683 -> 10, made a day later. RULE: a validation
+> dataset's usable n is its overlap with the SPECIFIC label panel, computed BEFORE the dataset is ranked,
+> never its overlap with all of LINCS.** The falsification role falls to the PRISM differential, which has 821
+> drugs and cancels the viability confounder; xu could not have controlled it anyway, as Xu reports NO
+> viability readout.
 
 > **2026-11-23 — STRONGEST RESULT SO FAR: MetChange beats expression under a MEASURED viability control, and it
 > REPLICATES (report 09, 9.6).** Expression labels ALSO predict SH-SY5Y ATP loss, through MITOCHONDRIAL sets
