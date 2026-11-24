@@ -18,6 +18,10 @@
 set -uo pipefail
 . "$(dirname "$0")/mc_phenotype_assoc_common.sh"
 provenance
+# Exit rather than warn - see the note in launch_assoc_metchange.sh: the arm runs
+# several associations without aggregating their exit status, so a bad interpreter
+# would otherwise produce a 0 exit and a "successful" Slurm task with no output.
+require_python || exit 1
 if [ ! -f "$gene_sets" ]; then
     echo "MISSING gene sets: $gene_sets - run prepare_assoc_inputs.sh first" >&2
     exit 1

@@ -22,7 +22,12 @@ sets_dir=results/mc_phenotype_assoc/metabolite_sets
 pheno=results/mc_phenotype_assoc/phenotypes_ALL/naia_atp.tsv
 mc_out="results/mc_phenotype_assoc/${cell}/naia_atp"
 ex_out="results/mc_phenotype_assoc/${cell}/naia_atp_expr"
-py() { python3 -I "$@"; }
+# Interpreter resolution is shared with the launchers (micromamba env on the
+# cluster, system python3 on the laptop); see python_env.sh.
+# shellcheck source=python_env.sh
+. "$repo/scripts/mc_phenotype_assoc/python_env.sh"
+require_python || exit 1
+py() { "${py}" -I "$@"; }
 
 echo "=== 1/5  phenotype table (groups from the ATP z-score, mapped to the ${cell} panel) ==="
 py scripts/mc_phenotype_assoc/build_naia_phenotype.py --cell "$cell" --z-flat 1.0 --out "$pheno"

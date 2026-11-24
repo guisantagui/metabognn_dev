@@ -826,6 +826,27 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > negatives that prompted it (HCC515 -0.371, A375 -0.154) rest on 45-61 responsive drugs. Directional only.
 > Not addressed: only HEPG2-vs-X pairs, responsive n 31-68, and `z` is already within-perturbation standardised.
 
+> **2026-11-24 — MICROMAMBA ENV FIX + a SILENT-SUCCESS bug (report 10, 7.7).** Cluster runs failed with
+> **"No module named numpy"**: deps are in the micromamba env `metabolic_drug_repurposing` and **a Slurm job does
+> NOT inherit an activated environment**, so `python3` was the system interpreter. Invisible locally because the
+> laptop's system python3 has numpy/scipy.
+> **Fixed in ONE place: `scripts/mc_phenotype_assoc/python_env.sh` (new)**, sourced by
+> `mc_phenotype_assoc_common.sh`, `submit_assoc.sh` and `run_naia_assoc.sh` — the three that each had their own
+> `python3` default, which is why it bit only some. Order: exported `$py` -> current `python3` -> micromamba env
+> (interpreter located via `micromamba run`, so no layout guessing; shell hook as fallback) ->
+> `$mamba_env_prefix/bin/python3` or the usual roots. `project_paths.conf` gained optional `mamba_env_prefix`
+> for when micromamba is not on PATH in batch jobs. **`provenance` now prints the interpreter and how it was
+> found**, so logs record which Python produced the numbers. `require_python` refuses BEFORE doing work and
+> prints the three ways to fix it.
+> **THE FIX EXPOSED A WORSE BUG: with no usable interpreter `launch_assoc_slurm_generic.sh` EXITED 0** — a
+> green Slurm array task with no output. The arm scripts run several associations in sequence and never
+> aggregate exit status, so every `run_assoc` failed in turn and the script still finished cleanly.
+> `require_python || exit 1` now sits at the top of `launch_assoc_metchange.sh` and `launch_assoc_expr.sh`.
+> Verified every entry point now exits 1 on an unsatisfiable requirement (launch_prism_cell, prepare_assoc_inputs,
+> submit_assoc, run_naia_assoc, both generic-slurm tasks) and the laptop path is unchanged.
+> **Fourth member of the family in report 10, 7.6: the failure mode that matters is not the error, it is the
+> confident-looking success.**
+
 > **2026-11-24 — THREE MORE DATASETS: PRISM, Panorama GCP, Way (report 10).**
 > **PRISM (`data/validation/prism/`) is the valuable one — 1,449 BRD compounds x 482 cell lines, 8-dose,
 > AUC/IC50/EC50; `broad_id` + `ccle_name` so mapping is EXACT, no structure work. 1,103 of 1,449 in LINCS.

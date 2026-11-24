@@ -45,7 +45,9 @@ if [ -z "${labels_base:-}" ]; then
 fi
 export repo_dir labels_base
 
-py="${py:-python3}"
+# shellcheck source=python_env.sh
+. "$here/python_env.sh"
+require_python || exit 1
 checker="$here/check_label_availability.py"
 
 echo "repo        : $repo_dir"

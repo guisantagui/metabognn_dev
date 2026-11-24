@@ -34,6 +34,7 @@ n_boot="${n_boot:-200}"
 n_random_sets="${n_random_sets:-10}"
 
 provenance
+require_python || exit 1
 printf 'PRISM table      : %s\n' "$pheno"
 printf 'NOTE             : read per_drug_scores.tsv; set_results.tsv is the confounded naive test\n\n'
 

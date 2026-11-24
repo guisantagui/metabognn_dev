@@ -31,6 +31,7 @@
 set -uo pipefail
 . "$(dirname "$0")/mc_phenotype_assoc_common.sh"
 provenance
+require_python || exit 1
 
 mkdir -p "$sets_dir" "$pheno_dir"
 

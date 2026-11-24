@@ -76,7 +76,14 @@ met_sets="${met_sets:-$sets_dir/metabolite_sets.tsv}"
 gene_sets="${gene_sets:-$sets_dir/gene_sets.tsv}"
 negctrl_sets="${negctrl_sets:-$sets_dir/metabolite_sets_negctrl.tsv}"
 
-py="${py:-python3}"
+# Python interpreter. Resolved by python_env.sh, which finds the micromamba
+# environment `metabolic_drug_repurposing` on the cluster and falls back to the
+# system python3 on the laptop. A Slurm job does not inherit an activated
+# environment, so without this `python3` is the system interpreter and
+# mc_phenotype_assoc.py dies with "No module named numpy" after the allocation
+# has already been granted.
+# shellcheck source=python_env.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/python_env.sh"
 here_dir="$repo_dir/scripts/mc_phenotype_assoc"
 assoc="$here_dir/mc_phenotype_assoc.py"
 strat="$here_dir/stratified_check.py"
@@ -101,6 +108,7 @@ phenotypes       : $pheno_dir  [$pheno_scope]
 metabolite sets  : $sets_dir
 outputs          : $out_base
 resampling       : n_perm=$n_perm n_boot=$n_boot n_random_sets=$n_random_sets
+python           : $py  [${py_source:-?}]
 --------------------------------------------------------------------
 PROV
 }
@@ -140,6 +148,7 @@ run_assoc() {
     local name="$1" labels="$2" sets="$3" pheno="$4" case_="$5" ctrl="$6"; shift 6
     local out="$out_base/$name"
     say "$name  ($case_ vs $ctrl, cell=$cell)"
+    require_python || return 1
     if [ ! -d "$labels" ]; then
         echo "SKIP $name: no label dir $labels" >&2
         return 0

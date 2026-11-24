@@ -21,6 +21,12 @@
 set -uo pipefail
 . "$(dirname "$0")/mc_phenotype_assoc_common.sh"
 provenance
+# Both checks exit rather than warn: this script runs several associations in a
+# row and does not aggregate their exit status, so without an early exit an
+# unusable interpreter or a missing input would let every run_assoc fail in turn
+# and the script would still finish 0 - Slurm would report the array task as
+# successful. (Observed: the generic slurm body exited 0 with no numpy anywhere.)
+require_python || exit 1
 require_inputs || exit 1
 
 # value and sign are defined for every perturbation; sig is not - with no

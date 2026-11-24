@@ -481,3 +481,38 @@ Worth recording as a near-miss of the same family as the others in these reports
 fallback, the whole-LINCS-versus-panel overlap, the stale label matrix. **Each would have produced a
 confident number rather than an error**, and each was caught by testing a case whose answer was known in
 advance rather than by reading the code.
+
+### 7.7 The micromamba environment, and a silent-success bug it exposed
+
+The first cluster run failed with **"No module named numpy"**: the dependencies live in the micromamba
+environment `metabolic_drug_repurposing`, and **a Slurm job does not inherit an activated environment**, so
+`python3` was the system interpreter. The laptop's system python3 does have numpy and scipy, which is why
+nothing showed up in local testing.
+
+Fixed in one place rather than per launcher. `scripts/mc_phenotype_assoc/python_env.sh` (new) resolves an
+interpreter and is sourced by `mc_phenotype_assoc_common.sh`, `submit_assoc.sh` and `run_naia_assoc.sh` -
+the three places that each had their own `python3` default, which is how this could bite only one of them.
+Resolution order, first that works winning: an exported `$py`; the current `python3`; the micromamba
+environment (its interpreter located by asking `micromamba run`, so no layout is guessed, with the shell hook
+as a fallback when the environment needs its own `LD_LIBRARY_PATH`); then `$mamba_env_prefix/bin/python3` or
+the usual micromamba roots. `project_paths.conf` gained an optional `mamba_env_prefix` for the case where
+micromamba is not on `PATH` inside batch jobs. `provenance` now prints the interpreter and how it was found,
+so a log says which Python produced the numbers.
+
+`require_python` is the loud check, and the launchers call it **before** doing work: it prints what it tried
+and the three ways to fix it, then refuses. Nothing is attempted that is going to fail partway through.
+
+**The fix exposed a worse bug than the original.** With no usable interpreter,
+`launch_assoc_slurm_generic.sh` **exited 0** - a "successful" Slurm array task with no output. The arm
+scripts run several associations in sequence and never aggregate their exit status, so every `run_assoc` was
+failing in turn and the script still finished cleanly. A crash is recoverable; a green array task that
+produced nothing is the kind of thing that gets discovered weeks later. `require_python || exit 1` now sits at
+the top of `launch_assoc_metchange.sh` and `launch_assoc_expr.sh`, and both tasks exit 1 as they should.
+
+Verified: with an unsatisfiable requirement every entry point exits 1 -
+`launch_prism_cell.sh`, `prepare_assoc_inputs.sh`, `submit_assoc.sh`, `run_naia_assoc.sh` and both array
+tasks of `launch_assoc_slurm_generic.sh` - and with the real dependencies present the resolution is unchanged
+on the laptop (`python3 on PATH`).
+
+This is the fourth member of the family catalogued in 7.6: **the failure mode that matters is not the error,
+it is the confident-looking success.**
