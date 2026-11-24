@@ -46,6 +46,35 @@ SUBSYSTEMS = {
     'glycolysis': ['Glycolysis / Gluconeogenesis'],
     'pyruvate':   ['Pyruvate metabolism'],
     'ppp':        ['Pentose phosphate pathway', 'Pentose Phosphate Pathway'],
+    # BIOMASS PRECURSORS, added 2026-11-24. The sets above are all central carbon
+    # and energy metabolism, so the PRISM run of report 10, section 8 tested an
+    # energy-metabolism proxy rather than the stated "biomass precursors
+    # (nucleotides, amino acids) -> proliferation" hypothesis (report 10, 8.5).
+    # These are the subsystems that hypothesis actually names. They are also where
+    # the drug targets are: of the PRISM compounds, 28 have a target in Purine
+    # metabolism, 22 in Pyrimidine metabolism and 17 in Nucleotide metabolism.
+    'nucleotide': ['Nucleotide metabolism'],
+    'purine':     ['Purine metabolism'],
+    'pyrimidine': ['Pyrimidine metabolism'],
+    'folate':     ['Folate metabolism'],
+    # One combined amino-acid set rather than fourteen, to keep the BH family from
+    # doubling. 'Amino sugar and nucleotide sugar metabolism' is deliberately NOT
+    # here: it is glycan-adjacent and sits closer to the NEG_CONTROL sets below
+    # than to amino-acid or nucleotide biosynthesis.
+    'amino_acid': ['Alanine, aspartate and glutamate metabolism',
+                   'Arginine and proline metabolism',
+                   'Beta-alanine metabolism',
+                   'Cysteine and methionine metabolism',
+                   'Glycine, serine and threonine metabolism',
+                   'Histidine metabolism',
+                   'Lysine metabolism',
+                   'Metabolism of other amino acids',
+                   'Phenylalanine metabolism',
+                   'Phenylalanine, tyrosine and tryptophan biosynthesis',
+                   'Tryptophan metabolism',
+                   'Tyrosine metabolism',
+                   'Urea cycle',
+                   'Valine, leucine, and isoleucine metabolism'],
 }
 
 # DECLARED NEGATIVE CONTROLS, chosen on biology alone and before seeing any
@@ -89,6 +118,26 @@ CURATED = {
     'glycolysis_endpoints': ['glucose', 'pyruvate', 'L-lactate'],
     'tca_endpoints':        ['acetyl-CoA', 'citrate', 'AKG', 'succinate',
                              'fumarate', 'malate', 'CO2'],
+    # BIOMASS-PRECURSOR ENDPOINTS, added 2026-11-24 alongside the subsystems above.
+    # Names verified against data/GEMs/Human-GEM/model/Human-GEM.yml: all 14
+    # NTP/dNTP names and all 20 amino acids are present, and the amino acids are
+    # spelled WITHOUT an 'L-' prefix ('alanine', not 'L-alanine') - checking the
+    # built network's nodes.tsv instead would be misleading, because currency
+    # metabolites and hubs are filtered out during network construction, so ATP and
+    # the amino acids are absent from it by design.
+    #
+    # dntp_endpoints is the tightest test of the nucleotide arm: four metabolites,
+    # the direct products of ribonucleotide reductase and thymidylate synthase,
+    # which are the best-represented metabolic targets in the PRISM library (RNR 4
+    # drugs, TS 4, DHFR 3). Unlike the NTPs they are not currency hubs, so they
+    # survive the hub filter.
+    'dntp_endpoints':       ['dATP', 'dGTP', 'dCTP', 'dTTP'],
+    'ntp_endpoints':        ['ATP', 'GTP', 'CTP', 'UTP'],
+    'nmp_endpoints':        ['AMP', 'GMP', 'CMP', 'UMP', 'IMP', 'dTMP', 'dUMP'],
+    'amino_acid_endpoints': ['alanine', 'arginine', 'asparagine', 'aspartate', 'cysteine',
+                             'glutamate', 'glutamine', 'glycine', 'histidine', 'isoleucine',
+                             'leucine', 'lysine', 'methionine', 'phenylalanine', 'proline',
+                             'serine', 'threonine', 'tryptophan', 'tyrosine', 'valine'],
 }
 
 # Hubs by name, in addition to whatever the degree cutoff picks up

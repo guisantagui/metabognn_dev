@@ -64,10 +64,16 @@ phenotype difference:  AUC(d, X) - AUC(d, Y)
 predictor difference:  setscore(d | X labels) - setscore(d | Y labels)
 ```
 
-and ask whether the two correlate across drugs. **Differencing removes the drug's general potency entirely** -
-a compound that is simply toxic everywhere contributes zero to both sides - so the confounder is cancelled by
-construction rather than matched away. What remains is strictly the *selectivity* question: when a drug hits
-one line harder than another, do that line's MetChange labels say so?
+and ask whether the two correlate across drugs. **Differencing removes the drug's general potency** -
+a compound that is simply toxic everywhere contributes zero to both sides. What remains is the *selectivity*
+question: when a drug hits one line harder than another, do that line's MetChange labels say so?
+
+> **CORRECTED after running it (section 8.3).** The original wording here said the confounder is "cancelled by
+> construction rather than matched away". That is only half right. Differencing cancels confounding that is
+> **shared** between the two cells; it does **not** cancel a **cell-specific** coupling between score and
+> sensitivity. Those couplings turned out to range from +0.036 to +0.126 across the five lines, and the
+> difference between them became the largest signal in the result. Read section 8 before relying on anything
+> in 1.2.
 
 This is the symmetric test report 09, section 6 asked for, and it is the first version of it with real power:
 
@@ -536,3 +542,296 @@ on the laptop (`python3 on PATH`).
 
 This is the fourth member of the family catalogued in 7.6: **the failure mode that matters is not the error,
 it is the confident-looking success.**
+
+## 8. PRISM differential, run: the prediction FAILS, and the design is weaker than section 1.2 claimed
+
+*All five covered cell lines scored on the cluster against their own MetChange labels
+(`run_info.json` confirms `/scratch/.../labels/<CELL>/metchange/rank` for each; 679-760 drugs per cell),
+then `prism_differential.py` over 40 set x variant combinations x 10 cell pairs = 400 tests.
+Outputs: `results/mc_phenotype_assoc/cross_cell/prism_differential{,_standardised}.tsv`.*
+
+### 8.1 The result
+
+**The pre-registered prediction is not supported.** Of 400 combinations, **171 (43%) carry the predicted
+positive sign** against the 50% that means no signal, and of the **13 that pass BH q < 0.05, none has the
+predicted sign** - every one is negative:
+
+| pair | set | variant | n | r_diff | perm p | BH q | r_selective |
+|---|---|---|---|---|---|---|---|
+| A375/MCF7 | glycolysis | cyto_nohub | 684 | **-0.187** | 0.0005 | 3.3e-04 | -0.244 |
+| A375/MCF7 | glycolysis | cyto | 684 | -0.156 | 0.0005 | 0.008 | -0.221 |
+| A375/PC3 | energy_currency | all | 735 | -0.146 | 0.0005 | 0.009 | -0.218 |
+| A375/PC3 | adenylates | all | 735 | -0.141 | 0.0005 | 0.009 | -0.228 |
+| A375/PC3 | oxphos | mito | 735 | -0.133 | 0.0005 | 0.015 | -0.180 |
+
+Per the pre-registration in 7.4, a negative `r_diff` **contradicts** the prediction rather than supporting it
+with a flipped sign. Effect sizes are small throughout: |r| <= 0.19.
+
+### 8.2 It is one cell line, and standardising does not remove it
+
+**All 13 significant results are pairs containing A375**, and the mean `r_diff` per pair sorts almost
+perfectly by whether A375 is in it:
+
+| cell pair | mean r_diff | fraction positive |
+|---|---|---|
+| A375/PC3 | -0.061 | 18% |
+| A375/MCF7 | -0.054 | 5% |
+| A375/A549 | -0.043 | 8% |
+| A375/HT29 | -0.026 | 35% |
+| MCF7/PC3 | -0.009 | 30% |
+| A549/MCF7 | -0.006 | 40% |
+| HT29/PC3 | +0.008 | 65% |
+| HT29/MCF7 | +0.017 | 70% |
+| A549/HT29 | +0.021 | 80% |
+| A549/PC3 | **+0.035** | 78% |
+
+The first suspicion was arithmetic: differencing only cancels the confounder if neither cell dominates the
+difference, and A375 has the largest score dispersion of the five (median within-set SD 0.328 against
+0.263-0.303), so `dS` would lean towards it and `r_diff` would inherit A375's own within-cell correlation.
+Consistent with that, `corr(r_diff, naive_r_in_x) = +0.40` overall and **+0.45** restricted to A375.
+
+So `--standardise-within-cell` was added, z-scoring each cell's scores across drugs per set before
+differencing. **It barely changes anything**: 9 significant instead of 13, still all negative, still all
+A375 pairs, 42% positive sign. Variance dominance is not the explanation.
+
+### 8.3 What is actually going on, and the correction to section 1.2
+
+The within-cell correlation `Spearman(set score, AUC)` - the quantity the design was meant to avoid - differs
+systematically between cell lines:
+
+| | A375 | A549 | HT29 | MCF7 | PC3 |
+|---|---|---|---|---|---|
+| glycolysis cyto_nohub | **-0.155** | -0.003 | +0.090 | +0.059 | +0.006 |
+| tca_endpoints mito_nohub | +0.160 | -0.018 | +0.230 | +0.313 | +0.123 |
+| mean over the 40 combinations | **+0.071** | +0.036 | +0.126 | +0.126 | +0.120 |
+| combinations at p < 0.01 | 22 | 11 | **27** | **26** | **28** |
+
+A375's coupling is the weakest and most often negative (32% of sets), where HT29, MCF7 and PC3 sit near +0.12
+with 26-28 of 40 sets significant. The A375/MCF7 glycolysis result follows directly: -0.155 in A375 against
++0.059 in MCF7, and `r_diff = -0.180`.
+
+**This is the correction.** Section 1.2 claimed the differential "removes the drug's general potency by
+construction, so the confounder is cancelled rather than matched away". That is **half true, and the half it
+gets wrong matters**:
+
+- differencing does cancel what is **shared** between the two cells - a compound that is simply toxic
+  everywhere has `dP ~ 0` and contributes nothing, exactly as argued;
+- it does **not** cancel a **cell-specific** coupling between score and sensitivity. When cell X couples at
+  -0.155 and cell Y at +0.059, `corr(dS, dP)` measures *the difference in their confounding*, not the biology.
+
+So `r_diff` is not a clean estimate. The design removes drug-level confounding and leaves cell-level
+confounding untouched, and with five cell lines whose couplings range from +0.036 to +0.126 that residue is
+the largest signal in the table.
+
+### 8.4 The one thing that does point the predicted way, and why it cannot be claimed
+
+The **within-cell** correlations are mostly **positive**, which *is* the predicted direction: a drug that
+lowers predicted capacity (low score) should inhibit growth more (low AUC), giving a positive correlation.
+Four of five lines show it, at mean +0.036 to +0.126.
+
+It cannot be claimed as support, for the reason the differential existed in the first place: **26 to 28 of 40
+set x variant combinations are significant at p < 0.01 in HT29, MCF7 and PC3.** A hypothesis about
+biomass precursors predicts specific sets, not nearly all of them. Near-uniform significance across
+glycolysis, TCA, OXPHOS, PPP, adenylates and energy currency alike is the signature of general bioactivity -
+cytotoxic drugs lower AUC and move every metabolite set - which is precisely what reports 07-09 spent their
+effort excluding and what 1.1 predicted would happen here. The negative-control sets were not included in
+this run, and should be next time: if `negctrl_o_glycan` also correlates at +0.12, the matter is settled.
+
+### 8.5 FIRST: the stated hypothesis was not the one tested
+
+`data/validation/prism/notes.md` states the hypothesis as **"Biomass precursors (nucleotides, amino acids) ->
+proliferation."** The 11 sets in `metabolite_sets.tsv` are `adenylates, energy_currency, etc_endpoints,
+glycolysis, glycolysis_endpoints, oxphos, ppp, pyruvate, redox_couples, tca, tca_endpoints` - **all central
+carbon and energy metabolism. There is no nucleotide set and no amino-acid set**; `grep -i
+'nucleotide|amino|purine|pyrimidine'` returns nothing. `ppp` feeds nucleotide synthesis and `adenylates` is
+AMP/ADP/ATP, and that is the whole of the overlap.
+
+**So section 8 tests an energy-metabolism proxy, not the biomass-precursor hypothesis.** Everything in 8.1-8.4
+stands as stated - the design limitation of 8.3 in particular is independent of which sets are used - but the
+verdict below must be read as applying to energy metabolism only.
+
+There is a second mismatch. The `z` statistic is standardised **within each perturbation**, so it measures the
+set's displacement relative to *that drug's own average feature*, i.e. pathway selectivity within the response.
+A drug that uniformly collapses everything scores ~0 on every set. For "collapse of biomass precursors stops
+proliferation" the relevant quantity is plausibly *total* disruption, which `z` removes by construction.
+`--mode value` also produces `auroc`, and an unstandardised summary would need adding.
+
+### 8.6 Verdict and what would be needed
+
+**PRISM does not support an energy-metabolism version of the hypothesis, and does not test the
+biomass-precursor version at all.** The pre-registered differential is null-to-contradicted (0 of 400
+significant combinations with the predicted sign), the significant negatives reduce to one cell line's
+anomalous within-cell coupling, and the within-cell signal that does run the right way is non-specific enough
+to be bioactivity.
+
+This was the best-powered cell-matched test available - 821 drugs, five lines - so the negative carries more
+weight than the small-n nulls of report 09, 8.1 and report 10, 5. It does not bear on the HepG2 MMP and
+SH-SY5Y ATP results of report 09, which used different phenotypes and, crucially, phenotypes that are not
+themselves the confounder.
+
+What a usable version would need:
+
+0. ~~**Nucleotide and amino-acid sets**, which do not exist yet~~ - **DONE 2026-11-24, see 9.5.** This was
+   described as needing curation and a scope decision. It needed neither: `SUBSYSTEMS` in
+   `build_metabolite_sets.py` is a map from set name to Human-GEM subsystem names, and **Human-GEM has 19
+   nucleotide / amino-acid subsystems out of 147**, so the sets are a lookup.
+1. **Negative-control sets in the run**, to quantify how much of the within-cell correlation is non-specific.
+   One extra `--sets` argument; should have been in the first run.
+2. **Cell-level confounding handled explicitly** - for instance regressing each cell's score on its own AUC
+   and differencing the residuals, or matching drugs on overall potency within each cell before differencing.
+   Differencing alone is not enough, which 8.3 now establishes.
+3. **A phenotype that is not viability.** This remains the real obstacle: reports 07-09 established that
+   viability and responsiveness are the confounders, and PRISM's phenotype *is* viability. The problem
+   identified in 1.1 was not solved by the differential, only moved.
+
+## 9. The comparison is not fair: growth inhibition has many mechanisms
+
+*Raised as an objection to section 8 and it is correct, quantitatively decisive, and changes the conclusion
+from "PRISM says no" to "PRISM cannot say". Added `--moa-regex` to `prism_differential.py`; results in
+`results/mc_phenotype_assoc/cross_cell/prism_differential_moa.tsv`.*
+
+### 9.1 Only 5% of the library can test the hypothesis
+
+A hypothesis about metabolite production capacity applies to drugs that act **through** metabolism. Growth
+inhibition does not require that: a tubulin poison, a topoisomerase inhibitor or a kinase inhibitor lowers AUC
+with no primary metabolic lesion, and for those drugs there is no reason the metabolic difference should track
+the viability difference.
+
+The PRISM repurposing set is overwhelmingly of that kind. Its commonest MoAs are EGFR inhibitor (22), tubulin
+polymerization inhibitor (17), HDAC inhibitor (17), MEK inhibitor (14), topoisomerase inhibitor (13), mTOR
+inhibitor (13), CDK inhibitor (13), glucocorticoid receptor agonist (13). **Drugs with a metabolic MoA: 45 of
+821, or 5%** - ribonucleotide reductase (4), thymidylate synthase (4), DHFR (3), dihydroorotate dehydrogenase
+(3), IMPDH (2), purine antagonists (2), and singletons.
+
+### 9.2 What pooling across mechanisms does to the test
+
+Simulated: 45 drugs with a genuine correlation, embedded in 776 with none, Spearman over all 821.
+
+| true r in the 45 drugs | pooled r reported | P(pooled test reaches p < 0.05) |
+|---|---|---|
+| 0.0 | -0.000 | 6% |
+| 0.2 | +0.011 | 6% |
+| 0.4 | +0.022 | 8% |
+| 0.6 | +0.030 | 14% |
+| **0.8** | **+0.045** | **24%** |
+
+**The actual run reported median |r_diff| = 0.030.** That is indistinguishable from a true r of 0.6-0.8 among
+the applicable drugs. So the pooled test of section 8 **cannot separate "no effect" from "a very large
+mechanism-specific effect"**, and its null is close to uninformative for the stated hypothesis. This is a
+worse problem than the set mismatch of 8.5 and the cell-level confounding of 8.3, because it is about whether
+the question was askable at all with this design.
+
+### 9.3 The stratified test: also underpowered, but the aggregate comparison is not
+
+`--moa-regex` now reports each combination for the matching drugs and for the complement, the complement being
+the built-in control: **the hypothesis predicts an effect in the matching group and not in the complement.**
+
+Per cell pair only **30** drugs match (fewer than 45, since a drug must be scored in both cells). Individually
+that is hopeless after correction: BH over 400 tests needs p < 1.25e-04, which at n = 30 requires |r| ~ 0.65.
+Unsurprisingly **0 of 400 reach BH q < 0.05 in the matching group** - the smallest q is 0.995 - and the largest
+values are incoherent in sign across pairs for the same set (`HT29/PC3 etc_endpoints` +0.415 against
+`HT29/PC3 energy_currency` -0.362), which is what n = 30 noise looks like.
+
+The informative comparison is the aggregate, which pools over all 400 and is therefore far better powered:
+
+| | matching drugs (hypothesis applies) | complement (control) |
+|---|---|---|
+| predicted positive sign | 184 of 400 (**46%**) | 168 of 400 (**42%**) |
+| median r | **-0.015** | **-0.010** |
+
+**The hypothesis predicts the matching group to exceed the complement. It does not** - 46% against 42% is
+nothing, and the medians are both slightly negative and essentially equal. Caveat: the 400 tests are not
+independent (10 pairs sharing 5 cells, nested set variants), so the effective n behind that comparison is much
+smaller than 400 and it should not be read as a precise estimate - only as the absence of the predicted
+separation.
+
+Also worth stating: **the amino-acid arm of the hypothesis is untested for lack of drugs.** Almost all 45
+matching compounds are nucleotide- or one-carbon-directed; the library has essentially no amino-acid-metabolism
+agents.
+
+### 9.4 Revised verdict on PRISM
+
+Sections 8.5, 8.3 and 9.2 compound rather than overlap, and together they change the conclusion:
+
+1. the sets tested were central carbon and energy metabolism, **not** the nucleotides and amino acids the
+   hypothesis names (8.5);
+2. differencing cancels drug-level but **not cell-level** confounding, and the residue was the largest signal
+   in the table (8.3);
+3. **95% of the library cannot test the hypothesis**, and pooling them makes a true r of 0.8 look like
+   r = 0.045 (9.2);
+4. the stratified test has no power after correction at 30 drugs per pair, and the one well-powered
+   comparison - matching versus complement - is flat (9.3).
+
+**So PRISM does not refute the hypothesis; it is structurally a weak instrument for it.** Report 10, section
+1.2 called it "a far better-powered version of the cross-cell-line test" on the strength of 821 drugs and 5
+cell lines. That counted compounds without asking how many were *relevant* compounds, which is the same error
+as counting whole-LINCS overlap without asking about the cell-line panel (5.1, and the rule recorded there).
+**The lesson generalises: usable n is the number of drugs for which the hypothesis makes a prediction, not the
+number of drugs in the file.**
+
+What PRISM remains genuinely good for: a well-powered **cell-line-selectivity** readout for any question that
+applies to bioactive compounds generally rather than to metabolically-acting ones, and the 8.3 diagnostic of
+how much cell-specific score-to-sensitivity coupling each label set carries - which is worth knowing
+independently of any hypothesis.
+
+## 9.5 The biomass-precursor sets existed all along; they were missing from our set file, not from Human-GEM
+
+*Correction. Section 8.5 said "there is no nucleotide set and no amino-acid set" - true of
+`metabolite_sets.tsv`, which had 11 hand-written central-carbon and energy sets - but section 9.4 then listed
+building them as needing curation and a scope decision. **That was wrong.** `SUBSYSTEMS` in
+`build_metabolite_sets.py` maps a set name to Human-GEM subsystem names and the builder takes every metabolite
+in a reaction of those subsystems. **Human-GEM has 19 nucleotide / amino-acid subsystems of 147**, so this was
+a lookup, not a curation problem.*
+
+The subsystems, with their reaction counts:
+
+| | reactions | | reactions |
+|---|---|---|---|
+| Phenylalanine, tyrosine and tryptophan biosynthesis | 157 | Glycine, serine and threonine metabolism | 61 |
+| Nucleotide metabolism | 119 | Valine, leucine, and isoleucine metabolism | 53 |
+| Purine metabolism | 108 | Cysteine and methionine metabolism | 44 |
+| Arginine and proline metabolism | 99 | Alanine, aspartate and glutamate metabolism | 41 |
+| Tyrosine metabolism | 78 | Lysine metabolism | 32 |
+| Pyrimidine metabolism | 75 | Histidine metabolism, Tryptophan, Beta-alanine, Phenylalanine, Urea cycle, Metabolism of other amino acids | 6-22 each |
+| Folate metabolism | 64 | | |
+
+### Added to `build_metabolite_sets.py`
+
+**Subsystem sets:** `nucleotide` (192 metabolites, `all`), `purine` (150), `pyrimidine` (140), `folate` (97),
+and one combined `amino_acid` (823) rather than fourteen separate ones, to stop the BH family doubling.
+`Amino sugar and nucleotide sugar metabolism` is deliberately excluded - it is glycan-adjacent and belongs
+nearer the `NEG_CONTROL` sets than to biosynthesis of either precursor class.
+
+**Curated endpoint sets**, in the style of the existing `*_endpoints`:
+
+| set | members (`all`) | note |
+|---|---|---|
+| **`dntp_endpoints`** | 14 | **the tightest test of the nucleotide arm** - dATP/dGTP/dCTP/dTTP are the direct products of ribonucleotide reductase and thymidylate synthase, the best-represented metabolic targets in the PRISM library (RNR 4 drugs, TS 4, DHFR 3), and unlike the NTPs they are **not** currency hubs, so `all_nohub` is also 14 |
+| `ntp_endpoints` | 20 | ATP/GTP/CTP/UTP; no `nohub` variant exists because all four are hubs, which is itself worth knowing |
+| `nmp_endpoints` | 39 | AMP/GMP/CMP/UMP/IMP/dTMP/dUMP |
+| `amino_acid_endpoints` | 89 | the 20 proteinogenic amino acids |
+
+### Two naming traps, both hit while doing this
+
+1. **The amino acids carry no `L-` prefix in Human-GEM** - `alanine`, not `L-alanine`. Probing with the
+   prefixed form returned 1 of 20 and looked like the model was missing them.
+2. **Do not check metabolite names in `data/networks/combined/nodes.tsv`.** That is the *built* network, and
+   currency metabolites and hubs are filtered out during construction, so ATP, GTP, CTP, UTP and every amino
+   acid are absent from it **by design**. Checking there suggested the GEM lacked ATP. The authoritative
+   source is `data/GEMs/Human-GEM/model/Human-GEM.yml`, parsed the way the builder parses it; note
+   `model/metabolites.tsv` carries only cross-reference IDs and no `metName` column.
+
+The builder warns on an unmatched subsystem and on an unmatched curated metabolite, so a typo is loud rather
+than silent - but only if the name is checked against the right file.
+
+### Next step
+
+The sets are built locally. To use them the label matrices must be rescored, which means the cluster: copy the
+regenerated `metabolite_sets.tsv` across (it is small) or rebuild it there with
+`rebuild_sets=true cell=ALL bash scripts/mc_phenotype_assoc/prepare_assoc_inputs.sh`, then re-run
+`launch_prism_slurm.sh`. The PRISM phenotype table does not change.
+
+Note for interpretation when that lands: adding 9 sets enlarges the BH family, so the correction gets
+stricter, and `amino_acid` at 823 metabolites is a seventh of the whole matrix - a set that large is close to
+a global measure and should be read with that in mind. `dntp_endpoints` is the set to look at first, because it
+is small, mechanistically specific, and matched to the drugs that are actually present.

@@ -45,7 +45,7 @@ Inputs are small: the phenotype table (a few hundred kB) and one
 are never touched here, so this runs equally well on the cluster or on a laptop
 after downloading only those files.
 """
-import argparse, csv, itertools, os, sys
+import argparse, csv, itertools, os, re, sys
 
 import numpy as np
 
@@ -55,8 +55,11 @@ except Exception:                                   # noqa: BLE001
     sps = None
 
 
-def read_phenotype(path, metric):
+def read_phenotype(path, metric, moa_out=None):
     rows = list(csv.DictReader(open(path), delimiter='\t'))
+    if moa_out is not None:
+        for r in rows:
+            moa_out[r['drug']] = r.get('moa', '') or ''
     if not rows:
         raise SystemExit('empty phenotype table %s' % path)
     pref = '%s_' % metric
@@ -125,6 +128,29 @@ def main():
     ap.add_argument('--cells', default='', help='default: every cell with both a score file and a phenotype column')
     ap.add_argument('--statistic', default='z')
     ap.add_argument('--method', default='spearman', choices=['spearman', 'pearson'])
+    ap.add_argument('--moa-regex', default='',
+                    help='case-insensitive pattern on the phenotype table\'s `moa` column. When given, every '
+                         'combination is additionally reported for the MATCHING drugs and for the COMPLEMENT '
+                         'separately. This matters more than any other option here: growth inhibition is '
+                         'achieved by many mechanisms, and a hypothesis about metabolite production applies '
+                         'only to drugs that act through metabolism. In the PRISM repurposing set just 45 of '
+                         '821 drugs (5%) have a metabolic MoA - the rest are kinase inhibitors, tubulin '
+                         'poisons, HDAC inhibitors, receptor ligands. Simulation: with a TRUE r of 0.8 among '
+                         'those 45, the pooled 821-drug test reports r ~ 0.045 and reaches p<0.05 only 24% of '
+                         'the time, so the pooled test cannot distinguish a strong mechanism-specific effect '
+                         'from none at all. The complement is the built-in control: the hypothesis predicts '
+                         'an effect in the matching group and NOT in the complement.')
+    ap.add_argument('--moa-min-drugs', type=int, default=20,
+                    help='minimum drugs in a MoA subgroup before it is reported (default 20)')
+    ap.add_argument('--standardise-within-cell', action='store_true',
+                    help='z-score each cell line\'s scores across drugs, per set, BEFORE differencing. '
+                         'Differencing only cancels the confounder if neither cell dominates the '
+                         'difference; when one cell\'s scores are more dispersed, dS leans towards it and '
+                         'r_diff inherits that cell\'s naive within-cell correlation. Observed: '
+                         'corr(r_diff, naive_r_in_x) = +0.40 overall and +0.45 for A375, which has the '
+                         'largest dispersion of the five lines (SD 0.328 vs 0.263-0.303), and every '
+                         'BH-significant result was a pair CONTAINING A375. Use this to test whether an '
+                         'effect survives once that asymmetry is removed.')
     ap.add_argument('--selective-cut', type=float, default=0.1,
                     help='|dP| above which a drug counts as cell-selective (default 0.1 AUC)')
     ap.add_argument('--min-drugs', type=int, default=30)
@@ -136,7 +162,13 @@ def main():
     if sps is None:
         raise SystemExit('scipy is required')
 
-    pheno, pheno_cells = read_phenotype(args.phenotype, args.metric)
+    moa = {}
+    pheno, pheno_cells = read_phenotype(args.phenotype, args.metric, moa)
+    moa_re = re.compile(args.moa_regex, re.I) if args.moa_regex else None
+    if moa_re is not None:
+        n_match = sum(1 for d in pheno if moa_re.search(moa.get(d, '')))
+        print('MoA filter %r matches %d of %d drugs (%.0f%%); the complement is the control'
+              % (args.moa_regex, n_match, len(pheno), 100 * n_match / max(1, len(pheno))))
     scores, missing = {}, []
     for c in (args.cells.replace(',', ' ').split() or pheno_cells):
         p = os.path.join(args.scores_root, c, args.run_name, 'per_drug_scores.tsv')
@@ -154,6 +186,18 @@ def main():
                          'score another with: cell=<CELL> bash scripts/mc_phenotype_assoc/launch_prism_cell.sh')
 
     keys = sorted(set.intersection(*[{k for k in s if k[2] == args.statistic} for s in scores.values()]))
+    if args.standardise_within_cell:
+        for c, sc in scores.items():
+            for key in list(sc):
+                vals = np.array([v for v in sc[key].values() if np.isfinite(v)], float)
+                if len(vals) < 3:
+                    continue
+                mu, sd = vals.mean(), vals.std()
+                if sd == 0:
+                    continue
+                sc[key] = {d: (v - mu) / sd for d, v in sc[key].items()}
+        print('scores z-scored within each cell line per set before differencing '
+              '(--standardise-within-cell)')
     pairs = list(itertools.combinations(sorted(scores), 2))
     print('%d set x variant combinations x %d cell pairs, statistic=%s, %s correlation'
           % (len(keys), len(pairs), args.statistic, args.method))
@@ -197,10 +241,23 @@ def main():
             # the confounded quantity, as a foil only
             naive = corr(np.array([sx[d] for d in drugs]),
                          np.array([pheno[d][X] for d in drugs]))[0]
+            # MoA strata: the matching group is where the hypothesis applies at all,
+            # the complement is the built-in control.
+            r_moa = p_moa = r_oth = p_oth = np.nan
+            n_moa = n_oth = 0
+            if moa_re is not None:
+                m = np.array([bool(moa_re.search(moa.get(d, ''))) for d in drugs])
+                n_moa, n_oth = int(m.sum()), int((~m).sum())
+                if n_moa >= args.moa_min_drugs and np.nanstd(dS[m]) > 0 and np.nanstd(dP[m]) > 0:
+                    r_moa, p_moa = corr(dS[m], dP[m])
+                if n_oth >= args.moa_min_drugs and np.nanstd(dS[~m]) > 0 and np.nanstd(dP[~m]) > 0:
+                    r_oth, p_oth = corr(dS[~m], dP[~m])
             rows.append({'cell_x': X, 'cell_y': Y, 'set': key[0], 'variant': key[1],
                          'statistic': key[2], 'n_drugs': len(drugs), 'r_diff': r, 'p_diff': p,
                          'perm_p': perm_p, 'n_selective': int(sel.sum()),
-                         'r_selective': r_sel, 'p_selective': p_sel, 'naive_r_in_x': naive})
+                         'r_selective': r_sel, 'p_selective': p_sel, 'naive_r_in_x': naive,
+                         'n_moa': n_moa, 'r_moa': r_moa, 'p_moa': p_moa,
+                         'n_other': n_oth, 'r_other': r_oth, 'p_other': p_oth})
     if degenerate:
         print('\nSKIPPED %d combination(s) with a constant or all-missing difference vector '
               '(no information; reporting them would invent a p-value):' % len(degenerate))
@@ -231,6 +288,36 @@ def main():
                  r['n_drugs'], r['r_diff'], r['perm_p'], r['bh_q'],
                  r['r_selective'] if np.isfinite(r['r_selective']) else 0.0,
                  r['n_selective'], r['naive_r_in_x']))
+    if moa_re is not None:
+        ok = [r for r in rows if np.isfinite(r['r_moa'])]
+        if ok:
+            ok.sort(key=lambda r: r['p_moa'])
+            qm = bh([r['p_moa'] for r in ok])
+            for r, qq in zip(ok, qm):
+                r['bh_q_moa'] = qq
+            print()
+            print('MoA-STRATIFIED: matching drugs (where the hypothesis applies) vs the complement (control)')
+            h = ('%-9s %-20s %-11s %5s %8s %8s %6s %8s'
+                 % ('pair', 'set', 'variant', 'n_moa', 'r_moa', 'BHq_moa', 'n_oth', 'r_oth'))
+            print(h)
+            print('-' * len(h))
+            for r in ok[:args.top]:
+                print('%-9s %-20s %-11s %5d %+8.3f %8.3g %6d %+8.3f'
+                      % ('%s/%s' % (r['cell_x'], r['cell_y']), r['set'][:20], r['variant'],
+                         r['n_moa'], r['r_moa'], r['bh_q_moa'], r['n_other'], r['r_other']))
+            pm = sum(1 for r in ok if r['r_moa'] > 0)
+            po = sum(1 for r in ok if np.isfinite(r['r_other']) and r['r_other'] > 0)
+            print()
+            print('predicted POSITIVE sign: %d of %d (%.0f%%) in the MATCHING group, '
+                  '%d of %d (%.0f%%) in the COMPLEMENT'
+                  % (pm, len(ok), 100 * pm / len(ok), po, len(ok), 100 * po / len(ok)))
+            print('BH q < 0.05 in the matching group: %d, of which %d positive'
+                  % (sum(1 for r in ok if r['bh_q_moa'] < 0.05),
+                     sum(1 for r in ok if r['bh_q_moa'] < 0.05 and r['r_moa'] > 0)))
+            print('median r: matching %+.3f, complement %+.3f  '
+                  '(the hypothesis predicts the first to exceed the second)'
+                  % (np.nanmedian([r['r_moa'] for r in ok]),
+                     np.nanmedian([r['r_other'] for r in ok])))
     pos = sum(1 for r in rows if r['r_diff'] > 0)
     sig = [r for r in rows if r['bh_q'] < 0.05]
     print()
