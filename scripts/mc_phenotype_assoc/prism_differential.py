@@ -98,6 +98,75 @@ def read_scores(path):
     return out
 
 
+def gem_gene_subsystems(nodes_path):
+    """gene symbol -> {GEM subsystem}, from the reaction rows' GPRs."""
+    out = {}
+    with open(nodes_path, newline='') as fh:
+        for r in csv.DictReader(fh, delimiter='\t'):
+            if r.get('node_type') != 'reaction' or not r.get('gpr') or not r.get('subsystem'):
+                continue
+            for g in re.split(r'[^A-Za-z0-9_.-]+', r['gpr']):
+                if g and g not in ('or', 'and'):
+                    out.setdefault(g, set()).add(r['subsystem'])
+    return out
+
+
+def drug_target_effects(path):
+    """lowercased drug name -> {target symbol: effect}"""
+    out = {}
+    with open(path, newline='') as fh:
+        for r in csv.DictReader(fh, delimiter='\t'):
+            n = (r.get('pertname') or '').strip().lower()
+            if n:
+                out.setdefault(n, {})[r['target']] = r.get('effect', '')
+    return out
+
+
+def jaccard_groups(vectors, threshold):
+    """Single-linkage grouping of drugs by Jaccard similarity of their target sets.
+
+    Union-find over pairs above the threshold. Drugs with no annotated targets each
+    form their own group, so they are neither merged together nor discarded.
+    """
+    drugs = sorted(vectors)
+    parent = {d: d for d in drugs}
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    # only drugs sharing at least one target can exceed any positive threshold
+    by_target = {}
+    for d in drugs:
+        for t in vectors[d]:
+            by_target.setdefault(t, []).append(d)
+    checked = set()
+    for members in by_target.values():
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                a, b = members[i], members[j]
+                key = (a, b) if a < b else (b, a)
+                if key in checked:
+                    continue
+                checked.add(key)
+                va, vb = vectors[a], vectors[b]
+                if not va or not vb:
+                    continue
+                if len(va & vb) / len(va | vb) >= threshold:
+                    union(a, b)
+    groups = {}
+    for d in drugs:
+        groups.setdefault(find(d), []).append(d)
+    return list(groups.values())
+
+
 def bh(ps):
     ps = np.asarray(ps, float)
     ok = np.isfinite(ps)
@@ -140,6 +209,38 @@ def main():
                          'the time, so the pooled test cannot distinguish a strong mechanism-specific effect '
                          'from none at all. The complement is the built-in control: the hypothesis predicts '
                          'an effect in the matching group and NOT in the complement.')
+    ap.add_argument('--targets', default='',
+                    help='data/drug_targets/combined/drug_targets.tsv. Selects drugs by ANNOTATED TARGET '
+                         'rather than by MoA free text, which is both principled and tells you which '
+                         'subsystem should move. Needs --nodes for the gene -> subsystem map. Beware that '
+                         '"has a GEM target" alone is far too permissive: 252 of 821 PRISM drugs qualify, but '
+                         'the commonest subsystems are Transport (82 drugs), Arachidonic acid (69), Linoleate '
+                         '(61), Leukotriene (58), Drug metabolism (54), Xenobiotics (52) and Inositol '
+                         'phosphate (26, the PI3K inhibitors) - signalling lipids, xenobiotic handling and '
+                         'transport, not biomass precursors. Hence --target-subsystems.')
+    ap.add_argument('--nodes', default='',
+                    help='data/networks/combined/nodes.tsv; reaction rows give gpr -> subsystem')
+    ap.add_argument('--target-subsystems',
+                    default=r'nucleotide|purine|pyrimidine|folate|one.carbon|amino acid|alanine|arginine|'
+                            r'asparagine|aspartate|cysteine|glutam|glycine|histidine|isoleucine|leucine|'
+                            r'lysine|methionine|phenylalanine|proline|serine|threonine|tryptophan|tyrosine|'
+                            r'valine|urea cycle|glycolysis|citric acid|tricarboxylic|'
+                            r'oxidative phosphorylation|pentose phosphate',
+                    help='case-insensitive pattern on the GEM subsystem of a drug target. The default is the '
+                         'biomass-precursor AND central-energy subsystems; with --target-effect inh that '
+                         'selects 90 of the 821 PRISM drugs (49 if glycolysis/TCA/OXPHOS/PPP are dropped and '
+                         'only the biomass precursors kept). Pass an empty string to accept any GEM target.')
+    ap.add_argument('--target-effect', default='inh',
+                    help="required effect on the matching target ('inh', 'act', or '' for any). Default "
+                         "'inh': activating a biosynthetic enzyme does not predict a capacity collapse.")
+    ap.add_argument('--group-jaccard', type=float, default=0.0,
+                    help='if > 0, collapse drugs into mechanism groups by Jaccard similarity of their target '
+                         'vectors (single-linkage at this threshold) and correlate GROUP MEDIANS instead of '
+                         'individual drugs. This fixes pseudo-replication, which is real here: among 747 '
+                         'PRISM drugs with annotated targets there are only 593 distinct target vectors, and '
+                         '237 drugs share a vector with another - 8 MEK inhibitors as {MAP2K1,MAP2K2}, 7 '
+                         'EGFR, 6 TOP2A, 6 PI3K, 5 tubulin, 5 HSP90, 5 mTOR. Treating those as independent '
+                         'observations inflates every p-value reported without it.')
     ap.add_argument('--moa-min-drugs', type=int, default=20,
                     help='minimum drugs in a MoA subgroup before it is reported (default 20)')
     ap.add_argument('--standardise-within-cell', action='store_true',
@@ -169,6 +270,38 @@ def main():
         n_match = sum(1 for d in pheno if moa_re.search(moa.get(d, '')))
         print('MoA filter %r matches %d of %d drugs (%.0f%%); the complement is the control'
               % (args.moa_regex, n_match, len(pheno), 100 * n_match / max(1, len(pheno))))
+
+    # Target-based selection: principled where the MoA regex is free text.
+    sel_drugs, sel_label, tvectors = None, '', {}
+    if args.targets:
+        if not args.nodes:
+            raise SystemExit('--targets needs --nodes (data/networks/combined/nodes.tsv) for the '
+                             'gene -> GEM subsystem map')
+        g2s = gem_gene_subsystems(args.nodes)
+        dte = drug_target_effects(args.targets)
+        tvectors = {d: frozenset(dte.get(d.lower(), {})) for d in pheno}
+        sub_re = re.compile(args.target_subsystems, re.I) if args.target_subsystems else None
+        sel_drugs = set()
+        for d in pheno:
+            for gene, eff in dte.get(d.lower(), {}).items():
+                subs = g2s.get(gene)
+                if not subs:
+                    continue
+                if sub_re is not None and not any(sub_re.search(x) for x in subs):
+                    continue
+                if args.target_effect and eff != args.target_effect:
+                    continue
+                sel_drugs.add(d)
+                break
+        sel_label = 'target in a matching GEM subsystem%s' % (
+            ', effect=%s' % args.target_effect if args.target_effect else '')
+        print('annotated targets: %d of %d drugs have any; %d have a GEM target in a subsystem matching '
+              'the pattern%s -> these are the MATCHING group, the rest are the control'
+              % (sum(1 for d in pheno if tvectors.get(d)), len(pheno), len(sel_drugs),
+                 ' with effect=%s' % args.target_effect if args.target_effect else ''))
+    if args.group_jaccard > 0 and not tvectors:
+        if not args.targets:
+            raise SystemExit('--group-jaccard needs --targets to build the target vectors')
     scores, missing = {}, []
     for c in (args.cells.replace(',', ' ').split() or pheno_cells):
         p = os.path.join(args.scores_root, c, args.run_name, 'per_drug_scores.tsv')
@@ -184,6 +317,13 @@ def main():
     if len(scores) < 2:
         raise SystemExit('\nthe differential needs at least TWO cell lines; '
                          'score another with: cell=<CELL> bash scripts/mc_phenotype_assoc/launch_prism_cell.sh')
+
+    def _is_match(d):
+        if sel_drugs is not None:
+            return d in sel_drugs
+        if moa_re is not None:
+            return bool(moa_re.search(moa.get(d, '')))
+        return False
 
     keys = sorted(set.intersection(*[{k for k in s if k[2] == args.statistic} for s in scores.values()]))
     if args.standardise_within_cell:
@@ -215,6 +355,23 @@ def main():
                 continue
             dP = np.array([pheno[d][X] - pheno[d][Y] for d in drugs])
             dS = np.array([sx[d] - sy[d] for d in drugs])
+            # Mechanism grouping: collapse each Jaccard group to its median before
+            # correlating, so 8 MEK inhibitors count once rather than eight times.
+            # A group counts as MATCHING if any of its members does.
+            if args.group_jaccard > 0:
+                idx = {d: i for i, d in enumerate(drugs)}
+                gdP, gdS, gmatch, gnames = [], [], [], []
+                for grp in jaccard_groups({d: tvectors.get(d, frozenset()) for d in drugs},
+                                          args.group_jaccard):
+                    ii = [idx[d] for d in grp]
+                    gdP.append(float(np.median(dP[ii])))
+                    gdS.append(float(np.median(dS[ii])))
+                    gmatch.append(any(_is_match(d) for d in grp))
+                    gnames.append(grp[0] if len(grp) == 1 else '%s+%d' % (grp[0], len(grp) - 1))
+                dP, dS = np.array(gdP), np.array(gdS)
+                drugs, group_match = gnames, np.array(gmatch)
+            else:
+                group_match = None
             # A set whose members are all absent from both label matrices gives a
             # constant (or all-nan) difference vector. Guard it: with a non-finite r,
             # `|null| >= |r|` is False for every permutation, so the permutation p-value
@@ -239,14 +396,23 @@ def main():
             else:
                 r_sel, p_sel = np.nan, np.nan
             # the confounded quantity, as a foil only
-            naive = corr(np.array([sx[d] for d in drugs]),
-                         np.array([pheno[d][X] for d in drugs]))[0]
+            if group_match is None:
+                naive = corr(np.array([sx[d] for d in drugs]),
+                             np.array([pheno[d][X] for d in drugs]))[0]
+            else:
+                naive = np.nan   # undefined once drugs are collapsed into groups
             # MoA strata: the matching group is where the hypothesis applies at all,
             # the complement is the built-in control.
             r_moa = p_moa = r_oth = p_oth = np.nan
             n_moa = n_oth = 0
-            if moa_re is not None:
+            m = None
+            if group_match is not None:
+                m = group_match
+            elif sel_drugs is not None:
+                m = np.array([d in sel_drugs for d in drugs])
+            elif moa_re is not None:
                 m = np.array([bool(moa_re.search(moa.get(d, ''))) for d in drugs])
+            if m is not None:
                 n_moa, n_oth = int(m.sum()), int((~m).sum())
                 if n_moa >= args.moa_min_drugs and np.nanstd(dS[m]) > 0 and np.nanstd(dP[m]) > 0:
                     r_moa, p_moa = corr(dS[m], dP[m])
@@ -296,7 +462,8 @@ def main():
             for r, qq in zip(ok, qm):
                 r['bh_q_moa'] = qq
             print()
-            print('MoA-STRATIFIED: matching drugs (where the hypothesis applies) vs the complement (control)')
+            print('STRATIFIED by %s: matching (where the hypothesis applies) vs complement (control)'
+                  % (sel_label or ('MoA %r' % args.moa_regex)))
             h = ('%-9s %-20s %-11s %5s %8s %8s %6s %8s'
                  % ('pair', 'set', 'variant', 'n_moa', 'r_moa', 'BHq_moa', 'n_oth', 'r_oth'))
             print(h)

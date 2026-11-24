@@ -835,3 +835,161 @@ Note for interpretation when that lands: adding 9 sets enlarges the BH family, s
 stricter, and `amino_acid` at 823 metabolites is a seventh of the whole matrix - a set that large is close to
 a global measure and should be read with that in mind. `dntp_endpoints` is the set to look at first, because it
 is small, mechanistically specific, and matched to the drugs that are actually present.
+
+## 10. With the biomass sets and target-based drug selection, the NUCLEOTIDE arm behaves as predicted and the AMINO-ACID arm contradicts
+
+*The cluster rescore with the 9 new sets landed the same day (`run_info.json`: 82 sets scored per cell,
+679-760 drugs). Drug selection by annotated target rather than MoA free text was suggested before any of these
+results existed. Outputs: `prism_differential_targets.tsv` (energy + biomass targets) and
+`prism_differential_nucleotide_targets.tsv` (nucleotide-pathway targets only).*
+
+### 10.1 The effect appears only when the drugs are mechanism-matched, and grows as the match tightens
+
+Mean `r_diff` over cell pairs, with the pre-registered prediction being **positive**:
+
+| set | all 821 drugs | energy+biomass targets (~80/pair) | **nucleotide-pathway targets only (~41/pair)** | complement |
+|---|---|---|---|---|
+| **`dntp_endpoints`** | -0.036 | +0.099 (60% of pairs +) | **+0.136 (80% +)** | -0.046 |
+| `ntp_endpoints` | -0.040 | +0.110 (60% +) | **+0.154 (80% +)** | -0.051 |
+| `nmp_endpoints` | -0.039 | +0.083 | +0.098 (68% +) | -0.047 |
+| `nucleotide` | -0.044 | +0.086 | +0.105 (65% +) | -0.053 |
+| `pyrimidine` | -0.041 | +0.080 | +0.091 (68% +) | -0.050 |
+| `purine` | -0.051 | +0.055 | +0.081 (55% +) | -0.060 |
+| `folate` | -0.012 | +0.016 | +0.018 (53% +) | -0.016 |
+| **`amino_acid`** | -0.018 | **-0.078 (27% +)** | **-0.100 (20% +)** | -0.012 |
+| `amino_acid_endpoints` | +0.001 | -0.056 (30% +) | -0.066 (30% +) | +0.008 |
+
+Selection sizes: 90 drugs match the energy+biomass subsystems with `effect=inh`, 44 match the
+nucleotide-pathway subsystems only.
+
+Three features of that table matter:
+
+1. **The sign flips with mechanism matching.** Pooled over all drugs every nucleotide set is slightly
+   negative; restricted to drugs that inhibit a nucleotide-pathway enzyme they are positive. That is the
+   direction predicted in 7.4 before any of this was run.
+2. **The effect grows as the match tightens** (-0.036 -> +0.099 -> +0.136 for `dntp_endpoints`) while n falls
+   from 684 to 41, which is the opposite of what a chance finding does.
+3. **The complement behaves as a control should** - about -0.05 throughout, i.e. no effect in the drugs where
+   the hypothesis does not apply.
+
+### 10.2 The aggregate statistics, and which ones are legitimate
+
+**Only `dntp_endpoints` and `ntp_endpoints` have a single variant**, so their 10 rows are genuinely one per
+cell pair. The other sets have 6 compartment/hub variants each, so their "60 pairs" are nested and their sign
+counts are inflated - those rows must not be read as 60 independent tests.
+
+For the two clean sets, nucleotide-targeting drugs, over the 10 cell pairs:
+
+| | `dntp_endpoints` | `ntp_endpoints` |
+|---|---|---|
+| pairs with the predicted positive sign | **8 of 10** | **8 of 10** |
+| sign test (one-sided) | p = 0.055 | p = 0.055 |
+| mean Fisher z | +0.140 | +0.159 |
+| p from the across-pair spread | 0.005 | 0.001 |
+| **matched vs complement, paired Wilcoxon over the same 10 pairs** | **p = 0.0020** | **p = 0.0010** |
+| strongest single pair | HT29/MCF7 +0.374 (p = 0.018) | HT29/MCF7 +0.396 (p = 0.012) |
+
+The **paired Wilcoxon is the right statistic**: it tests the crossed prediction directly - matched drugs
+exceeding the complement - and being paired on cell pair it removes pair-level effects, which is what defeated
+the pooled analysis of section 8. **It is also one test per set rather than per pair**, so its multiplicity
+burden is 9 sets rather than 820 combinations; see 10.3 for the corrected q-values and for why the same
+statistic must be ignored on the six-variant sets.
+
+The amino-acid arm fails the same test decisively in the opposite direction: 2 of 10 pairs positive, mean
+Fisher z -0.102, paired Wilcoxon p = 1.000 against the prediction.
+
+### 10.3 What this is and is not
+
+**Is:** a mechanism-matched, directionally pre-registered association in the nucleotide arm, with a
+correctly-behaving control group, which strengthens monotonically as the mechanistic match tightens. On a
+phenotype (viability) that is itself the confounder of reports 07-09, and in a design where the pooled version
+is provably unable to see it (9.2).
+
+**Correction, and what is and is not corrected.** Every per-pair `p_moa` quoted above is **uncorrected**, and
+an earlier draft described "p = 0.018 against a BH threshold of ~6e-05", which conflated two different things.
+The 6.1e-05 is α/m = 0.05/820, i.e. the BH threshold a p-value must beat *at rank 1*; it is not a q-value.
+The actual corrected numbers are:
+
+| family | smallest uncorrected p | **actual BH q** | rank-1 threshold |
+|---|---|---|---|
+| per-pair tests, 820 = sets x variants x pairs | 0.0019 | **0.62** | 6.1e-05 |
+| pre-registered `dntp_endpoints` alone, 10 tests | 0.0176 | **0.176** | 0.005 |
+
+So **no individual cell pair survives**, and not narrowly: q = 0.62 over the full family, and still 0.176 over
+the pre-registered single-set family of 10. For p = 0.018 to pass BH over 820 it would need rank >= 296, and
+only 12 tests sit at p <= 0.018.
+
+**The aggregate statistic belongs to a much smaller family, and it does survive.** The paired Wilcoxon is one
+test *per set*, not per pair, so m = 9:
+
+| set | rows | p | **BH q over the 9 sets** |
+|---|---|---|---|
+| `ntp_endpoints` | 10 | 9.8e-04 | **0.0018** |
+| `dntp_endpoints` | 10 | 0.0020 | **0.0029** |
+| `folate` | 60 | 0.033 | 0.043 |
+| `amino_acid_endpoints` | 40 | 0.9985 | 1.000 |
+| `amino_acid` | 60 | 1.000 | 1.000 |
+| `pyrimidine`, `nucleotide`, `nmp_endpoints`, `purine` | 60 | 7e-10 to 1e-07 | **not usable - see below** |
+
+**The four sets with q near 1e-09 must be discarded, not celebrated.** Their Wilcoxon runs over 60 rows that
+are 10 cell pairs x 6 nested compartment/hub variants of the same set, so the test treats pseudo-replicates as
+independent and the p-value is inflated by roughly the variant multiplicity. That is precisely why 10.2
+restricts the aggregate claim to `dntp_endpoints` and `ntp_endpoints`, the only sets with one row per cell
+pair.
+
+**And the surviving aggregate still rests on 10 cell pairs that share only 5 cell lines**, so its effective n
+is below 10; halving the degrees of freedom puts it near p = 0.03, q near 0.05. It is a real pre-specified
+result at the edge of significance, not a comfortable one.
+
+**Pre-registration, honestly apportioned - and the phrase "pre-specified aggregate" withdrawn.**
+
+Fixed before any result existed, with a written record: the **positive direction** (7.4, in
+`prism_differential.py`'s docstring before the differential was first run), **`dntp_endpoints` as the set to
+read first** (9.5 and STATUS, written when the sets were built and before the rescore landed), and the
+**complement-as-control** design (in the `--moa-regex` help text before any stratified run).
+
+**Not** fixed in advance: the narrowing of the drug set from 90 to 44, chosen after seeing the 90-drug result;
+and - the one that matters most - **the aggregate statistic itself**, chosen after it became clear the
+per-pair tests would not survive correction. Calling the result a "pre-specified aggregate" was therefore
+wrong. It is an aggregate test on a pre-specified set, in a pre-specified direction, **with a statistic
+selected after the fact.**
+
+That is not a small distinction, because three defensible aggregates on the same data span a factor of 25:
+
+| statistic | what it tests | p |
+|---|---|---|
+| sign test, 8 of 10 pairs positive | how many pairs point the predicted way; ignores magnitude and ignores the control | **0.055** |
+| mean Fisher z with the across-pair SE | whether the average r differs from zero; ignores the control | 0.005 |
+| paired Wilcoxon, matched vs complement | whether matched exceeds complement - the crossed prediction | **0.0020** |
+
+**10.2 led with 0.0020, the most favourable of the three.** The Wilcoxon remains the best choice *by design*,
+being the only one that uses the control group the crossed prediction depends on - but it is also the one
+least likely to have been chosen had it come out worse, and the most assumption-free statistic, the sign test,
+gives p = 0.055. **Read 0.055 as the conservative figure and 0.0020 as the design-appropriate one, and treat
+the gap between them as the cost of having picked the statistic afterwards.**
+
+The sequence all drugs -> MoA -> any GEM target -> nucleotide targets is four looks at one dataset, so the
+monotone trend of 10.1 is reassuring but is not a substitute for a fresh test (10.4, item 1).
+
+**And half the hypothesis is contradicted.** `notes.md` names nucleotides *and* amino acids. The amino-acid
+sets run significantly the wrong way at every level of matching, and get worse as the match tightens. Either
+amino-acid capacity is not limiting for proliferation in these lines, or the amino-acid sets - 823 metabolites,
+a seventh of the matrix - are too broad to mean anything. `amino_acid_endpoints` (89, the 20 proteinogenic
+acids) is also negative, which argues against the second explanation.
+
+### 10.4 What would settle it
+
+1. **A held-out test.** The forking path of 10.3 is the main threat. The cleanest resolution is the other
+   cell lines: HEPG2, VCAP and HCC515 are absent from PRISM, but the PRISM primary screen covers far more
+   compounds at a single dose, and the CTRP / GDSC viability sets cover other lines - a pre-specified
+   `dntp_endpoints` test there, with the direction and the drug-selection rule fixed in advance, needs no new
+   decisions.
+2. **Drug-specific target-proximal sets**, the refinement that was identified but not yet built: score each
+   drug against the metabolites within one or two reactions of *its own* target rather than against a shared
+   nucleotide set. That collapses 820 tests to 10 and is the single biggest available power gain.
+3. **Mechanism grouping.** `--group-jaccard` is implemented and unused here: 237 of 747 drugs share a target
+   vector with another drug, so the per-pair n of 41 contains pseudo-replicates. Grouping will lower n and
+   should be run before any number from 10.2 is quoted as final.
+4. **A375.** Its pairs are the two that go negative for `dntp_endpoints`, consistent with the cell-level
+   coupling anomaly of 8.3. Worth checking whether excluding A375 strengthens the result - and worth being
+   suspicious of a result that improves by dropping a cell line.
