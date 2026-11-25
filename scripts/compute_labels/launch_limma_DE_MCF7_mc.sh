@@ -1,0 +1,45 @@
+#!/bin/bash -l
+#Usage # sbatch [this script]
+#Name of the job
+#SBATCH --job-name=limma_MCF7_mc
+#SBATCH -N 1
+#SBATCH --mail-user=guillem.santamaria@uni.lu
+#SBATCH --mail-type=begin,end,fail
+#SBATCH --ntasks-per-node=1
+#SBATCH --mem=128GB
+#SBATCH -c 128
+#SBATCH --time=01-00:00:00
+#Define sdout path
+#SBATCH --output=./limma_MCF7_mc.out
+#Define sderr path
+#SBATCH --error=./limma_MCF7_mc.err
+#Define the queue (Quality Of Service) to which the task shall be submitted to
+#SBATCH -p batch
+#SBATCH --qos=normal
+
+conda activate r-4.3.1
+# One BLAS thread per worker: the workers already use all the cores
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+# Results are checkpointed in <out_dir>/checkpoints: if the job hits the time
+# limit, resubmit it as is and it continues where it stopped.
+
+delta_mat_dir="/scratch/users/gsantamaria/test_large_files/metabo_perts/results/mc_deltas/"
+cell_mat_dir=/scratch/users/gsantamaria/test_large_files/data/perturbation/lincs/cell_matrices/
+cell="MCF7"
+penalty="rank"
+medium_f="/home/users/gsantamaria/projects/metabo_pert/data/GEMs/gem_mediums/Human2-GEM/rpmi_medium.json"
+workers=64
+out_dir="/scratch/users/gsantamaria/test_large_files/metabognn_dev/results/labels/"
+
+medium=$(basename "${medium_f%.json}")
+expr="${delta_mat_dir}/${cell}/${penalty}/expr_ensembl_${penalty}_metChange_${medium}_concat.csv"
+mdat="${cell_mat_dir}/${cell}/mdat.csv"
+out_dir_cell="${out_dir}/${cell}/metchange/${penalty}/"
+
+
+Rscript limma_DE.R --expr "$expr" \
+        --mdat "$mdat" \
+        --workers "$workers" \
+        --reader lines \
+        --out_dir "$out_dir_cell"
+conda deactivate
