@@ -31,6 +31,47 @@ HEAD `d11744b`, except the files listed in section 8.
 > Earlier today: corrected MetChange matches expr and TF (report 05, section 5): per-drug gap 8.3 / 7.7
 > (seeds 0 / 1), vs expr 7.8 / 10.4 and TF 9.0 / 9.3, not significantly different.
 
+**2026-11-25 — NEXT ANALYSIS ASSESSED: NCI-60 exchange fluxes, see `reports/2026-11-25_nci60_exchange_flux_feasibility.md`
+(report 11).** Feasible and the FIRST dataset that measures FLUX — the ground truth report 05 9.3 says
+MetChange's claim requires and that pools cannot supply. **11 cell lines x 26 exchange reactions** (NOT 111
+metabolites), already mapped to Human-GEM reaction ids. All 26 reachable in the MetChange feature space, all
+with an EXTRACELLULAR species and no hub flags there. All 11 lines have CellMiner RNA-seq covering **2,482 of
+2,522 GEM genes (98.4%) — better than the LINCS space the existing labels use (97.9%)**, so this would run
+MetChange on direct RNA-seq rather than L1000-inferred values.
+**THREE THINGS TO HANDLE: (1) `786-O` is `RE:786-0` in CellMiner (zero, not letter O) — normalised matching
+silently drops it. (2) 1,103 duplicated symbols need aggregating; ranks make the log scale harmless but SUMMING
+duplicates is only valid in linear space — convert first or use max. (3) CellMiner omits ALL 13 mtDNA-encoded
+OXPHOS subunits (LINCS has all 13, so this is a NEW gap). It hits 5 reactions, all `Oxidative phosphorylation`
+with AND-dominated complex GPRs (14-44 ANDs, 1-7 subunits missing of 10-45) — so it sets the penalty for
+complexes I/III/IV/V. Impute at the median of the nuclear subunits, and run BOTH ways to report sensitivity.**
+**DESIGN FIXED BEFORE RUNNING (report 11, 6): do NOT correlate across metabolites within a cell — fluxes span
+SEVEN orders of magnitude, so that is report 10 8's confounder in extreme form. Use the between-cell
+differential: 11 cells = 55 PAIRS vs PRISM's 10, so the saturated Wilcoxon stops binding. Split by DIRECTION
+and predict OPPOSITE signs (8 released: more capacity -> more release; 18 consumed: more capacity -> LESS
+uptake) — a crossed prediction like the GCP rationale.**
+**COMPARATOR CORRECTED (report 11, 6.5-6.6): an FBA baseline (E-Flux/GIMME/iMAT/ec-GEM FVA) is the WRONG
+comparator here and is WITHDRAWN.** That asks whether MetChange is a good flux-prediction method — the
+MetChange paper's own question, already published. **The question here is whether the integration justifies
+MetChange as the FNN's metabolic SIGNATURE, so the comparator must be whatever would otherwise be fed to the
+FNN: the transcriptional signature.** E-Flux/GIMME/iMAT also fail on output space — they are REACTION-indexed
+while the bipartite network propagates from METABOLITE nodes, so they are not substitutable inputs.
+**THE RIGHT COMPARATOR IS A METABOLITE-CENTRIC EXPRESSION NULL: per metabolite, the mean expression of enzymes
+catalysing reactions that PRODUCE it.** That is what MetChange reduces to if the LP and network-wide
+stoichiometric coupling add nothing over local gene averaging. Same output space; **far tighter than the
+current expression arm, which uses SUBSYSTEM gene sets** (`nucleotide gene` spans a 192-metabolite subsystem);
+and it isolates the actual claim. `build_target_relevance.py` already derives producing routes, so the hop-1
+producers per metabolite are a by-product of existing code. **It also retro-sharpens report 10 section 12: the
+104% retention was measured against a subsystem gene set that was itself flat (-0.008); against a
+per-metabolite producer average the test is much harder and correspondingly more convincing if it survives.**
+**CAUTION: 16 of the 26 are AMINO ACIDS, so this is largely a test of the arm that FAILED in report 10 section
+13. Either that failure was the contaminated drug group (13.4: ~95% non-amino-acid drugs) or amino-acid
+capacity genuinely is not predicted — this distinguishes them, which is the dataset's main value.**
+**The other two candidates: To et al. 2019 K562 CRISPR deposited NO expression data (verified — GEO returns 0
+datasets for PMID 31730859; K562 also has only 136 compounds in LINCS) — DEPRIORITISE. Kang et al. 2024
+(PMC11310444) is NOT reprogramming but contact-inhibition QUIESCENCE in MOUSE fibroblasts, one P-vs-Q contrast
+— worth a cheap pre-registered directional case study (glycolysis down, TCA up, MPC up, ME1 route down, MDH1
+route reversed) but needs Mouse-GEM and is n=1 contrast.**
+
 **Reproducing any reported number:** see `scripts/mc_phenotype_assoc/REPRODUCING.md` — maps each report
 section to the script that produces it, and names the three known gaps (`confounder_checks.py` /
 `dose_exposure_check.py` for report 08's van Elteren MoA strata, potency and dose analyses;

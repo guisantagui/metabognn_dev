@@ -66,3 +66,41 @@ A launcher pins a flag combination; it does not make it legible. `prism_differen
 33 flags and the §12 result depends on six of them. **For a load-bearing claim the better form is a short
 script with the specification hardcoded and no arguments** — forty lines printing the numbers, reviewable in
 five minutes — with the flexible script kept for exploration. Not yet done for §12 or report 09 §4.
+
+## Conventions that must not drift
+
+### Gene symbol -> Ensembl
+
+**One mapper, one file, always with the GEM overrides.**
+
+```python
+import sys; sys.path.insert(0, 'scripts/parse_lincs_data')
+from gene_id_mapping import symbol_to_ensembl_map, gem_symbol_overrides
+mapping = symbol_to_ensembl_map(
+    pd.read_csv('data/utilities/hgnc_complete_set.txt', sep='\t', dtype=str),
+    gem_symbol_overrides(gem),            # NOT {} - see below
+)
+```
+
+`symbol_to_ensembl_map` takes HGNC approved symbols first, then previous and alias symbols **only** where they
+are unambiguous and are not themselves an approved symbol. `gem_symbol_overrides` then takes precedence, and
+exists because HGNC and Human-GEM assign **different Ensembl ids** to four genes: **SOD2, LRTOMT, PPIAL4C,
+SLC37A4**. Without the overrides those four fail to match the GEM.
+
+Every production consumer does this correctly: `metchange/create_penalties.py`,
+`metchange/prepare_input_matrices.py`, `parse_lincs_data/expr_symb_to_ensembl.py`,
+`metpath/build_metpath_pathways.py`, `metpath/score_metpath.py`. An ad-hoc check written on 2026-11-25 passed
+`{}` instead and understated GEM gene coverage of the NCI-60 expression data by three genes (98.41% against
+98.53%). The error was small because only four genes diverge - but one of them is SOD2, so the same slip
+inside a mitochondrial analysis would not be.
+
+**If you are writing a one-off that maps symbols, import the function. Do not reimplement it, and do not pass
+empty overrides.**
+
+### Aggregating duplicate genes
+
+Several expression sources have multiple rows per symbol (CellMiner RNA-seq: 24,911 rows, 23,808 distinct
+symbols, 1,103 duplicated). MetChange is rank-based, so a monotone transform of the values is harmless - but
+**summing duplicates is only valid in linear space**, which is why `prepare_input_matrices.py` converts from
+LINCS's log scale before summing. For a log-scale source either convert first, or aggregate with a
+rank-preserving function such as max.
