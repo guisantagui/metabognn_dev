@@ -1082,3 +1082,636 @@ Written here before the arm exists, so that §10.3's complaint about a post-hoc 
    `purine`, `pyrimidine`, `folate`, whose gene counterparts are exact rather than mapped. These are the
    like-for-like comparisons (same subsystem, metabolites against its own GPR genes) and are the cleanest
    test of increment, though they lack `dntp_endpoints`' mechanistic sharpness.
+
+## 11. Jaccard grouping both ways, and why the section-10 result must now be frozen rather than refined further
+
+*All three analyses requested: the aggregation form of Jaccard grouping, the stratified form, and the
+target-proximal sets. Two were runnable locally from the existing per-drug scores; the third is not.*
+
+### 11.1 Jaccard as aggregation: it substantially weakens section 10
+
+Collapsing each mechanism group to its median before correlating, so 8 near-identical drugs count once:
+
+| `dntp_endpoints`, nucleotide-targeting drugs | ungrouped | Jaccard >= 0.5 | Jaccard >= 0.7 |
+|---|---|---|---|
+| n (drugs -> groups) | 40 | 23 | 30 |
+| mean r | **+0.136** | +0.055 | +0.056 |
+| cell pairs positive | **80%** | 60% | 60% |
+| paired Wilcoxon p | **0.0020** | **0.080** | **0.053** |
+
+`nucleotide`, `purine` and `pyrimidine` go from positive to **negative** under grouping. The effect size
+halving is not a power artefact - that is the estimate itself moving - so specific groups of near-identical
+drugs were carrying it.
+
+**Which ones: the fluoropyrimidines.** Among the 44 matched drugs, Jaccard >= 0.5 gives 26 groups with sizes
+8, 4, 4, 3, 3, 2 and 20 singletons. The group of 8 is `{DPYD,TYMS}` - capecitabine, carmofur, doxifluridine,
+floxuridine, ftorafur, trifluridine and relatives, all 5-FU prodrugs or close analogues. Collapsing one
+chemotype family from 8 observations to 1 is most of the drop.
+
+### 11.2 Jaccard as stratification: this library cannot support it for the metabolic arm
+
+The stratified form - correlate *within* each mechanism group, to see which mechanisms carry an association -
+is the better-motivated design, and it is not feasible here. **No matched group reaches 10 drugs**: the
+largest is the 8 fluoropyrimidines, then 4 IMPDH inhibitors, 4 polymerase/nucleoside analogues, 3, 3, 2 and
+20 singletons. A within-group correlation on 8 drugs is not interpretable.
+
+What it does deliver is a **negative-control panel**, because the groups that *are* large enough are all
+non-metabolic:
+
+| group | n drugs | median r over the 10 pairs | pairs positive |
+|---|---|---|---|
+| MET | 35 | +0.016 | 50% |
+| ATR, MTOR | 30 | -0.012 | 50% |
+| FGFR1/2/3... | 19 | -0.039 | 50% |
+| HDAC1/2/3... | 16 | +0.103 | 70% |
+| AR, CYP2C8, ESR1... | 16 | +0.057 | 50% |
+| MAP2K1, MAP2K2 | 13 | -0.217 | 20% |
+| HSPA1A | 13 | -0.157 | 30% |
+| TUBA1A/1B/1C... | 10 | +0.236 | 60% |
+| AURKA/B/C... | 10 | +0.194 | 70% |
+
+Median of the group medians: **+0.016** over 9 non-metabolic mechanisms. Individual values scatter from
+-0.217 to +0.236 with sign fractions of 20-70%, i.e. noise at this n. That is a genuine, if weak,
+reassurance: **the design does not manufacture associations in mechanisms where the hypothesis does not
+apply.** It is weak because the per-group estimates are plainly unstable at 10-35 drugs.
+
+### 11.3 A contamination found while doing this, and the result it produces
+
+Listing the 44 matched drugs individually showed that **16 are not antimetabolites at all**. Nine are
+**phosphodiesterase inhibitors** - papaverine, anagrelide, enoximone, cilostamide, zardaverine, YM-976,
+trequinsin, avanafil, arctigenin - which qualify because cAMP/cGMP hydrolysis is filed under purine
+metabolism in Human-GEM. A PDE inhibitor does not deplete nucleotide pools. The others: tofogliflozin (GCK),
+adaprev (HK1), PJ-34 (EEF2), spermidine and RITA (TXNRD1/2), curcumin and diphenyleneiodonium (XDH), aspirin
+(ADA/PDE). This is the same failure as the PI3K-in-inositol-phosphate problem of 10.1, one level subtler:
+**GEM subsystem membership is bookkeeping, not mechanism.**
+
+`--exclude-target-genes '^PDE|^TXNRD|^XDH|^GCK$|^HK1$|^EEF2$'` leaves **28 drugs**, of which the genuine
+antimetabolite classes are TYMS (6), DHFR (3), RRM1/2/2B (5), IMPDH1/2 (6), DHODH (3), plus ADA, ADK, CDA,
+TYMP, PNP, HPRT1, CMPK1, FPGS singletons:
+
+| `dntp_endpoints`, clean 28 | ungrouped | Jaccard >= 0.7 | Jaccard >= 0.5 |
+|---|---|---|---|
+| n | 28 | 18 groups | 14 groups |
+| mean r | **+0.291** | +0.240 | +0.187 |
+| cell pairs positive | **10 of 10** | 90% | 70% |
+| paired Wilcoxon p | 0.00098 | **0.0020** | 0.019 |
+
+The two thresholds bracket it: 0.7 collapses only near-identical target vectors and retains 0.240 at 90% of
+pairs, 0.5 merges more aggressively and gives 0.187 at 70% (p = 0.019). Both keep the direction and both are
+far better behaved than the contaminated 44-drug version, which fell to p = 0.080 at Jaccard 0.5. That the
+clean set survives pseudo-replication control where the contaminated one did not is the one piece of internal
+evidence here that is not simply a consequence of narrowing.
+
+**Exact values, and a correction to an earlier version of this paragraph.** Read from
+`results/mc_phenotype_assoc/cross_cell/prism_clean28_*.tsv`:
+
+| run | n | mean r | pairs with r_moa > 0 | pairs with r_moa > r_other | Wilcoxon p | floor at n=10 |
+|---|---|---|---|---|---|---|
+| ungrouped | 28 | +0.291 | 10/10 | **10/10** | **0.000977** | 0.000977 |
+| Jaccard >= 0.7 | 18 | +0.240 | 9/10 | **9/10** | **0.001953** | 0.000977 |
+| Jaccard >= 0.5 | 14 | +0.187 | 7/10 | **8/10** | **0.018555** | 0.000977 |
+
+*The ungrouped p-value is saturated.* **0.000977 is exactly the floor of a one-sided Wilcoxon at n = 10 pairs**
+(1/2^10), so it conveys only "all ten cell pairs favoured the matched group" and carries no effect-size
+information. The same pattern would read 1e-06 with 20 pairs and could not go below 0.0039 with 8. The honest
+form is "10 of 10 pairs, the strongest this test can report at this n".
+
+> **CORRECTION.** An earlier version of this paragraph claimed the Jaccard-0.7 row *also* sat on that floor and
+> was therefore "indistinguishable from the ungrouped row by p-value", and used it to illustrate that
+> `frac r>0` and the Wilcoxon can disagree. **Both claims were wrong, and both came from a number I typed into
+> a demonstration instead of reading from the output.** The Jaccard-0.7 p is **0.001953 - exactly twice the
+> floor**, meaning 9 of 10 differences favoured the matched group, not 10. The two rows are distinguishable.
+> And in all three rows here the two statistics in fact track each other closely (10/10 and 10/10, 9/10 and
+> 9/10, 7/10 and 8/10), so the disagreement I illustrated did not occur. They remain *different* statistics -
+> `frac r>0` counts `r_moa > 0` while the Wilcoxon tests `r_moa > r_other`, and with the complement near -0.05
+> a slightly negative `r_moa` could still win - but that is a possibility, not something observed here.
+
+`amino_acid` remains negative ungrouped (-0.084, 35% of pairs). Under grouping it moves to +0.032 with a
+nominal p of 0.023, which is incoherent with its ungrouped value and is a direct warning that **the grouped
+estimates at n = 14 are too noisy to read precisely.**
+
+### 11.4 This sequence can no longer establish anything, and the result must be frozen
+
+The effect has grown at every refinement:
+
+| selection | matched n | mean r on `dntp_endpoints` |
+|---|---|---|
+| all drugs | 684 | **-0.036** |
+| MoA regex | 30 | (sign-incoherent, 0 of 400 at BH q<0.05) |
+| any energy+biomass GEM target | 80 | **+0.099** |
+| nucleotide-pathway target | 40 | **+0.136** |
+| nucleotide target, contaminants removed | 28 | **+0.291** |
+
+**That is the textbook signature of a forking path, and the fact that each individual step was defensible
+does not change it.** Every narrowing was chosen after seeing the previous result, and every one moved in the
+direction of a larger effect. A PDE inhibitor genuinely is not an antimetabolite - but I removed them *after*
+the number existed, not before, and would not have gone looking had the number been satisfactory.
+
+**So none of 10.1-11.3 is evidence for the hypothesis in a confirmatory sense.** What the sequence has
+produced is something else and genuinely useful: a **fully specified hypothesis with no free parameters
+left.**
+
+```
+drug set   : the 28 PRISM compounds with an inhibited target in a Human-GEM
+             nucleotide / purine / pyrimidine / folate subsystem, after excluding
+             targets matching ^PDE|^TXNRD|^XDH|^GCK$|^HK1$|^EEF2$
+metabolite : dntp_endpoints (dATP, dGTP, dCTP, dTTP), variant `all`
+statistic  : per cell pair, Spearman of (setscore difference, AUC difference);
+             aggregated across pairs by paired Wilcoxon against the complement
+grouping   : Jaccard >= 0.5 on target vectors, group medians (the conservative form)
+direction  : positive
+secondary  : the same on amino_acid / amino_acid_endpoints, predicted NULL or
+             negative, as the internal contrast
+```
+
+Frozen here. **The next number quoted for this hypothesis must come from data none of the above touched** -
+PRISM primary, CTRP once its usable n is checked, or GDSC - run once, with this specification and nothing
+added.
+
+### 11.5 Target-proximal sets: not runnable locally, and what it would take
+
+This is the third request and the only one that cannot be done from the per-drug scores. Those files contain
+the 87 predefined set x variant combinations; a target-proximal set is **per drug** - the metabolites within
+one or two reactions of *that drug's own* target - so it is a different predictor and needs a scoring pass
+against the label matrices, i.e. the cluster.
+
+It is also now the most valuable remaining analysis, for a reason 11.1-11.3 makes concrete. With a shared
+`dntp_endpoints` the 28 drugs are scored against four metabolites regardless of mechanism, so a DHFR
+inhibitor, a DHODH inhibitor and a TYMS inhibitor are all judged on dNTP pools. Target-proximal sets would
+score each on its own neighbourhood - folate/one-carbon for DHFR, orotate for DHODH, dTMP/dUMP for TYMS -
+which is both mechanistically correct and **collapses the test family from 820 combinations to roughly 10**,
+the single largest power gain available.
+
+What it needs: a new scoring mode that takes a drug -> metabolite-set mapping built from the network
+(`nodes.tsv` gives reaction GPRs and reaction-metabolite membership, so one or two hops from a target gene is
+a short graph walk), and then one score per drug against its own set. The sensible shape is a
+`--drug-sets FILE` argument to `mc_phenotype_assoc.py` with columns `drug, node_id`, scored like the existing
+sets but selected per column. Until that exists, 11.4's frozen specification stands as the testable claim.
+
+### 11.6 What the test actually is, level by level, and the dependency it rests on
+
+Spelled out because three different n's are in play and they are easy to conflate.
+
+**Where the 28 drugs come from.** 821 PRISM compounds in the phenotype table (an AUC in all five covered
+cells and a LINCS `pert_id`) -> 747 with at least one annotated target -> 44 with an **inhibited** target that
+is a Human-GEM gene whose reactions fall in a `nucleotide|purine|pyrimidine|folate` subsystem -> **28** after
+excluding `^PDE|^TXNRD|^XDH|^GCK$|^HK1$|^EEF2$`.
+
+**Level 1, within a cell pair: Spearman across drugs.** Two correlations per pair, one on the 28 matched drugs
+and one on the ~650 complement drugs:
+
+| cell pair | rho matched (28) | rho complement (~650) | difference |
+|---|---|---|---|
+| A375/A549 | 0.259 | -0.048 | +0.307 |
+| A375/HT29 | 0.238 | -0.097 | +0.335 |
+| A375/MCF7 | 0.502 | -0.053 | +0.555 |
+| A375/PC3 | 0.094 | -0.092 | +0.186 |
+| A549/HT29 | 0.349 | +0.030 | +0.319 |
+| A549/MCF7 | 0.190 | -0.091 | +0.281 |
+| A549/PC3 | 0.288 | -0.070 | +0.359 |
+| HT29/MCF7 | 0.385 | +0.008 | +0.377 |
+| HT29/PC3 | 0.169 | -0.056 | +0.225 |
+| MCF7/PC3 | 0.434 | +0.009 | +0.425 |
+
+**Level 2, across cell pairs: Wilcoxon signed-rank on those 10 differences**, one-sided, `greater`. So the
+test's **n is 10 cell pairs** - not 28 drugs and not the 820 set x variant x pair combinations. W = 55, the
+maximum possible at n = 10, hence p = 1/2^10.
+
+**The dependency this rests on, which earlier sections did not state.** The 10 pairs are drawn from **5 cell
+lines**, so each cell appears in 4 of them; and **the same 28 drugs are used in every pair**. The 10
+differences are therefore not independent in either direction, while the Wilcoxon assumes they are - so its
+p-value is optimistic on top of being saturated.
+
+Leave-one-cell-out, keeping only the 6 pairs that exclude a given cell:
+
+| dropped | pairs | mean rho matched | mean rho complement | mean difference | p |
+|---|---|---|---|---|---|
+| A375 | 6 | 0.302 | -0.028 | +0.331 | 0.0156 |
+| A549 | 6 | 0.304 | -0.047 | +0.350 | 0.0156 |
+| HT29 | 6 | 0.295 | -0.057 | +0.352 | 0.0156 |
+| MCF7 | 6 | 0.233 | -0.056 | +0.288 | 0.0156 |
+| PC3 | 6 | 0.320 | -0.042 | +0.362 | 0.0156 |
+
+Per-cell mean rho matched: A375 +0.273, A549 +0.271, HT29 +0.285, MCF7 +0.378, PC3 +0.246. **No single cell
+drives the result**, which is the useful part of this check.
+
+And note every one of those p-values is *also* at its own floor (1/2^6 = 0.0156, all six differences
+positive). **Every p-value in this analysis is saturated**: they report sign consistency and nothing else.
+**The defensible summary of the frozen hypothesis is therefore the effect size and its stability - matched
+rho about 0.25 to 0.38 per cell line against a complement pinned near -0.05 - and not any p-value quoted from
+it.** That is also why the confirmatory cohort needs more *cell lines*, not merely more drugs: with 5 cells
+the aggregate test cannot resolve below 0.000977 however strong the effect.
+
+## 12. The expression arm, run: the pre-registered conditional prediction is confirmed
+
+*All five expression arms completed and downloaded the same day (`run_info.json`: `labels = <CELL>/expr`,
+20,209-20,214 genes, 679-760 drugs). Output:
+`results/mc_phenotype_assoc/cross_cell/prism_clean28_conditional.tsv`.*
+
+**An implementation gap found and fixed first.** The conditional columns as originally written computed the
+partial correlation over **all ~680 drugs**, not within the matched subgroup - so they answered a different
+question (does expression explain the pooled, confounded, near-null signal?) than the one registered in 10.7.
+`r_partial_moa` / `r_expr_moa` / `r_partial_other` now compute it within the matched group and within the
+complement separately. The numbers below are the registered statistic.
+
+### 12.1 The result
+
+`dntp_endpoints`, the 28 matched drugs, per cell pair:
+
+| cell pair | r MetChange | r expression | **r MetChange \| expression** | complement (MC\|expr) |
+|---|---|---|---|---|
+| A375/A549 | 0.259 | +0.009 | **0.260** | -0.047 |
+| A375/HT29 | 0.238 | -0.074 | **0.226** | -0.095 |
+| A375/MCF7 | 0.502 | -0.031 | **0.520** | -0.036 |
+| A375/PC3 | 0.094 | -0.093 | **0.081** | -0.064 |
+| A549/HT29 | 0.349 | -0.078 | **0.380** | +0.018 |
+| A549/MCF7 | 0.190 | -0.130 | **0.170** | -0.085 |
+| A549/PC3 | 0.288 | +0.094 | **0.348** | -0.070 |
+| HT29/MCF7 | 0.385 | +0.138 | **0.458** | +0.025 |
+| HT29/PC3 | 0.169 | -0.103 | **0.136** | -0.023 |
+| MCF7/PC3 | 0.434 | +0.185 | **0.441** | +0.014 |
+
+| | mean r | pairs > 0 |
+|---|---|---|
+| MetChange | +0.291 | 10/10 |
+| expression, `nucleotide` gene set | **-0.008** | 4/10 |
+| **MetChange given expression** | **+0.302** | **10/10** |
+
+**Retention: 104%.** The registered prediction (10.7) was that retention would stay well above 50%; it is at
+100%. Paired Wilcoxon of the partial, matched against complement over the 10 pairs: 10/10 differences
+favouring matched, p at the n=10 floor.
+
+### 12.2 What this does and does not license
+
+**It is the strongest result in the project for the central thesis**, and the first measurement of *increment*
+rather than a side-by-side comparison (10.6). On five **non-HepG2** cell lines, with a mechanism-matched drug
+set, MetChange's cell-specific prediction tracks cell-specific sensitivity and **the expression of the same
+pathway's genes carries none of that information**.
+
+**But read why retention is 104% rather than, say, 70%.** It is not that expression carries a strong signal
+which MetChange survives - it is that **the gene-set differential is flat (-0.008, 4 of 10 pairs positive)**,
+so conditioning on it removes nothing because there is nothing to remove. That is the cleanest possible form
+of "the transcriptome alone does not see this", and it is a weaker statement than "MetChange adds to a strong
+transcriptional signal". The comparator is fair - the `nucleotide` gene set is the GPR genes of the same
+subsystems whose metabolites `dntp_endpoints` summarises - but the finding is an *absence* on the expression
+side, not a defeat.
+
+**The forking path is untouched by this.** The conditional statistic was registered in advance; **the 28-drug
+set was not** - it is the product of five successive narrowings (11.4). So the right description is: *within a
+post-hoc-selected drug set, a pre-registered conditional test behaves exactly as the thesis requires.* Only a
+fresh cohort removes the remaining threat, and 12.3 now makes that much more feasible than it looked.
+
+All p-values remain saturated at n = 10 pairs; quote the effect sizes.
+
+### 12.3 93 more cell lines are available, and that is the real headline for scaling
+
+> **WRONG, corrected in section 15.** The 93 figure comes from `cellinfo_beta.txt` membership, which says
+> nothing about how many of the relevant drugs each cell line was actually profiled with. Measured against
+> `lincs_unique_perts_bycell.tsv`, **only two or three cell lines are worth computing, not 93**: the non-core
+> LINCS panels are modally 120 or 723 perturbations from a different chemical space and carry 5 or fewer of
+> the 31 nucleotide-targeting drugs. Read section 15 instead of this one.
+
+
+PRISM covers 568 cell lines; 99 of them appear in `cellinfo_beta.txt`; **6 have MetChange labels (A375, A549,
+HEPG2, HT29, MCF7, PC3) and 93 do not.** Among the 93: HCT116, HUH7, JHH5, JHH7, DU145, BT474, 22RV1, HCC827,
+HCC44, and a deep panel of endometrial, ovarian, bladder and colon lines.
+
+That changes the limiting factor identified in 11.6. With 5 cells the aggregate test cannot resolve below
+p = 0.000977 however strong the effect, because it has only 10 pairs. **With 20 cell lines it would have 190
+pairs; with 50, 1,225.** The confirmatory cohort does not need a different dataset - it needs more label runs
+on the dataset already in hand.
+
+**The gating check is LINCS depth, not `cellinfo` membership** - the lesson from SHSY5Y, which appears in
+`cellinfo` with 224 perturbations and only 10 Naia compounds (8.1). Before committing to label runs, count
+distinct `trt_cp` `pert_id`s per candidate cell in `siginfo_beta.txt` and keep those with enough overlap with
+the 821 PRISM drugs. HUH7 is worth particular attention: it is a liver line, and HEPG2 - where every other
+result in this project lives - is absent from PRISM entirely (1.1).
+
+## 13. The specificity question, tested properly: PRISM cannot answer it
+
+*Raised as the objection that other subsystem-targeting drug groups might show the same association. It is the
+right control. Answer: the library contains exactly one testable metabolic drug class, so specificity can
+neither be established nor refuted here. Ten runs, one per subsystem, drugs selected by inhibited GEM target
+and scored on the metabolite set of the same subsystem - the diagonal of a drug-group x set design.*
+
+### 13.1 The table
+
+| subsystem | matched drugs | overlap with the 28 | mean r | pairs > 0 | complement | Wilcoxon p | MC \| expr |
+|---|---|---|---|---|---|---|---|
+| nucleotide | 28 | 28 | **+0.254** | 10/10 | -0.058 | 0.00098 | +0.253 |
+| pyrimidine | 20 | 20 | **+0.306** | 10/10 | -0.058 | 0.00098 | +0.281 |
+| purine | 13 | 13 | **+0.152** | 8/10 | -0.058 | 0.0029 | +0.151 |
+| amino_acid | 48 | 3 | -0.061 | 4/10 | -0.014 | 0.78 | -0.087 |
+| folate | 4 | 4 | not scorable | | | | |
+| glycolysis | 4 | 0 | not scorable | | | | |
+| oxphos | 4 | 3 | not scorable | | | | |
+| pyruvate | 4 | 0 | not scorable | | | | |
+| tca | 3 | 0 | not scorable | | | | |
+| **ppp** | **1** | 0 | not scorable | | | | |
+
+### 13.2 The three positives are one finding, not three
+
+`purine` (13 drugs) and `pyrimidine` (20) are **entirely inside** the 28-drug nucleotide group, and 27 of the
+28 fall in one or the other. They are the same drug set re-sliced, so they do not corroborate each other. The
+apparent breadth across three subsystems is an artefact of the subsystems overlapping in their drugs.
+
+### 13.3 Six of the nine comparators have 1 to 4 drugs, and are contaminated with the same drugs
+
+`ppp` has **one** drug. `tca` has three - diphenyleneiodonium (a NOX inhibitor), disulfiram (ALDH) and
+hexachlorophene (an uncoupler) - none of which inhibits a TCA enzyme. `oxphos` has four, three of them
+*already in the nucleotide 28*: brequinar and teriflunomide are DHODH inhibitors, and DHODH sits in the OXPHOS
+subsystem because it feeds ubiquinone. `folate`'s four are the antifolates, also in the 28. `glycolysis`'s four
+are a VEGFR inhibitor, an ALDH inhibitor, a NOX inhibitor and adaprev.
+
+A repurposing library has dozens of clinical antimetabolites and essentially no approved drugs against GAPDH,
+citrate synthase or complex I. That asymmetry, not the biology, is what this table mostly measures.
+
+### 13.4 `amino_acid` looked like the comparator and is not one
+
+It is the one group that clears the size bar - **48 drugs, larger than the nucleotide 28, and nearly
+independent of it (3 shared)** - and it is null (-0.061, 4 of 10 pairs, p = 0.78). That is not a power
+artefact. It is also **not interpretable**, because the group is almost entirely contamination:
+
+| route into the group | n | examples |
+|---|---|---|
+| **CYP2C19** | 13 | imatinib, gefitinib, vemurafenib, axitinib, rifampicin, amoxicillin, propranolol, ketoconazole, flutamide... - drugs **metabolised by** it, not inhibitors of amino-acid metabolism |
+| **MAO A/B** | 6 | iproniazid, piperine, bifemelane, vanoxerine, salidroside - monoamine catabolism, which sits in the tyrosine and tryptophan subsystems |
+| **SAM-dependent methyltransferases** | 2 | BIX-01294 (EHMT1/2), E-7438 (EZH2) - epigenetic drugs, in cysteine/methionine metabolism because their targets consume SAM |
+| sirtuins | 2 | tenovin-6, bisindolylmaleimide-ix (NAD-consuming) |
+| AKR1C1, AOX1, TYR, NOS, MIF, ALDH, COMT, HPGDS | ~20 | aspirin, curcumin, disulfiram, raloxifene, monobenzone, nocodazole... |
+| **genuinely amino-acid metabolism** | **~1** | **nitisinone** (HPD, the tyrosinaemia drug) |
+
+So the null means "this group contains no amino-acid-directed drugs", not "amino-acid capacity is not
+limiting".
+
+**And the comparison was asymmetric in the favourable direction.** The nucleotide arm was cleaned from 44 to
+28 by excluding non-mechanistic targets (11.3); this arm was left uncleaned at 48. Comparing a cleaned arm
+against an uncleaned one is biased toward the nucleotide result, and the asymmetry was mine.
+
+### 13.5 The methodological conclusion, which generalises beyond PRISM
+
+**Target-based selection on GEM subsystems needs a curated enzyme whitelist, not a subsystem regex.**
+Human-GEM's subsystems absorb, by correct bookkeeping:
+
+- **drug metabolism** - every CYP sits in an amino-acid or xenobiotic subsystem, so any drug with an annotated
+  CYP interaction qualifies, and "target" in these tables includes metabolising enzymes;
+- **monoamine catabolism** - MAO in tyrosine/tryptophan, so every MAO inhibitor qualifies;
+- **SAM-dependent methylation** - every methyltransferase, hence every epigenetic methyltransferase inhibitor,
+  qualifies via cysteine/methionine metabolism;
+- **NAD and nucleotide second messengers** - sirtuins and phosphodiesterases via purine metabolism (11.3);
+- **phosphoinositide signalling** - PI3K via inositol phosphate metabolism (10.1).
+
+Three separate times now the same failure has produced a plausible-looking drug group: PI3K under inositol
+phosphate, PDE under purine, and CYP/MAO/methyltransferase under amino acid. **The subsystem a gene's
+reactions belong to does not tell you whether a drug acting on it perturbs that pathway's flux.**
+
+### 13.6 Where the specificity question stands
+
+Unanswered, and not answerable with this library. PRISM offers 28 cleanable nucleotide-directed drugs, roughly
+one genuine amino-acid-directed drug, and one to four per remaining subsystem. The result of 12.1 therefore
+stands as *"for the one metabolic drug class this library contains, MetChange's cell-specific prediction works
+and the matching gene expression does not"* - and cannot be sharpened to *"specifically nucleotide"* on this
+evidence.
+
+Two routes out, in order of cost:
+
+1. **More cell lines, same drugs** (12.3): 93 PRISM lines are in LINCS without labels. This does not address
+   specificity, but it fixes the saturated p-values and would make the nucleotide finding solid in itself.
+2. **A library with broader metabolic coverage.** Tox21 and ToxCast have the mitochondrial and metabolic
+   actives that a repurposing library lacks - and bring back the chemical-space mismatch with LINCS that
+   produced the Hallinger and Xu nulls (5.1). Checking the usable n for a *cleaned, whitelisted* target
+   selection against those libraries is the next concrete step, and must be done before any further
+   analysis is designed around them.
+
+## 14. A principled target filter, and why it is for the NEXT library rather than this one
+
+*Implemented in response to 13.5. `scripts/mc_phenotype_assoc/build_target_relevance.py` (new) plus three
+flags on `prism_differential.py`. **Deliberately not run-and-quoted on PRISM** - that would be an eighth look
+at the same data (11.4).*
+
+### 14.1 Producer direction: derived from stoichiometry, and it rederives the hand-made list
+
+`build_target_relevance.py` emits `gene, set, hops`: the shortest number of reaction steps from a gene's
+reactions to a member of a metabolite set, **following production only**, with currency metabolites excluded
+from the traversal for the same reason the network builder removes them.
+
+For `dntp_endpoints` it rules out **1,509 of 2,522 GEM genes (60%) as never reached** - and the never-reached
+set includes **PDE, PI3K and EZH2**, i.e. exactly the contaminations that 10.1, 11.3 and 13.4 found by
+inspection. The hand-made exclusion list is recovered from the stoichiometry.
+
+**Two things it cannot do, measured rather than assumed.**
+
+*Hop distance does not separate biosynthetic routes from incidental ones.* Distances to a dNTP:
+
+| hop | genes include |
+|---|---|
+| 1 | NME1/2, RRM1/2 |
+| 4 | TK1, TYMS, **EHMT2** (histone methyltransferase) |
+| 5 | DHFR, IMPDH1, TYMP, ADA, **CYP2C19** |
+| 6 | DHODH, **MAOA** |
+| never | PDE*, PIK3*, EZH2 |
+
+Any cutoff including DHODH includes MAO-A; any including DHFR includes CYP2C19; any including TYMS includes
+G9a. Gene counts: 19 at hop 1, 43 at 2, 117 at 3, 402 at 4, 837 at 5, 1,415 at 6.
+
+*It only discriminates for small, specific sets.* Drugs selected by inhibited-target reachability:
+
+| set | H<=2 | H<=3 | H<=4 | H<=6 | H<=6 and n_sources>=3 |
+|---|---|---|---|---|---|
+| **dntp_endpoints** | 8 | 14 | 42 | 116 | 45 |
+| nucleotide (192 metabolites) | 235 | 235 | 235 | 235 | 105 |
+| glycolysis / tca / oxphos / ppp | ~233 | ~233 | ~233 | ~233 | ~104 |
+
+The subsystem sets hold 192-823 metabolites, many near-currency, so nearly every GEM gene is within a few
+hops of producing *something* in them. **The filter is therefore only meaningful with endpoint sets** - which
+is a design constraint worth accepting, since `dntp_endpoints` (4 metabolites) is the right object for this
+question and `nucleotide` (192) is not.
+
+### 14.2 Two different failure modes, and a correction to 11.3
+
+| failure | example | fix |
+|---|---|---|
+| **enzyme is in the GEM for non-biosynthetic reasons** | PDE, CYP2C19, MAO-A, EHMT2 | class exclusion (14.3) |
+| **the drug-target annotation is weak or wrong** | adaprev->HK1, tofogliflozin->GCK, PJ-34->EEF2 | `--min-target-sources` |
+
+The three implausible annotations all carry **n_sources = 2** from ChemPert-CLUE and RepurposingHub, while
+every genuine antimetabolite annotation carries **3-5** including ChEMBL and DrugCentral (methotrexate->DHFR 5,
+gemcitabine->RRM1 5, floxuridine->TYMS 4, brequinar->DHODH 4, merimepodib->IMPDH1 3). So `n_sources >= 3`
+removes all three.
+
+**Correction: GCK, HK1 and EEF2 should not have been in the 11.3 exclusion list.** They are misplaced
+*annotations*, not misplaced enzymes - a genuine hexokinase inhibitor would be a legitimate glycolysis drug,
+and excluding HK1 as a class would discard it. 11.3's result is unaffected (the three drugs fail the source
+threshold anyway) but the reasoning was wrong.
+
+### 14.3 The class exclusion list, with its principle
+
+Enzymes present in the GEM for **catabolic, cofactor-consuming, signalling or xenobiotic** reasons rather than
+as biosynthetic routes to a precursor. Marked where the producer filter already handles it:
+
+| class | pattern | handled by 14.1? |
+|---|---|---|
+| cyclic-nucleotide hydrolases | `^PDE` | **yes**, never reached |
+| lipid / inositol kinases | `^PIK3`, `^PIP[45]K`, `^SPHK`, `^DGK` | **yes**, never reached |
+| xenobiotic metabolism | `^CYP`, `^UGT`, `^SULT`, `^NAT[12]$`, `^FMO` | no - CYP2C19 at hop 5 |
+| SAM-dependent methyltransferases | `^EHMT`, `^EZH`, `^DNMT`, `^SETD`, `^KMT`, `^PRMT`, `^COMT$`, `^NNMT$` | no - EHMT2 at hop 4 |
+| monoamine / aldehyde catabolism | `^MAO`, `^ALDH`, `^ADH[0-9]`, `^AOX1$`, `^DBH$` | no - MAOA at hop 6 |
+| NAD-consuming signalling | `^SIRT`, `^PARP`, `^CD38$` | no |
+| redox / detoxification | `^TXNRD`, `^GSR$`, `^GPX`, `^GST`, `^NQO1$`, `^SOD[0-9]`, `^CAT$` | no |
+| eicosanoids | `^PTGS`, `^ALOX`, `^PTGES`, `^HPGDS$`, `^TBXAS1$` | no |
+| nitric oxide | `^NOS[0-9]` | no |
+| carbonic anhydrases | `^CA[0-9]` | no |
+| steroidogenesis | `^HSD`, `^SRD5A`, `^STS$` | no |
+
+**Deliberately absent, and why:**
+
+- **NAMPT** - NAD *synthesis* is biosynthetic, so a NAMPT inhibitor genuinely limits a cofactor pool.
+- **Transporters** (`SLC*`, `ABC*`, `ATP1A/B*`, `AQP*`) - context-dependent rather than wrong. SLC7A11
+  (cystine) and SLC1A5 (glutamine) genuinely limit precursor supply, so a blanket exclusion would discard real
+  signal. Flag and decide per question.
+- **GCK, HK1, EEF2** - see 14.2; these are annotation failures.
+
+### 14.4 The cost, and why this is for the next library
+
+Applying the whole stack to PRISM - subsystem match, class exclusion, `n_sources >= 3`, producer reachability
+at hop <= 4 - leaves **25 drugs overall and 12 for `dntp_endpoints`**, against 28 for the hand-cleaned group of
+11.3. The hop-4 cutoff drops the DHFR, IMPDH and DHODH drugs, which sit at 5 and 6.
+
+So the clean filter **halves the power** on the one set where the effect was visible. And it cannot help with
+the specificity question at all, because **a better filter cannot create drugs**: PRISM still has one PPP
+drug, three TCA drugs and four each for glycolysis and OXPHOS (13.1). Cleaning only shrinks groups further.
+
+**Hence the filter is not run on PRISM here.** It is specified now so that it can be applied *before* looking
+at results on a library where the drugs exist - Tox21 or ToxCast, which carry the mitochondrial and metabolic
+actives a repurposing collection lacks, and which bring back the chemical-space mismatch with LINCS that
+produced the Hallinger and Xu nulls (5.1). The order that follows from this: **check usable n under this
+filter stack on those libraries first, before designing any analysis around them.**
+
+Usage, for the record:
+
+```bash
+python3 -I scripts/mc_phenotype_assoc/build_target_relevance.py \
+    --out results/mc_phenotype_assoc/metabolite_sets/target_relevance.tsv
+
+python3 -I scripts/mc_phenotype_assoc/prism_differential.py \
+    --targets data/drug_targets/combined/drug_targets.tsv \
+    --nodes data/networks/combined/nodes.tsv \
+    --target-subsystems 'nucleotide|purine|pyrimidine|folate' \
+    --exclude-target-classes '<the patterns in 14.3>' \
+    --min-target-sources 3 \
+    --relevance results/mc_phenotype_assoc/metabolite_sets/target_relevance.tsv --max-hops 4 \
+    --expr-run prism_viability_expr
+```
+
+### 14.5 CORRECTION: use the class exclusion alone; the producer filter is a diagnostic, not a selector
+
+*14.1-14.4 recommended the producer-reachability filter as the primary mechanism. That was wrong, and the
+objection that identified it is the right one: if the filter halves the power on drugs that genuinely do
+affect dNTP production, it is doing harm.*
+
+**Why the hop cutoff fails, stated properly.** DHFR, IMPDH and DHODH *are* on producing routes to dNTPs -
+DHFR makes the THF that TYMS needs for dTMP, IMPDH runs IMP to XMP to GMP to dGTP, DHODH feeds orotate into
+UMP and onward to dCTP and dTTP. They sit at hops 5-6 because **real biosynthetic routes are long**, not
+because they are irrelevant. Hop distance measures path length, and path length is not relevance.
+
+**The decisive comparison.** With PDE and the lipid kinases moved *into* the class list instead of being
+delegated to the producer filter:
+
+| rule | drugs | retains the 28 of 11.3 | extras |
+|---|---|---|---|
+| **subsystem + class exclusion** | **33** | **all 28** | PJ-34, adaprev, tofogliflozin (bad annotations); curcumin, diphenyleneiodonium (both via XDH) |
+| subsystem + class + producer-reachable, any depth | 31 | **27** - loses ABT-702 | 4 |
+| subsystem + producer-reachable, no class | 33 | 27 | |
+| subsystem + class + `n_sources >= 3` | 25 | **19** - loses carmofur, cladribine, AVN-944 | |
+
+**The class exclusion alone reproduces the hand-cleaned group exactly.** The producer filter adds nothing and
+costs ABT-702, a genuine adenosine kinase inhibitor. And `n_sources >= 3` is too aggressive - it discards
+carmofur, cladribine and AVN-944, which are real antimetabolites - so it belongs as a sensitivity check, not
+as part of the rule.
+
+**The revised rule, and it is simpler than 14.3-14.4 proposed:**
+
+1. target in a matching GEM subsystem, `effect == inh`;
+2. **exclude the classes of 14.3, with `^PDE`, `^PIK3|^PIP[45]K|^SPHK|^DGK` and `^XDH` added to the list**
+   rather than delegated elsewhere - XDH is purine catabolism and is how curcumin and diphenyleneiodonium
+   enter;
+3. nothing else. No hop cutoff, no source threshold in the primary rule.
+
+That leaves 31 drugs, retaining all 28, with three known bad annotations as residue - about 10% noise, which
+`--min-target-sources 3` can be used to quantify as a sensitivity check without being baked in.
+
+**What the producer filter is still for.** It is a **diagnostic that derived the class list**, not a selector.
+Running it is what established that PDE, PI3K and EZH2 are *never* on a producing route to a dNTP - which is
+the justification for putting them in the class list in the first place, replacing three rounds of inspection
+(10.1, 11.3, 13.4) with a stoichiometric criterion. `build_target_relevance.py` and `--relevance` stay for
+that purpose, and for checking a new class before adding it. They should not be used to choose drugs.
+
+## 15. Which cell lines are actually worth computing: two, not ninety-three
+
+*Measured from `data/LINCS/lincs_unique_perts_bycell.tsv` (227 cell lines, 201,295 rows) against the PRISM
+dose-response table, before committing to MetChange label runs. This corrects 12.3.*
+
+### 15.1 The measurement
+
+89 cell lines appear in both the per-cell LINCS table and PRISM. Coverage of the **31** nucleotide-targeting
+drugs (the class-excluded rule of 14.5) is what decides whether the section-12 finding can be tested in a
+given cell:
+
+| nucleotide drugs covered (of 31) | cell lines |
+|---|---|
+| 29-30 | **5** - PC3, A375, MCF7, A549, HT29: the cores, labels already computed |
+| **24** | **1 - YAPC** |
+| **18** | **1 - MDAMB231** |
+| 11 | 1 - U2OS |
+| <= 6 | **81** |
+
+| cell | LINCS panel | PRISM overlap | nucleotide drugs | labels |
+|---|---|---|---|---|
+| PC3 / A375 / MCF7 / A549 / HT29 | 12,156-13,892 | 861-927 | 29-30 | yes |
+| **YAPC** | **1,716** | **605** | **24** | no |
+| MDAMB231 | 1,357 | 480 | 18 | no |
+| U2OS | 20,836 | 438 | 11 | no |
+| HEC108, CAL29, BEN, OVTOKO, HEC1A, ... | ~723 | ~220 | 5 | no |
+
+**The cause is panel size and composition, not cell-line availability.** Non-core LINCS panels are modally
+**120 perturbations (13 cell lines) or 723-724 (17 cell lines)** - a small fixed plate - against 12,000+ for
+the five cores. U2OS is the instructive exception: 20,836 perturbations and still only 11 of the 31, because
+its panel is a different chemical space, not a smaller version of the same one.
+
+### 15.2 What each addition buys
+
+The binding constraint identified in 11.6 was the saturated Wilcoxon, which cannot resolve below 1/2^(n pairs):
+
+| adding | cells | pairs | Wilcoxon floor |
+|---|---|---|---|
+| nothing | 5 | 10 | 9.8e-04 |
+| **+ YAPC** | **6** | **15** | **3.1e-05** |
+| + MDAMB231 | 7 | 21 | 4.8e-07 |
+| + U2OS | 8 | 28 | 3.7e-09 |
+
+**YAPC alone breaks the saturation**, and at 24 of 31 drugs its per-pair correlations will be comparable in
+quality to the existing five. MDAMB231 at 18 is a reasonable second. U2OS at 11 would add pairs but with
+noticeably noisier per-pair estimates, and a cell carrying 5 of 31 drugs yields a correlation on five points,
+which is not worth a label run.
+
+**Recommendation: compute YAPC, then MDAMB231 if the first is informative. Do not compute the other 86.**
+
+Note also that YAPC is one of the seven Panorama GCP cell lines (section 2), so a label run there serves two
+analyses rather than one.
+
+### 15.3 The error, which has now happened five times
+
+12.3's "93 cell lines available" was derived from `cellinfo_beta.txt` membership and never checked against
+per-cell drug coverage. That is the same mistake as:
+
+- Hallinger - identified tier-1 compounds, almost none in LINCS (report 07);
+- naia - 683 whole-LINCS structure matches, **10** in the SHSY5Y panel (report 09, 8.1);
+- xu - 53 whole-LINCS matches, **11 vs 12** in the HEPG2 panel (report 10, 5.1);
+- the PRISM subsystem comparators - 1 to 4 drugs each, and contaminated (13.1, 13.3);
+- and now this.
+
+The rule recorded after the second instance was *"a validation dataset's usable n is its overlap with the
+specific label panel, computed before the dataset is ranked"*. It applies to **cell lines** exactly as it does
+to datasets, and the general form is: **count the units that can actually carry the prediction, for the
+specific comparison being proposed, before quoting an opportunity.** `lincs_unique_perts_bycell.tsv` makes
+that a one-command check for any future cell-line question and should be the first thing consulted.

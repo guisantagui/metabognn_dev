@@ -250,6 +250,49 @@ def main():
                          'biomass-precursor AND central-energy subsystems; with --target-effect inh that '
                          'selects 90 of the 821 PRISM drugs (49 if glycolysis/TCA/OXPHOS/PPP are dropped and '
                          'only the biomass precursors kept). Pass an empty string to accept any GEM target.')
+    ap.add_argument('--relevance', default='',
+                    help='target_relevance.tsv from build_target_relevance.py (gene, set, hops): the '
+                         'shortest PRODUCING route from a gene to a member of each metabolite set. With it, a '
+                         'drug is relevant to a set only if an inhibited target can actually affect that '
+                         "set's production, which is derived from stoichiometry instead of from subsystem "
+                         'labels. It excludes PDE, PI3K and EZH2 automatically (never reached) - the hand-made '
+                         'list of report 10, 11.3 rederived. **Only use it with small endpoint sets**: for '
+                         '`dntp_endpoints` it rules out 60% of GEM genes, but the subsystem sets hold 192-823 '
+                         'metabolites so nearly every gene is within a few hops and it selects ~235 drugs at '
+                         'any depth (report 10, 14).')
+    ap.add_argument('--max-hops', type=int, default=4,
+                    help='maximum producing-route distance for --relevance. Hop distance does NOT separate '
+                         'biosynthetic routes from incidental ones - to a dNTP, TYMS and TK1 sit at 4 '
+                         'alongside the G9a methyltransferase, DHFR and IMPDH1 at 5 alongside CYP2C19, DHODH '
+                         'at 6 alongside MAO-A - so use --exclude-target-classes as well.')
+    ap.add_argument('--min-target-sources', type=int, default=1,
+                    help='minimum `n_sources` for a drug-target annotation to count. This is the fix for weak '
+                         'annotations, which is a DIFFERENT failure from a misplaced enzyme: adaprev->HK1, '
+                         'tofogliflozin->GCK and PJ-34->EEF2 all have n_sources=2 from CLUE/RepurposingHub, '
+                         'while every genuine antimetabolite annotation carries 3-5 including ChEMBL and '
+                         'DrugCentral. Those three genes were wrongly put in an exclusion list in report 10, '
+                         '11.3; a hexokinase inhibitor would be a legitimate glycolysis drug. 3 is the '
+                         'sensible value.')
+    ap.add_argument('--exclude-target-classes', default='',
+                    help='regex over target symbols for enzyme classes present in the GEM for catabolic, '
+                         'cofactor-consuming, signalling or xenobiotic reasons rather than as biosynthetic '
+                         'routes to a precursor. The documented default (report 10, 14.3) is '
+                         "'^CYP|^UGT|^SULT|^NAT[12]$|^FMO|^EHMT|^EZH|^DNMT|^SETD|^KMT|^PRMT|^COMT$|^NNMT$|"
+                         "^MAO|^ALDH|^ADH[0-9]|^AOX1$|^DBH$|^SIRT|^PARP|^CD38$|^TXNRD|^GSR$|^GPX|^GST|"
+                         "^NQO1$|^SOD[0-9]|^CAT$|^PTGS|^ALOX|^PTGES|^HPGDS$|^TBXAS1$|^NOS[0-9]|^CA[0-9]|"
+                         "^HSD|^SRD5A|^STS$' - note NAMPT is deliberately absent (NAD synthesis is "
+                         'biosynthetic) and transporters (SLC*, ABC*, ATP1A/B*, AQP*) are deliberately absent '
+                         'too, because SLC7A11 and SLC1A5 genuinely limit precursor supply.')
+    ap.add_argument('--exclude-target-genes', default='',
+                    help='drop a drug from the matched group if its matching target hits this pattern. '
+                         'Needed because GEM subsystem membership is bookkeeping, not mechanism: of the 44 '
+                         'PRISM drugs whose inhibited target sits in a nucleotide subsystem, 9 are '
+                         'PHOSPHODIESTERASE inhibitors (papaverine, anagrelide, enoximone, cilostamide, '
+                         'zardaverine, YM-976, trequinsin, avanafil, arctigenin) - cAMP/cGMP hydrolysis is '
+                         'purine metabolism in the GEM, but a PDE inhibitor does not deplete nucleotide pools. '
+                         'Others in the same category: GCK/HK1 (hexokinase, glycolytic), EEF2 (GTP-dependent '
+                         'translation), TXNRD1/2 (thioredoxin reductase), XDH. A sensible value is '
+                         "'^PDE|^TXNRD|^XDH|^GCK$|^HK1$|^EEF2$'.")
     ap.add_argument('--target-effect', default='inh',
                     help="required effect on the matching target ('inh', 'act', or '' for any). Default "
                          "'inh': activating a biosynthetic enzyme does not predict a capacity collapse.")
@@ -261,6 +304,17 @@ def main():
                          '237 drugs share a vector with another - 8 MEK inhibitors as {MAP2K1,MAP2K2}, 7 '
                          'EGFR, 6 TOP2A, 6 PI3K, 5 tubulin, 5 HSP90, 5 mTOR. Treating those as independent '
                          'observations inflates every p-value reported without it.')
+    ap.add_argument('--group-report', type=int, default=0,
+                    help='if > 0, report the differential WITHIN each Jaccard mechanism group that has at '
+                         'least this many drugs, for the set named by --group-report-set. This is the '
+                         'stratified counterpart to --group-jaccard: instead of collapsing groups to kill '
+                         'pseudo-replication, it asks WHICH mechanisms carry an association. Needs --targets. '
+                         'The large groups are mostly non-metabolic (MET 39 drugs, ATR/MTOR 35, KIT/PDGFR 24, '
+                         'HDAC 16, MEK 14, PIM1 14, NR3C1 12 at Jaccard 0.5), so they double as a '
+                         'negative-control panel: under the hypothesis they should show nothing.')
+    ap.add_argument('--group-report-set', default='dntp_endpoints')
+    ap.add_argument('--group-report-variant', default='all')
+    ap.add_argument('--group-report-jaccard', type=float, default=0.5)
     ap.add_argument('--moa-min-drugs', type=int, default=20,
                     help='minimum drugs in a MoA subgroup before it is reported (default 20)')
     ap.add_argument('--standardise-within-cell', action='store_true',
@@ -299,10 +353,33 @@ def main():
                              'gene -> GEM subsystem map')
         g2s = gem_gene_subsystems(args.nodes)
         dte = drug_target_effects(args.targets)
+        globals()['dte'] = dte
         tvectors = {d: frozenset(dte.get(d.lower(), {})) for d in pheno}
         sub_re = re.compile(args.target_subsystems, re.I) if args.target_subsystems else None
-        sel_drugs = set()
+        exc_re = re.compile(args.exclude_target_genes) if args.exclude_target_genes else None
+        cls_re = re.compile(args.exclude_target_classes) if args.exclude_target_classes else None
+        srcmax = {}
+        if args.min_target_sources > 1:
+            with open(args.targets, newline='') as fh:
+                for r in csv.DictReader(fh, delimiter='\t'):
+                    n = (r.get('pertname') or '').strip().lower()
+                    if not n:
+                        continue
+                    try:
+                        k = int(r.get('n_sources') or 0)
+                    except ValueError:
+                        k = 0
+                    key = (n, r['target'])
+                    srcmax[key] = max(srcmax.get(key, 0), k)
+        relev = {}
+        if args.relevance:
+            with open(args.relevance, newline='') as fh:
+                for r in csv.DictReader(fh, delimiter='\t'):
+                    relev.setdefault(r['set'], {})[r['gene']] = int(r['hops'])
+            print('relevance table: %d sets, max hops allowed %d' % (len(relev), args.max_hops))
+        sel_drugs, n_excluded = set(), 0
         for d in pheno:
+            hit = False
             for gene, eff in dte.get(d.lower(), {}).items():
                 subs = g2s.get(gene)
                 if not subs:
@@ -311,8 +388,27 @@ def main():
                     continue
                 if args.target_effect and eff != args.target_effect:
                     continue
-                sel_drugs.add(d)
+                if exc_re is not None and exc_re.search(gene):
+                    continue
+                if cls_re is not None and cls_re.search(gene):
+                    continue
+                if srcmax and srcmax.get((d.lower(), gene), 0) < args.min_target_sources:
+                    continue
+                hit = True
                 break
+            if hit:
+                sel_drugs.add(d)
+            elif exc_re is not None:
+                # would it have matched without the exclusion?
+                for gene, eff in dte.get(d.lower(), {}).items():
+                    subs = g2s.get(gene)
+                    if subs and (sub_re is None or any(sub_re.search(x) for x in subs)) \
+                            and (not args.target_effect or eff == args.target_effect):
+                        n_excluded += 1
+                        break
+        if exc_re is not None:
+            print('excluded %d drugs whose only matching target hits %r (GEM subsystem membership is '
+                  'bookkeeping, not mechanism)' % (n_excluded, args.exclude_target_genes))
         sel_label = 'target in a matching GEM subsystem%s' % (
             ', effect=%s' % args.target_effect if args.target_effect else '')
         print('annotated targets: %d of %d drugs have any; %d have a GEM target in a subsystem matching '
@@ -462,10 +558,36 @@ def main():
             else:
                 naive = np.nan   # undefined once drugs are collapsed into groups
 
+            r_moa = p_moa = r_oth = p_oth = np.nan
+            n_moa = n_oth = 0
+            m = None
+            if group_match is not None:
+                m = group_match
+            elif sel_drugs is not None:
+                # --relevance narrows the matched group PER SET: a drug counts only if one
+                # of its (already filtered) inhibited targets lies within --max-hops of a
+                # producing route to THIS set. Hence the mask is rebuilt for each set.
+                if relev:
+                    hops = relev.get(key[0], {})
+                    ok_rel = set()
+                    for d in sel_drugs:
+                        for gene in dte.get(d.lower(), {}):
+                            h = hops.get(gene)
+                            if h is not None and h <= args.max_hops:
+                                ok_rel.add(d)
+                                break
+                    m = np.array([d in ok_rel for d in drugs])
+                else:
+                    m = np.array([d in sel_drugs for d in drugs])
+            elif moa_re is not None:
+                m = np.array([bool(moa_re.search(moa.get(d, ''))) for d in drugs])
+
             # Conditional on expression: the differential of the matching GENE set, and
             # the MetChange differential with that gene set partialled out.
             r_expr = p_expr = r_part = p_part = np.nan
-            n_cond = 0
+            r_expr_moa = r_part_moa = p_part_moa = np.nan
+            r_expr_oth = r_part_oth = np.nan
+            n_cond = n_cond_moa = 0
             if expr_scores and group_match is None and X in expr_scores and Y in expr_scores:
                 ek = _expr_key(key[0], key[2])
                 ex, ey = expr_scores[X].get(ek), expr_scores[Y].get(ek)
@@ -481,17 +603,29 @@ def main():
                         if np.nanstd(eE) > 0:
                             r_expr, p_expr = corr(eE, eP)
                             r_part, p_part = _partial(eS, eP, eE)
+                    # The pre-registered statistic is the partial WITHIN the matched
+                    # subgroup, not over all drugs: the all-drug partial answers a
+                    # different question (does expression explain the pooled signal,
+                    # which is itself confounded and near-null).
+                    if m is not None:
+                        mm = [d for d in cd if _is_match(d)]
+                        oo = [d for d in cd if not _is_match(d)]
+                        for lst, tag in ((mm, 'moa'), (oo, 'oth')):
+                            if len(lst) < max(8, args.moa_min_drugs // 2):
+                                continue
+                            jj = [ii[d] for d in lst]
+                            aS, aP = dS[jj], dP[jj]
+                            aE = np.array([ex[d] - ey[d] for d in lst])
+                            if np.nanstd(aE) <= 0 or np.nanstd(aS) <= 0:
+                                continue
+                            re_, _ = corr(aE, aP)
+                            rp_, pp_ = _partial(aS, aP, aE)
+                            if tag == 'moa':
+                                r_expr_moa, r_part_moa, p_part_moa, n_cond_moa = re_, rp_, pp_, len(lst)
+                            else:
+                                r_expr_oth, r_part_oth = re_, rp_
             # MoA strata: the matching group is where the hypothesis applies at all,
             # the complement is the built-in control.
-            r_moa = p_moa = r_oth = p_oth = np.nan
-            n_moa = n_oth = 0
-            m = None
-            if group_match is not None:
-                m = group_match
-            elif sel_drugs is not None:
-                m = np.array([d in sel_drugs for d in drugs])
-            elif moa_re is not None:
-                m = np.array([bool(moa_re.search(moa.get(d, ''))) for d in drugs])
             if m is not None:
                 n_moa, n_oth = int(m.sum()), int((~m).sum())
                 if n_moa >= args.moa_min_drugs and np.nanstd(dS[m]) > 0 and np.nanstd(dP[m]) > 0:
@@ -505,7 +639,10 @@ def main():
                          'n_moa': n_moa, 'r_moa': r_moa, 'p_moa': p_moa,
                          'n_other': n_oth, 'r_other': r_oth, 'p_other': p_oth,
                          'n_conditional': n_cond, 'r_expr': r_expr, 'p_expr': p_expr,
-                         'r_partial_mc_given_expr': r_part, 'p_partial': p_part})
+                         'r_partial_mc_given_expr': r_part, 'p_partial': p_part,
+                         'n_cond_moa': n_cond_moa, 'r_expr_moa': r_expr_moa,
+                         'r_partial_moa': r_part_moa, 'p_partial_moa': p_part_moa,
+                         'r_expr_other': r_expr_oth, 'r_partial_other': r_part_oth})
     if degenerate:
         print('\nSKIPPED %d combination(s) with a constant or all-missing difference vector '
               '(no information; reporting them would invent a p-value):' % len(degenerate))
@@ -593,6 +730,64 @@ def main():
             keep = np.nanmedian(np.abs(rp)) / max(1e-9, np.nanmedian(np.abs(rm)))
             print('the MetChange association retains %.0f%% of its magnitude once expression is partialled '
                   'out (100%% = expression explains none of it, 0%% = all of it)' % (100 * keep))
+    if args.group_report:
+        if not tvectors:
+            print('\n--group-report needs --targets')
+        else:
+            key = (args.group_report_set, args.group_report_variant, args.statistic)
+            avail = [c for c in scores if key in scores[c]]
+            if len(avail) < 2:
+                print('\n--group-report: %s not scored in >=2 cells' % (key,))
+            else:
+                print()
+                print('WITHIN-GROUP DIFFERENTIAL for %s %s, Jaccard >= %.2f, groups with >= %d drugs'
+                      % (args.group_report_set, args.group_report_variant,
+                         args.group_report_jaccard, args.group_report))
+                print('Each row: the correlation computed ACROSS that group\'s drugs, per cell pair, then')
+                print('summarised over pairs. "matched" = the group targets a selected GEM subsystem.')
+                base = sorted(set(pheno) & set.intersection(*[set(scores[c][key]) for c in avail]))
+                grps = [g for g in jaccard_groups({d: tvectors.get(d, frozenset()) for d in base},
+                                                  args.group_report_jaccard)
+                        if len(g) >= args.group_report]
+                h = ('%-30s %5s %4s %9s %9s %8s'
+                     % ('group (shared targets)', 'n', 'mtch', 'median r', 'frac r>0', 'npairs'))
+                print(h)
+                print('-' * len(h))
+                out = []
+                for g in sorted(grps, key=len, reverse=True):
+                    rs = []
+                    for X, Y in itertools.combinations(sorted(avail), 2):
+                        if X not in pheno[g[0]] if g[0] in pheno else True:
+                            pass
+                        dd = [d for d in g if X in pheno.get(d, {}) and Y in pheno.get(d, {})
+                              and d in scores[X][key] and d in scores[Y][key]
+                              and np.isfinite(scores[X][key][d]) and np.isfinite(scores[Y][key][d])]
+                        if len(dd) < max(8, args.group_report // 2):
+                            continue
+                        a = np.array([scores[X][key][d] - scores[Y][key][d] for d in dd])
+                        b = np.array([pheno[d][X] - pheno[d][Y] for d in dd])
+                        if np.nanstd(a) == 0 or np.nanstd(b) == 0:
+                            continue
+                        rs.append(corr(a, b)[0])
+                    if len(rs) < 3:
+                        continue
+                    rs = np.array([x for x in rs if np.isfinite(x)])
+                    tv = sorted(tvectors.get(g[0], frozenset()))
+                    lbl = ','.join(tv[:3]) + ('...' if len(tv) > 3 else '') or '(no targets)'
+                    mtch = 'yes' if any(_is_match(d) for d in g) else 'no'
+                    out.append((len(g), lbl, mtch, float(np.median(rs)), float(np.mean(rs > 0)), len(rs)))
+                for n_, lbl, mtch, med, frac, npair in out:
+                    print('%-30s %5d %4s %+9.3f %8.0f%% %8d' % (lbl[:30], n_, mtch, med, 100 * frac, npair))
+                if out:
+                    mm = [o for o in out if o[2] == 'yes']
+                    nn = [o for o in out if o[2] == 'no']
+                    print()
+                    print('median of the group medians: matched groups %+.3f (n=%d), '
+                          'non-matched %+.3f (n=%d)'
+                          % (np.median([o[3] for o in mm]) if mm else np.nan, len(mm),
+                             np.median([o[3] for o in nn]) if nn else np.nan, len(nn)))
+                    print('NOTE the non-matched groups are mostly kinase/HDAC/receptor mechanisms and act as '
+                          'a negative-control panel here.')
     pos = sum(1 for r in rows if r['r_diff'] > 0)
     sig = [r for r in rows if r['bh_q'] < 0.05]
     print()
