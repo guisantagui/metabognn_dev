@@ -218,6 +218,25 @@ rather than an assumption.
 
 ## 7. Analysis provenance
 
+**Added 2026-11-25: `scripts/mc_phenotype_assoc/reproduce_report09.sh`** runs every number in sections 3, 3.1,
+4 and 5, one block per section (`bash ... reproduce_report09.sh` for all, or `... 4` for one). Verified: the
+section-4 head-to-head returns HEPG2 MetChange 0.350 pooled / **0.365 matched** and expression 0.418 pooled /
+**0.500 matched**, exactly as reported. For sections 9 and 9.6 use `run_naia_assoc.sh`, which always existed.
+
+The gap it closes: the HepG2 MMP association itself was always scripted - `launch_assoc_HEPG2_slurm.sh` runs
+both the MetChange and expression arms with their stratified and responsiveness-matched checks - but the
+**cross-cell comparison and the head-to-head were not**, because both apply the common-drug restriction that
+the per-cell launchers do not. Section 4 holds the project's most load-bearing number for the central thesis
+and was reproducible only from an ad-hoc command line.
+
+One thing the launcher surfaces that the report did not record: the **responsive shares differ enormously
+between the two label types**. For MMP-down in HEPG2 the MetChange arm is 28% of cases against 7% of controls,
+while the expression arm is 62% against 50%. Expression labels call far more drugs responsive, with a much
+smaller case-control gap, which is relevant context for why the matched designs behave so differently - and
+worth bearing in mind before reading the 0.500 as a clean null.
+
+
+
 **`scripts/mc_phenotype_assoc/cross_cell_compare.py`** (added with this report) performs the common-drug
 restriction and both designs, for any run / set / statistic / contrast, reading only `per_drug_scores.tsv`:
 

@@ -31,6 +31,11 @@ HEAD `d11744b`, except the files listed in section 8.
 > Earlier today: corrected MetChange matches expr and TF (report 05, section 5): per-drug gap 8.3 / 7.7
 > (seeds 0 / 1), vs expr 7.8 / 10.4 and TF 9.0 / 9.3, not significantly different.
 
+**Reproducing any reported number:** see `scripts/mc_phenotype_assoc/REPRODUCING.md` — maps each report
+section to the script that produces it, and names the three known gaps (`confounder_checks.py` /
+`dose_exposure_check.py` for report 08's van Elteren MoA strata, potency and dose analyses;
+`signature_conservation.py` for report 09 §6.3; `build_xu_phenotype.py` for report 10 §5).
+
 **Read first:** `reports/2026-11-24_prism_gcp_cellpainting.md` **section 12 — the pre-registered conditional
 test is CONFIRMED: on 5 NON-HepG2 cell lines, MetChange's cell-specific prediction tracks cell-specific drug
 sensitivity (mean r +0.291, 10/10 pairs) and the matching GENE set carries NONE of it (-0.008, 4/10);
@@ -834,6 +839,36 @@ R on the cluster: conda env `r-4.3.1` (`launch_schuhknecht_mc_assoc_A549.sh` act
 > complementarity.** On the best-powered pair TCA conservation is POSITIVE (+0.11..+0.32), merely lowest; the
 > negatives that prompted it (HCC515 -0.371, A375 -0.154) rest on 45-61 responsive drugs. Directional only.
 > Not addressed: only HEPG2-vs-X pairs, responsive n 31-68, and `z` is already within-perturbation standardised.
+
+> **2026-11-25 — REPRODUCIBILITY GAP FOUND AND CLOSED (report 10, 16).** Asked whether the reported results had
+> a launcher; the answer was **no**. The SCORING steps always did (`launch_prism_cell/slurm.sh`,
+> `prepare_assoc_inputs.sh`, `run_naia_assoc.sh`), but **every number in report 10 sections 8-15 came from an
+> ad-hoc command line** — reproducible only by remembering which of `prism_differential.py`'s **33 flags** were
+> set. Nominal reproducibility: script in git, result not, and a changed default would alter a published number
+> silently. **Section 7 identified this exact failure for the cross-cell work, fixed it with
+> `cross_cell_compare.py`, and it was then repeated a dozen times**; section 13's subsystem loop existed only in
+> a session temp dir.
+> **ALSO ADDED `reproduce_report09.sh`** — the HepG2 MMP association itself was always scripted
+> (`launch_assoc_HEPG2_slurm.sh` runs BOTH arms with stratified + matched checks), **but report 09's cross-cell
+> table (section 3) and the MetChange-vs-expression HEAD-TO-HEAD (section 4) were NOT**, because both apply the
+> common-drug restriction the per-cell launchers skip. **Section 4 holds the project's most load-bearing number
+> for the thesis and had no launcher.** Now verified to return HEPG2 MetChange 0.350 pooled / 0.365 matched and
+> expression 0.418 / 0.500 matched, exactly as reported. Sections 9/9.6 use `run_naia_assoc.sh` (always existed).
+> **NEW CONTEXT the launcher surfaced: the RESPONSIVE SHARES differ hugely between label types — MMP-down in
+> HEPG2 is 28%/7% (MetChange) vs 62%/50% (expression). Expression calls far more drugs responsive with a much
+> smaller case-control gap, which is why the matched designs behave so differently — bear it in mind before
+> reading the 0.500 as a clean null.**
+> **NOW: `reproduce_report10.sh` runs every section 8-15 analysis with exact flags** (`bash ... reproduce_report10.sh`
+> for all, or `... 12 13` for selected); `prism_cell_coverage.py` reproduces section 15 and is reusable for any
+> cell-line question; `build_target_relevance.py` for section 14. Only prerequisite is the per-cell scores from
+> the cluster. **Verified: section 12 returns +0.291 (10/10), expression -0.008 (4/10), MC|expr +0.302 (10/10),
+> retention 104%, Wilcoxon at the n=10 floor — exactly as reported.**
+> **NOT FIXED, and the right next housekeeping: `prism_differential.py` is 811 lines / 33 flags and the headline
+> depends on a 6-flag combination. A launcher PINS that but does not make it LEGIBLE. A load-bearing claim wants
+> a ~40-line script with the specification HARDCODED and no arguments**, with the flexible script kept for
+> exploration. Also: of ~2,600 lines written for report 10, ~600 serve no live claim (`build_xu_phenotype.py`
+> underpowered test, `signature_conservation.py` one use, `build_target_relevance.py` withdrawn as a selector
+> within the hour). **Volume is not progress; the remedy is a decision criterion, not more code.**
 
 > **2026-11-25 — WHICH CELL LINES ARE WORTH COMPUTING: TWO, NOT 93 (report 10, 15). CORRECTS 12.3.** Measured
 > from the new `data/LINCS/lincs_unique_perts_bycell.tsv` (227 cells, 201,295 rows) against PRISM, BEFORE

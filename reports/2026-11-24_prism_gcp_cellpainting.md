@@ -1715,3 +1715,53 @@ specific label panel, computed before the dataset is ranked"*. It applies to **c
 to datasets, and the general form is: **count the units that can actually carry the prediction, for the
 specific comparison being proposed, before quoting an opportunity.** `lincs_unique_perts_bycell.tsv` makes
 that a one-command check for any future cell-line question and should be the first thing consulted.
+
+## 16. Reproducibility: sections 8-15 had no launcher until now
+
+*Asked directly, and the honest answer was no. Recorded because it is the second time
+the same gap appeared in this report.*
+
+### 16.1 What was and was not reproducible
+
+The **scoring** steps always were: `launch_prism_cell.sh` / `launch_prism_slurm.sh` produce the per-cell
+`per_drug_scores.tsv` for both arms, `prepare_assoc_inputs.sh` builds the sets and phenotype tables, and
+`run_naia_assoc.sh` reproduces report 09, section 9 end to end.
+
+The **analyses** were not. Every number in sections 8 to 15 came from an ad-hoc command line, so the reported
+results were reproducible only by remembering which of `prism_differential.py`'s **33 flags** had been set.
+That is nominal reproducibility: the script is in git, the result is not, and a changed default would alter a
+published number silently. Section 7 identified exactly this failure for the cross-cell work, fixed it with
+`cross_cell_compare.py`, and it was then repeated a dozen times. Section 13's subsystem loop existed only as a
+file in a session temporary directory, which is the same thing again.
+
+### 16.2 What now exists
+
+| script | reproduces |
+|---|---|
+| **`reproduce_report10.sh`** | **every number in sections 8-15**, one block per section, exact flags, outputs to `results/mc_phenotype_assoc/cross_cell/` |
+| `prism_cell_coverage.py` | section 15's table, and reusable for any future cell-line question |
+| `build_target_relevance.py` | section 14's producer-reachability table |
+
+```bash
+bash scripts/mc_phenotype_assoc/reproduce_report10.sh          # all sections
+bash scripts/mc_phenotype_assoc/reproduce_report10.sh 12 13    # selected
+```
+
+Its only prerequisite is the per-cell scores from the cluster; everything else is local and reads the ~2 MB
+score files. Verified on section 12, which returns the reported values exactly: MetChange +0.291 (10/10
+pairs), expression -0.008 (4/10), MetChange given expression +0.302 (10/10), retention 104%, paired Wilcoxon
+at the n=10 floor with 10/10 differences favouring the matched group.
+
+### 16.3 The structural problem this does not fix
+
+`prism_differential.py` is 811 lines with 33 flags, and the section-12 result depends on a particular
+six-flag combination. A launcher pins that combination but does not make it legible. **The better form for a
+load-bearing claim is a short script with the specification hardcoded and no arguments** - forty lines that
+print the three numbers, reviewable in five minutes - with the flexible script kept for exploration. That is
+not yet done, and it is the right next piece of housekeeping.
+
+Related: of roughly 2,600 lines written for this report, perhaps 600 serve no live claim -
+`build_xu_phenotype.py` produced an underpowered test (section 5), `signature_conservation.py` ran once, and
+`build_target_relevance.py` was withdrawn as a selector within the hour (14.5). Volume is not progress, and
+the remedy is a decision criterion rather than more code: an analysis that serves a decision does not
+accumulate.
