@@ -33,6 +33,13 @@ cd "$repo"
 require_python || exit 1
 
 cell="${cell:-HEPG2}"
+# The ASSAY cell line of each phenotype. The phenotype never changes cell line when
+# `cell` changes - only the LABELS do. So running a HepG2-measured phenotype against
+# another cell's labels is the cross-cell CONTROL of report 08 section 8.3, not a
+# replication: a null there means the association is that cell's metabolism rather
+# than a compound property. Printed below because this reading has been inverted
+# once already (report 11, 12.0).
+pheno_cell="HEPG2"
 sets_dir="results/mc_phenotype_assoc/metabolite_sets"
 PH="results/mc_phenotype_assoc/phenotypes_ALL/attene_ramos_mmp.tsv"
 out_root="results/mc_phenotype_assoc/${cell}"
@@ -64,6 +71,17 @@ else
     NO_NSIG=""
     MC_ARM="results/labels/${cell}/metchange/rank"
     echo "NOTE: ${cell} arms are co-extensive ($((n_mc-1)) perturbations); no restriction needed."
+fi
+echo
+
+if [ "$cell" = "$pheno_cell" ]; then
+    echo "DESIGN: phenotype measured in ${pheno_cell}, labels from ${cell} -> MATCHED."
+    echo "        A positive association is the result under test."
+else
+    echo "DESIGN: phenotype measured in ${pheno_cell}, labels from ${cell} -> CROSS-CELL CONTROL."
+    echo "        This is report 08 section 8.3's control, NOT a replication of the ${pheno_cell} run."
+    echo "        A NULL here is the control PASSING: it says the association is ${pheno_cell}"
+    echo "        metabolism rather than a compound property. A positive result would be bad news."
 fi
 echo
 

@@ -1,3 +1,21 @@
+> **2026-11-26 — A549 is the cross-cell CONTROL and it PASSES.** The Attene-Ramos MMP phenotype is measured
+> in **HepG2** (AID 720637) whatever cell line supplies the labels, so swapping in A549 labels is report 08
+> §8.3's cross-cell control, **not a replication**: if A549 labels predicted HepG2 MMP, the association would
+> be compound chemistry rather than HepG2 metabolism. They don't — all 18 TCA/pyruvate rows at 0.451–0.536
+> (rand 0.39–0.995) on a matched n=78/428, against HepG2's 0.357–0.418 (rand 0.005–0.075); a null, not
+> attenuation (~3.6 SE at that n). It also reproduces report 09 §3 (A549 0.477/0.493/0.463) through a
+> different pipeline. **So the §10 result has now survived three distinct challenges: the producer-average
+> null, global-component removal, and the cross-cell control.** What is still untested is generality across
+> *phenotypes* — every test so far uses the same HepG2-measured MMP phenotype, so they probe different
+> confounds of one association, and a second label cell line cannot fix that because the phenotype is fixed
+> in HepG2. §10.3b stays blocked on `cell_matrices/HEPG2/expr.csv`. Report 11 §12.
+> **Correction:** a first version of this banner and of §12 called the A549 null a non-replication that cost
+> §10 its generality. That is backwards, and the project had already documented this exact trap in report 08
+> §8.3 in those words.
+> Also fixed: `build_derived_labels.py` was symlinking q-values from the UNRESTRICTED source, which crashed
+> the expression arm loudly and made the MetChange arm take `n_sig` from a different perturbation set
+> silently. Aux files now carry over only when the perturbation set is identical (§12.1).
+
 > **2026-11-25 (later) — the producer-average null and the residual both come back POSITIVE for MetChange.**
 > Four arms, one design (HEPG2, Attene-Ramos MMP, n=144/475, all recomputed in the same run): on `tca` and
 > `pyruvate` in MMP-down, MetChange sits at the random-set floor (AUROC 0.362–0.395, rand 0.005) while the

@@ -505,3 +505,102 @@ representations. That is the test that should gate the FNN investment, and it is
 
 Still true from section 8: feed the FNN the residual plus the global component as one separate feature, not
 5,707 features correlated at 0.97.
+
+---
+
+## 12. A549 as the cross-cell CONTROL, and it passes (2026-11-26)
+
+`cell=A549 bash scripts/mc_phenotype_assoc/reproduce_report11.sh 9 10 11`
+
+### 12.0 Read this run for what it is: a control, not a replication
+
+**The Attene-Ramos phenotype is measured in HepG2** (PubChem AID 720637) whatever cell line supplies the
+labels. `attene_ramos_mmp.tsv` does not change cell line between these runs - only the MetChange labels do.
+So the two runs are:
+
+| run | phenotype | labels | design |
+|---|---|---|---|
+| section 10 | HepG2 MMP | **HepG2** | **matched** |
+| this section | HepG2 MMP | **A549** | **cross-cell control** |
+
+Report 08 section 8.3 states the reading: "Running them against A549 labels is the **cross-cell-line
+control** [...] not a replication: if the association is as strong with A549 labels against a HepG2-measured
+phenotype, it is a compound property rather than HepG2 metabolism."
+
+**A first version of this section got that backwards**, calling the A549 null a non-replication that cost the
+section 10 result its generality. It is the opposite: a null here is the control passing. The error is
+recorded because the project had already documented this exact trap, in those words, and it was walked into
+anyway.
+
+### 12.1 The arms are not co-extensive in A549, and that had to be fixed first
+
+A549 has **44,396** perturbations in the MetChange arm against **7,636** in the expression arm, sharing
+**7,633**. Unrestricted, the comparison would have scored MetChange on nearly six times as many
+perturbations - and therefore a different drug set - as the expression arms. HEPG2 does not have this
+problem: both arms carry the identical 15,032 perturbations in identical order, so section 10 needed no
+restriction and stands as reported.
+
+All four A549 arms are cut to the 7,633 shared perturbations, giving a matched **n = 78 cases / 428 controls**
+in every arm. `reproduce_report11.sh` now compares the two headers itself and restricts when they differ.
+
+**A bug this exposed.** `build_derived_labels.py` was symlinking `qvals.csv` and `fit_info_nsig.csv` from the
+unrestricted source, so a 7,633-column matrix sat beside 44,397-column q-values. The expression arm died
+loudly (`matrix q has a different header to value`); the MetChange arm did **not**, because its symlinked
+`fit_info_nsig.csv` satisfied the `n_sig` lookup before `qvals` was read - so it silently took `n_sig` from a
+different perturbation set. One cause, a loud failure in one arm and a silent inconsistency in another. Aux
+files now carry over only when the perturbation set is identical, and their absence is explained in each
+derived directory's `PROVENANCE.txt`.
+
+### 12.2 The control passes: A549 labels carry no information about HepG2 MMP
+
+MetChange arm, `z`, MMP_down vs inactive:
+
+| set | variant | HepG2 labels (n=144/475) | A549 labels (n=78/428) |
+|---|---|---|---|
+| tca | mito_nohub | 0.362 **rand 0.005** | 0.504 rand 0.93 |
+| tca | cyto_nohub | 0.393 **rand 0.005** | 0.483 rand 0.82 |
+| tca | all_nohub | 0.383 **rand 0.005** | 0.498 rand 0.96 |
+| tca_endpoints | cyto_nohub | 0.357 **rand 0.005** | 0.515 rand 0.91 |
+| tca_endpoints | all_nohub | 0.358 **rand 0.005** | 0.512 rand 0.86 |
+| pyruvate | mito_nohub | 0.365 **rand 0.015** | 0.491 rand 0.94 |
+| pyruvate | all_nohub | 0.389 **rand 0.010** | 0.465 rand 0.58 |
+
+All 18 TCA and pyruvate rows fall between 0.451 and 0.536, random-set p 0.39 to 0.995. The strongest row on
+any set is `glycolysis mito` at 0.566, rand 0.095.
+
+This is a null and not an attenuation - the point estimates are centred on chance, and with n = 78/428 the
+AUROC standard error is about 0.036, so the HepG2 value of 0.362 sits ~3.6 SE away. **Therefore the section
+10 association is not a compound property.** A drug's effect on A549 metabolism says nothing about its effect
+on HepG2 mitochondria, which is what should happen if the signal is HepG2 metabolism rather than chemistry.
+
+### 12.3 It reproduces report 09 section 3
+
+Report 09 section 3 ran this control across all eight cell lines with labels and found the MMP-down
+association HepG2-only: A549 at 0.477 (own drugs), 0.493 (common set), 0.463 (responsiveness-matched). This
+run returns 0.504 through a different pipeline - restricted perturbation set, freshly built derived arms,
+random-set nulls - and agrees. A passed reproducibility check on an established control.
+
+### 12.4 What it does and does not establish
+
+**Does:** the section 10 result survives the cross-cell control, so "MetChange beats the producer-average on
+HepG2 MMP" is not explained by compound chemistry. Combined with section 10.1, the producer-average null and
+the global-residual test, that is three distinct challenges the HepG2 TCA association has now survived.
+
+**Does not:** generality across phenotypes. Every one of these tests uses the same HepG2-measured MMP
+phenotype, so they probe different confounds of one association rather than several associations. A second
+*phenotype* measured in HepG2 would test that; a second *label* cell line cannot, because the phenotype is
+fixed in HepG2.
+
+**And it does not open the 10.3b diagnostics.** The sign conflict lives in the matched HepG2 design, so
+A549's absolute expression matrix - the one that happens to be local - is the wrong one. Resolving 10.3b
+needs `cell_matrices/HEPG2/expr.csv`, by transfer or by running the diagnostic on the cluster.
+
+### 12.5 Status of the claims in this report
+
+| claim | status |
+|---|---|
+| MetChange is ~1-dimensional, and the LP is what collapses it (8, 9.2) | **holds**, both cell lines (PR 1.10 / 1.11) |
+| MetChange beats the producer-average; the signal is not the global component (10.1) | **holds**, and now also survives the cross-cell control |
+| the association is HepG2 metabolism, not compound chemistry (12.2) | **supported** |
+| the MMP-down direction has a transcriptional reading (10.3b) | **open, blocked** on HepG2 absolute expression |
+| any of this generalises to another phenotype | **untested** - all tests share one HepG2-measured phenotype |
