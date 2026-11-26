@@ -1,3 +1,43 @@
+> **2026-11-25 (later) — the producer-average null and the residual both come back POSITIVE for MetChange.**
+> Four arms, one design (HEPG2, Attene-Ramos MMP, n=144/475, all recomputed in the same run): on `tca` and
+> `pyruvate` in MMP-down, MetChange sits at the random-set floor (AUROC 0.362–0.395, rand 0.005) while the
+> **producer-average** — the same genes, aggregated to the same metabolites, with no LP and no stoichiometry —
+> is **null** (0.422–0.490, rand 0.10–0.92), and gene-level expression is null too (0.405, rand 0.12). The
+> **global-residual** arm keeps the signal (0.352–0.382, rand 0.010–0.040), so §8's one-dimensionality does
+> not invalidate the report 09 §4 result. The producer-average is not inert — it is the strongest arm on the
+> MMP-**up** contrast (nucleotide 0.259 at the floor) — so this is a real comparison.
+> **BUT THE DIRECTION CONFLICTS WITH BOTH EXPRESSION ARMS AND IS UNEXPLAINED.** No sign flip is applied
+> anywhere: AUROC 0.362 means MMP-down drugs have more NEGATIVE TCA log2FC, i.e. a GAIN of transcriptome
+> consistency. Yet both expression arms say TCA genes go DOWN (producer-avg 0.422, expr 0.405), which should
+> make TCA metabolites more expensive, not less. Two candidates — the LP's min-over-routes, and rank-relativity
+> (penalties use within-sample ranks of ABSOLUTE expression, the expression arm reports log2FC, and the two
+> can move oppositely by construction) — each with a diagnostic in report 11 §10.3b. **Do not build a
+> mechanistic reading on the TCA result until one is settled.**
+> **The statistical claim is the first result isolating the stoichiometric integration itself rather than
+> MetChange vs expression**, and the disagreement arguably strengthens it (a proxy for TCA gene expression
+> could not disagree with TCA gene expression) — but what MetChange tracks instead is currently unknown. Also established: the LP is what collapses the
+> dimensionality (producer-average retains 5.18 effective dimensions, MetChange 1.10). On the MMP-**up**
+> contrast the arms' sign inversion does reconcile them (producer-avg 0.259 vs MetChange 0.630 are the same
+> biological statement); on MMP-**down** it does not, which is the conflict above. Gates remaining for the
+> FNN: resolve §10.3b, and a grouped cross-validated target-prediction task.
+> Launchers: `reproduce_report11.sh 9 10 11`. Full account: **report 11 §9–§11**.
+
+> **2026-11-25 — the MetChange label matrix is effectively one-dimensional.** PC1 = 95.5% (HEPG2) and 95.0%
+> (A549) of the feature-correlation variance; participation ratio 1.10 and 1.11; **one** eigenvalue carries
+> 90% of the variance; random metabolite pairs correlate at r = 0.97. The same statistic on the *expression*
+> arm of the same cells and perturbations gives 52–58 eigenvalues and r = 0.045–0.066, so the collapse happens
+> in the expression→MetChange step, not in the data. The global component is **not** response magnitude
+> (Spearman +0.14 against mean |expr log2FC|), so the `n_sig` covariate matching used in reports 08–10 does
+> **not** target it, though the `z` statistic itself partially does (report 11 §8.3). Curated sets do nonetheless carry set-specific signal above size-matched random sets
+> (`dntp_endpoints` at the 99.7th percentile), so the existing results are not void — but every set-level
+> claim should be read against its `rand=` column, not its parametric p. Full account, the correction of a
+> wrong intermediate figure, and the consequences for the FNN: **report 11 §8**. Script:
+> `scripts/mc_phenotype_assoc/feature_dimensionality.py`.
+>
+> Also: folate is a dead MetChange feature (0th-percentile SD in both cells), so the NCI-60 design is **25
+> metabolites, not 26**. And the medium does *not* explain the amino-acid null — alanine, the one amino acid
+> absent from `rpmi_medium.json`, behaves like the 19 that are in it (report 11 §8.5).
+
 # Project state — 2026-11-19
 
 Handoff note for continuing in a new session. Everything described here is committed up to

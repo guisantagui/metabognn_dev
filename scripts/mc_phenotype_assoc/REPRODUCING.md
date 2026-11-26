@@ -51,6 +51,31 @@ launch_prism_slurm.sh     PRISM, both arms, 5 cells  ->  reproduce_report10.sh
 | §14 producer-reachability filter | `reproduce_report10.sh 14`, via `build_target_relevance.py` | scripted |
 | §15 which cell lines are worth computing | `reproduce_report10.sh 15`, via `prism_cell_coverage.py` | scripted |
 
+## Report 11 — `2026-11-25_nci60_exchange_flux_feasibility.md`
+
+| section | produced by | status |
+|---|---|---|
+| §8 label-matrix dimensionality, both arms, HEPG2 + A549 | `feature_dimensionality.py` | scripted |
+| §8.4 set specificity against size-matched random sets | `feature_dimensionality.py` (same run) | scripted |
+| §1–§6 the NCI-60 feasibility checks themselves | ad-hoc, run inline on 2026-11-25 | **GAP** |
+| §9 the producer-average null | `reproduce_report11.sh 9`, via `build_derived_labels.py` | scripted |
+| §10 four-arm comparison, residual vs producer-average | `reproduce_report11.sh 10` | scripted |
+| §10.1 the four-way table itself | `reproduce_report11.sh 11`, via `compare_arms.py` | scripted |
+
+`feature_dimensionality.py` needs only local label matrices and runs in ~3 min for both cells. Its functions
+have working defaults and are importable, so the analysis can be stepped through rather than only run:
+
+```python
+from feature_dimensionality import *
+X, ids, cols = load_matrix(label_path('HEPG2', 'metchange'))
+spectrum(X)                                   # PC1, participation ratio, median pairwise r
+set_specificity(X, ids, read_sets()[('dntp_endpoints', 'all')])
+```
+
+**Read `_check_no_double_centring` before writing any variant of this analysis.** Centring the standardised
+matrix across features removes the shared component being measured, and the first pass at §8 did exactly
+that and reported 9.55 effective dimensions instead of 1.10.
+
 ## Known gaps, in priority order
 
 1. **`confounder_checks.py` / `dose_exposure_check.py`** — report 08's van Elteren MoA strata, potency and
@@ -104,3 +129,17 @@ symbols, 1,103 duplicated). MetChange is rank-based, so a monotone transform of 
 **summing duplicates is only valid in linear space**, which is why `prepare_input_matrices.py` converts from
 LINCS's log scale before summing. For a log-scale source either convert first, or aggregate with a
 rank-preserving function such as max.
+
+### MetChange score direction
+
+`run_metchange_exe.py` minimises the penalty sum (`ModelSense = GRB.MINIMIZE`); its comment at line 266 reads
+**"a metchange score of zero means the metabolite can be easily produced"**. The label is therefore a **cost**:
+
+* MetChange log2FC **up**  = production **harder**
+* expression  log2FC **up**  = genes **up**, so capacity **easier**
+
+**The two arms are sign-inverted.** Any head-to-head reading of a MetChange AUROC against an expression
+AUROC has to flip one of them, and an apparent disagreement between the arms may be agreement. Report 11
+§10.3 found exactly that: producer-average 0.259 against MetChange 0.630 on the same contrast are the same
+biological statement. A set-level AUROC below 0.5 on the MetChange arm means the case drugs find that set
+*easier* to produce, which is not what "the pathway is impaired" would predict.
