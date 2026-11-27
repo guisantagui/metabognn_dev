@@ -126,10 +126,18 @@ sec() {
 # 10.3b): first as "easier" by reading z as a log2FC, then as "harder" from a raw mean of
 # a heavy-tailed distribution. `sign_mean` settles it in one number - and for
 # `tca all_nohub` it is AUROC 0.523 at random-set p 0.995, i.e. no absolute effect at all.
+#
+# --mode abs adds two more uncentred statistics, both robust to the heavy tails that
+# made the raw mean misleading: `median_raw` (set median of log2FC) and `tz_mean` (mean
+# signed limma evidence, sign(log2FC) * Phi^-1(1 - p/2); needs pvals.csv, so it is
+# absent for the derived producer-average / global-residual arms). Every run also
+# writes onesample_results.tsv: each group's drugs tested against NO CHANGE (0; 0.5
+# for auroc) - for the uncentred statistics that is "does the set move against its
+# controls at all", which the case-vs-control contrast does not ask.
 assoc() {
     "$py" -I "$here/mc_phenotype_assoc.py" \
         --labels "$1" --sets "$2" --phenotype "$PH" \
-        --mode value --mode sign ${NO_NSIG:-} \
+        --mode value --mode sign --mode abs ${NO_NSIG:-} \
         --case MMP_down --control inactive --extra-contrast MMP_up:inactive \
         --out-dir "$3"
 }
@@ -245,6 +253,44 @@ if sec 11 "the four-way table"; then
     echo
     echo "--- sign_dev: direction relative to the perturbation's own mean sign ---"
     "$py" -I "$here/compare_arms.py" --base "$out_root" --statistic sign_dev
+    echo
+    echo "--- median_raw: UNCENTRED set median of log2FC (case vs control contrast) ---"
+    "$py" -I "$here/compare_arms.py" --base "$out_root" --statistic median_raw
+    echo
+    echo "--- tz_mean: UNCENTRED signed limma evidence (MetChange and expression arms only) ---"
+    "$py" -I "$here/compare_arms.py" --base "$out_root" --statistic tz_mean
+
+    echo
+    echo "--- one-sample: does each group move the set against its controls? ---"
+    echo "    null = 0 (no change). wilcoxon/sign p test that; rand asks whether the"
+    echo "    set moves more than random sets of its size (the relative question again)."
+    OUT_ROOT="$out_root" "$py" -I - <<'PY'
+import csv, os
+base = os.environ['OUT_ROOT']
+arms = [('MetChange', 'attene_mc_ref'), ('producer-avg', 'attene_prodavg'),
+        ('global-resid', 'attene_resid'), ('expression', 'attene_expr_ref')]
+keep_sets = {'tca', 'tca_endpoints', 'pyruvate', 'oxphos', 'glycolysis', 'dntp_endpoints'}
+keep_stats = ['sign_mean', 'median_raw', 'tz_mean', 'z']
+for label, sub in arms:
+    f = os.path.join(base, sub, 'onesample_results.tsv')
+    if not os.path.exists(f):
+        print('  [%s] no onesample_results.tsv' % label)
+        continue
+    rows = [r for r in csv.DictReader(open(f), delimiter='\t')
+            if r['set'] in keep_sets and r['statistic'] in keep_stats
+            and r['group'] in ('MMP_down', 'inactive')]
+    rows.sort(key=lambda r: (r['set'], r['variant'], keep_stats.index(r['statistic']), r['group']))
+    print('  [%s]' % label)
+    print('    %-16s %-11s %-10s %-9s %4s %10s %22s %6s %9s %9s %7s'
+          % ('set', 'variant', 'statistic', 'group', 'n', 'median', '95% CI', 'above',
+             'wilcox_p', 'sign_p', 'rand'))
+    for r in rows:
+        print('    %-16s %-11s %-10s %-9s %4s %10.4g [%9.3g,%9.3g] %6.2f %9.2g %9.2g %7.3g'
+              % (r['set'], r['variant'], r['statistic'], r['group'], r['n_drugs'],
+                 float(r['median']), float(r['median_ci_lo']), float(r['median_ci_hi']),
+                 float(r['frac_above']), float(r['wilcoxon_p'] or 'nan'),
+                 float(r['sign_test_p'] or 'nan'), float(r['random_set_p'] or 'nan')))
+PY
 fi
 
 echo
@@ -254,6 +300,7 @@ echo "  MetChange        ${out_root}/attene_mc_ref/set_results.tsv"
 echo "  producer-average ${out_root}/attene_prodavg/set_results.tsv"
 echo "  global residual  ${out_root}/attene_resid/set_results.tsv"
 echo "  expression       ${out_root}/attene_expr_ref/set_results.tsv"
+echo "one-sample tests against no change: onesample_results.tsv in the same directories."
 echo
 echo "Read the 'rand' column, not the parametric p: with features correlated at"
 echo "r=0.97 the parametric null is not the relevant one (report 11, 8.1)."

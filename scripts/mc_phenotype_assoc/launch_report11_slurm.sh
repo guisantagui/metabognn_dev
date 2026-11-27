@@ -25,7 +25,25 @@
 #SBATCH --output=logs/report11_%j.out
 set -uo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Locate this directory. NOT from BASH_SOURCE / $0: Slurm copies the batch script to
+# /var/spool/slurmd/job<id>/ before running it, so dirname of the script is the spool
+# directory (job 6428066 died exactly that way: "reproduce_report11.sh: No such file").
+# Walk up from the submit directory instead, as launch_assoc_HEPG2_slurm.sh does.
+marker="scripts/mc_phenotype_assoc/reproduce_report11.sh"
+here=""
+for start in "${SLURM_SUBMIT_DIR:-}" "$PWD" "$(dirname "${BASH_SOURCE[0]}")"; do
+    [ -n "$start" ] || continue
+    d="$(cd "$start" 2>/dev/null && pwd)" || continue
+    while [ -n "$d" ] && [ "$d" != "/" ]; do
+        if [ -f "$d/$marker" ]; then here="$d/scripts/mc_phenotype_assoc"; break 2; fi
+        d="$(dirname "$d")"
+    done
+done
+if [ -z "$here" ]; then
+    echo "cannot locate $marker upward from SLURM_SUBMIT_DIR=${SLURM_SUBMIT_DIR:-unset} or $PWD." >&2
+    echo "Submit from inside the repository (e.g. scripts/mc_phenotype_assoc)." >&2
+    exit 1
+fi
 mkdir -p "$here/logs"
 cd "$here"
 

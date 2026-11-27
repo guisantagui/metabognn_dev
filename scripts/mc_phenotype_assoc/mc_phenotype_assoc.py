@@ -26,6 +26,25 @@ one drug are not independent.
                   the directional reading: it asks whether the pathway moves UP or
                   DOWN, where `value` asks whether it moves at all.
 
+  --mode abs     (ABSOLUTE magnitude: uncentred, robust to the heavy tails)
+    median_raw    median of log2FC over the set's members, nothing subtracted. The
+                  log2FC is already treated-vs-control, so > 0 means the set moved up
+                  against the perturbation's own controls. The median, not the mean:
+                  the TCA endpoints over MMP-down perturbations have mean +29.56 but
+                  median -0.30 (report 11, 10.3b).
+    tz_mean       mean over the set of the SIGNED limma evidence,
+                  sign(log2FC) * Phi^-1(1 - p/2), with p from --pmatrix. This is the
+                  moderated t put on a common normal scale: fit_info carries no
+                  residual df, and the normal quantile of the two-sided p is the same
+                  monotone transform of |t| that limma's own zscoreT applies, but
+                  comparable across perturbations with different df. Dividing by the
+                  SE is what tames the tails. p is clipped at 1e-300 (|z| <= 37).
+
+  sign_mean (mode sign), median_raw and tz_mean are the three uncentred statistics.
+  `z`, `auroc`, `sign_dev`, `sig_dev`, `sig_signed_dev` are all RELATIVE: they ask
+  whether the set moves differently from the rest of the features, not whether it
+  moves up or down against controls.
+
   --mode sig     (significance, needs --qmatrix; USE WITH --min-nsig 1)
     sig_dev       fraction of the set that is significant at --qvalue, minus the
                   perturbation's overall significant fraction: an enrichment of
@@ -76,15 +95,33 @@ default; `--min-nsig 1` reruns it on the responsive subset. Run BOTH and compare
 if the effect is real it should be at least as strong in the responsive subset,
 and that consistency is more convincing than either number alone.
 
+ONE-SAMPLE TESTS (onesample_results.tsv, every statistic, every group). The group
+comparison above asks "do case drugs differ from control drugs". It does not ask
+"do case drugs move the set at all", and the two can disagree: if inactive drugs
+also shift TCA, a real absolute movement in MMP-down drugs can be invisible to the
+contrast. So per group and per set, the drug-level values are tested against the
+statistic's NO-CHANGE value: 0 for every statistic except `auroc` (0.5).
+  - for the uncentred statistics (sign_mean, median_raw, tz_mean) the null is
+    "no change against the perturbation's own controls" - the absolute question;
+  - for the centred ones it is "no different from the rest of the feature space".
+Columns: Wilcoxon signed-rank p, a sign test on the fraction of drugs above vs
+below the null value (robust to the heavy tails), a bootstrap CI of the group
+median, BH q within (group, statistic), and a size-matched RANDOM-SET p: the
+fraction of random sets of the same size whose group median is at least as far
+from the null value. Read the random-set p as "is this set special", not "does it
+move": with features correlated at r = 0.97 every set carries the common shift, so
+for an absolute statistic that p re-asks the relative question at the set level.
+
 Outputs in --out-dir:
   per_drug_scores.tsv   drug x set x statistic, with n_perturbations and max_nsig
   set_results.tsv       set x contrast: group medians, AUROC + CI, p values, BH q
+  onesample_results.tsv set x group x statistic: test against the no-change value
   set_member_values.npz compact (set members + background) x perturbation matrix,
                         so GSEA/NES or any other statistic can be added later
                         without re-reading the 1.5 GB label matrix
   run_info.json
 """
-import argparse, collections, csv, json, os, sys, time
+import argparse, collections, csv, json, os, sys, time, warnings
 
 import numpy as np
 
@@ -350,6 +387,22 @@ def build_cell_matrices(modes, mats, qvalue):
     cells = {}
     vals = mats.get('value')
     qs = mats.get('q')
+    if 'abs' in modes:
+        if vals is None:
+            raise SystemExit('--mode abs needs --matrix')
+        cells['median_raw'] = (vals, 'raw')          # aggregated by MEDIAN, see score_sets
+        ps = mats.get('p')
+        if ps is None:
+            print('mode abs: no p-value matrix, so tz_mean is skipped (median_raw only)',
+                  file=sys.stderr)
+        elif sps is None:
+            print('mode abs: scipy unavailable, so tz_mean is skipped', file=sys.stderr)
+        else:
+            with np.errstate(invalid='ignore'):
+                pc = np.clip(ps.astype(np.float64), 1e-300, 1.0)
+                tz = (np.sign(vals) * sps.norm.isf(pc / 2.0)).astype(np.float32)
+            tz[~np.isfinite(vals) | ~np.isfinite(ps)] = np.nan
+            cells['tz_mean'] = (tz, 'raw')
     if 'value' in modes:
         if vals is None:
             raise SystemExit('--mode value needs --matrix')
@@ -385,6 +438,15 @@ def column_baselines(cells):
     return out
 
 
+# Statistics summarised over the set's rows by the median instead of the mean.
+MEDIAN_STATS = {'median_raw'}
+# The value of each statistic that means "no change" (one-sample null). Everything
+# not listed is 0; auroc is a probability against the background, so 0.5.
+NULL_VALUE = {'auroc': 0.5}
+# Statistics with nothing subtracted: their null is "no change against controls".
+UNCENTRED = {'sign_mean', 'median_raw', 'tz_mean'}
+
+
 def score_sets(sets, feat_index, cells, baselines):
     """(set, variant) -> {statistic: value per column}."""
     out = {}
@@ -395,8 +457,10 @@ def score_sets(sets, feat_index, cells, baselines):
         stats = {}
         for stat, (m, _) in cells.items():
             mean, sd, how = baselines[stat]
-            with np.errstate(invalid='ignore'):
-                v = np.nanmean(m[rows], axis=0)
+            agg = np.nanmedian if stat in MEDIAN_STATS else np.nanmean
+            with np.errstate(invalid='ignore'), warnings.catch_warnings():
+                warnings.simplefilter('ignore', RuntimeWarning)   # all-NaN columns
+                v = agg(m[rows], axis=0)
                 if how == 'z':
                     v = (v - mean) / np.where(sd > 0, sd, np.nan)
                 elif how == 'dev':
@@ -415,8 +479,11 @@ def main():
                     help='fold-change matrix inside --labels; needed by modes value/sign')
     ap.add_argument('--qmatrix', default='qvals.csv',
                     help='q-value matrix inside --labels; needed by mode sig')
+    ap.add_argument('--pmatrix', default='pvals.csv',
+                    help='p-value matrix inside --labels; used by mode abs for tz_mean '
+                         '(skipped with a message when absent, e.g. derived label dirs)')
     ap.add_argument('--mode', action='append', default=[],
-                    choices=['value', 'sign', 'sig'],
+                    choices=['value', 'sign', 'sig', 'abs'],
                     help='repeatable; default value')
     ap.add_argument('--qvalue', type=float, default=0.05)
     ap.add_argument('--no-nsig', action='store_true',
@@ -469,7 +536,8 @@ def main():
         all_perts = list(fit)
     else:
         with open(os.path.join(args.labels,
-                               args.matrix if 'value' in modes else args.qmatrix)) as fh:
+                               args.matrix if {'value', 'sign', 'abs'} & set(modes)
+                               else args.qmatrix)) as fh:
             all_perts = next(fh).rstrip('\n').split(',')[1:]
 
     keep_cols, col_drug = set(), {}
@@ -490,8 +558,15 @@ def main():
         need_rows |= m
 
     paths = {}
-    if 'value' in modes or 'sign' in modes:
+    if 'value' in modes or 'sign' in modes or 'abs' in modes:
         paths['value'] = os.path.join(args.labels, args.matrix)
+    if 'abs' in modes:
+        ppath = os.path.join(args.labels, args.pmatrix)
+        if os.path.exists(ppath):
+            paths['p'] = ppath
+        else:
+            print('mode abs: %s absent, tz_mean will not be computed' % ppath,
+                  file=sys.stderr)
     qpath = os.path.join(args.labels, args.qmatrix)
     # The q-values are read when mode sig needs them, and ALSO whenever there is no
     # fit_info_nsig.csv to take n_sig from: without n_sig the responsiveness
@@ -683,6 +758,78 @@ def main():
         w.writeheader()
         w.writerows(results)
 
+    # --------------------------------------------------- one-sample tests vs null
+    # Per group: do the drugs move the set at all? Null = the statistic's no-change
+    # value (0, or 0.5 for auroc). See the module docstring for how to read each.
+    os_rows = []
+    os_rng = np.random.default_rng(args.seed + 1)
+    for g in sorted(wanted_groups):
+        gi = groups == g
+        if gi.sum() < 3:
+            continue
+        for (sname, variant), per in sorted(drug_stat.items()):
+            size = set_size[(sname, variant)]
+            cand = [v for k, v in rand_drug.items() if k[0] == '__random%d' % size]
+            for stat_name in stat_names:
+                null = NULL_VALUE.get(stat_name, 0.0)
+                x = per[stat_name][gi]
+                x = x[np.isfinite(x)] - null
+                if len(x) < 3:
+                    continue
+                n_pos, n_neg = int((x > 0).sum()), int((x < 0).sum())
+                wp, sp = np.nan, np.nan
+                if sps is not None:
+                    if n_pos + n_neg >= 3:
+                        try:
+                            wp = float(sps.wilcoxon(x, zero_method='wilcox').pvalue)
+                        except ValueError:
+                            pass
+                    if n_pos + n_neg > 0:
+                        sp = float(sps.binomtest(n_pos, n_pos + n_neg, 0.5).pvalue)
+                med = float(np.median(x))
+                boots = np.median(os_rng.choice(x, (args.n_boot, len(x)), replace=True), axis=1)
+                lo, hi = np.percentile(boots, [2.5, 97.5])
+                rp, n_rand = np.nan, 0
+                if cand:
+                    worse = 0
+                    for per_r in cand:
+                        xr = per_r[stat_name][gi]
+                        xr = xr[np.isfinite(xr)] - null
+                        if len(xr) < 3:
+                            continue
+                        n_rand += 1
+                        if abs(np.median(xr)) >= abs(med):
+                            worse += 1
+                    if n_rand:
+                        rp = (worse + 1) / float(n_rand + 1)
+                os_rows.append({
+                    'group': g, 'set': sname, 'variant': variant,
+                    'aliases': set_aliases.get((sname, variant), ''),
+                    'statistic': stat_name,
+                    'reading': 'absolute' if stat_name in UNCENTRED else 'relative',
+                    'null_value': null, 'n_members': size, 'n_drugs': len(x),
+                    'median': med + null, 'median_ci_lo': float(lo) + null,
+                    'median_ci_hi': float(hi) + null, 'mean': float(np.mean(x)) + null,
+                    'frac_above': n_pos / float(len(x)), 'frac_below': n_neg / float(len(x)),
+                    'wilcoxon_p': wp, 'sign_test_p': sp,
+                    'random_set_p': rp, 'n_random_sets': n_rand,
+                })
+    for g in sorted(wanted_groups):
+        for stat_name in stat_names:
+            sel = [r for r in os_rows if r['group'] == g and r['statistic'] == stat_name]
+            for r, q in zip(sel, bh([r['wilcoxon_p'] for r in sel])):
+                r['bh_q'] = float(q)
+    os_rows.sort(key=lambda r: (r['group'], r['statistic'],
+                                r['wilcoxon_p'] if np.isfinite(r['wilcoxon_p']) else 2.0))
+    os_cols = ['group', 'set', 'variant', 'aliases', 'statistic', 'reading', 'null_value',
+               'n_members', 'n_drugs', 'median', 'median_ci_lo', 'median_ci_hi', 'mean',
+               'frac_above', 'frac_below', 'wilcoxon_p', 'sign_test_p', 'bh_q',
+               'random_set_p', 'n_random_sets']
+    with open(os.path.join(args.out_dir, 'onesample_results.tsv'), 'w', newline='') as fh:
+        w = csv.DictWriter(fh, fieldnames=os_cols, delimiter='\t', extrasaction='ignore')
+        w.writeheader()
+        w.writerows(os_rows)
+
     # keep the set members (small) plus the column annotation, so GSEA / NES or any
     # other statistic can be added later without re-reading the 1.5 GB matrix
     keep = sorted({feat_index[m] for _, _, mm in sets for m in mm if m in feat_index})
@@ -700,6 +847,8 @@ def main():
                    'modes': modes, 'statistics': stat_names, 'qvalue': args.qvalue,
                    'matrix': args.matrix if 'value' in paths else None,
                    'qmatrix': args.qmatrix if 'q' in paths else None,
+                   'pmatrix': args.pmatrix if 'p' in paths else None,
+                   'onesample_null': {s: NULL_VALUE.get(s, 0.0) for s in stat_names},
                    'contrasts': ['%s_vs_%s' % c for c in contrasts],
                    'min_nsig': args.min_nsig, 'n_features': len(feats),
                    'n_perturbations': len(names), 'n_drugs': len(drugs),
