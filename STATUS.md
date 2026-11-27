@@ -1,60 +1,142 @@
-> **2026-11-26 — A549 is the cross-cell CONTROL and it PASSES.** The Attene-Ramos MMP phenotype is measured
-> in **HepG2** (AID 720637) whatever cell line supplies the labels, so swapping in A549 labels is report 08
-> §8.3's cross-cell control, **not a replication**: if A549 labels predicted HepG2 MMP, the association would
-> be compound chemistry rather than HepG2 metabolism. They don't — all 18 TCA/pyruvate rows at 0.451–0.536
-> (rand 0.39–0.995) on a matched n=78/428, against HepG2's 0.357–0.418 (rand 0.005–0.075); a null, not
-> attenuation (~3.6 SE at that n). It also reproduces report 09 §3 (A549 0.477/0.493/0.463) through a
-> different pipeline. **So the §10 result has now survived three distinct challenges: the producer-average
-> null, global-component removal, and the cross-cell control.** What is still untested is generality across
-> *phenotypes* — every test so far uses the same HepG2-measured MMP phenotype, so they probe different
-> confounds of one association, and a second label cell line cannot fix that because the phenotype is fixed
-> in HepG2. §10.3b stays blocked on `cell_matrices/HEPG2/expr.csv`. Report 11 §12.
-> **Correction:** a first version of this banner and of §12 called the A549 null a non-replication that cost
-> §10 its generality. That is backwards, and the project had already documented this exact trap in report 08
-> §8.3 in those words.
-> Also fixed: `build_derived_labels.py` was symlinking q-values from the UNRESTRICTED source, which crashed
-> the expression arm loudly and made the MetChange arm take `n_sig` from a different perturbation set
-> silently. Aux files now carry over only when the perturbation set is identical (§12.1).
+# Where this project is — synthesis, 2026-11-27
 
-> **2026-11-25 (later) — the producer-average null and the residual both come back POSITIVE for MetChange.**
-> Four arms, one design (HEPG2, Attene-Ramos MMP, n=144/475, all recomputed in the same run): on `tca` and
-> `pyruvate` in MMP-down, MetChange sits at the random-set floor (AUROC 0.362–0.395, rand 0.005) while the
-> **producer-average** — the same genes, aggregated to the same metabolites, with no LP and no stoichiometry —
-> is **null** (0.422–0.490, rand 0.10–0.92), and gene-level expression is null too (0.405, rand 0.12). The
-> **global-residual** arm keeps the signal (0.352–0.382, rand 0.010–0.040), so §8's one-dimensionality does
-> not invalidate the report 09 §4 result. The producer-average is not inert — it is the strongest arm on the
-> MMP-**up** contrast (nucleotide 0.259 at the floor) — so this is a real comparison.
-> **BUT THE DIRECTION CONFLICTS WITH BOTH EXPRESSION ARMS AND IS UNEXPLAINED.** No sign flip is applied
-> anywhere: AUROC 0.362 means MMP-down drugs have more NEGATIVE TCA log2FC, i.e. a GAIN of transcriptome
-> consistency. Yet both expression arms say TCA genes go DOWN (producer-avg 0.422, expr 0.405), which should
-> make TCA metabolites more expensive, not less. Two candidates — the LP's min-over-routes, and rank-relativity
-> (penalties use within-sample ranks of ABSOLUTE expression, the expression arm reports log2FC, and the two
-> can move oppositely by construction) — each with a diagnostic in report 11 §10.3b. **Do not build a
-> mechanistic reading on the TCA result until one is settled.**
-> **The statistical claim is the first result isolating the stoichiometric integration itself rather than
-> MetChange vs expression**, and the disagreement arguably strengthens it (a proxy for TCA gene expression
-> could not disagree with TCA gene expression) — but what MetChange tracks instead is currently unknown. Also established: the LP is what collapses the
-> dimensionality (producer-average retains 5.18 effective dimensions, MetChange 1.10). On the MMP-**up**
-> contrast the arms' sign inversion does reconcile them (producer-avg 0.259 vs MetChange 0.630 are the same
-> biological statement); on MMP-**down** it does not, which is the conflict above. Gates remaining for the
-> FNN: resolve §10.3b, and a grouped cross-validated target-prediction task.
-> Launchers: `reproduce_report11.sh 9 10 11`. Full account: **report 11 §9–§11**.
+This replaces five dated banners covering 2026-11-25 to 11-27. Their detail is in reports 09, 10 and 11;
+what follows is the standing picture. The FNN plan below (**Goal and standing constraints** onwards) is
+unchanged.
 
-> **2026-11-25 — the MetChange label matrix is effectively one-dimensional.** PC1 = 95.5% (HEPG2) and 95.0%
-> (A549) of the feature-correlation variance; participation ratio 1.10 and 1.11; **one** eigenvalue carries
-> 90% of the variance; random metabolite pairs correlate at r = 0.97. The same statistic on the *expression*
-> arm of the same cells and perturbations gives 52–58 eigenvalues and r = 0.045–0.066, so the collapse happens
-> in the expression→MetChange step, not in the data. The global component is **not** response magnitude
-> (Spearman +0.14 against mean |expr log2FC|), so the `n_sig` covariate matching used in reports 08–10 does
-> **not** target it, though the `z` statistic itself partially does (report 11 §8.3). Curated sets do nonetheless carry set-specific signal above size-matched random sets
-> (`dntp_endpoints` at the 99.7th percentile), so the existing results are not void — but every set-level
-> claim should be read against its `rand=` column, not its parametric p. Full account, the correction of a
-> wrong intermediate figure, and the consequences for the FNN: **report 11 §8**. Script:
-> `scripts/mc_phenotype_assoc/feature_dimensionality.py`.
->
-> Also: folate is a dead MetChange feature (0th-percentile SD in both cells), so the NCI-60 design is **25
-> metabolites, not 26**. And the medium does *not* explain the amino-acid null — alanine, the one amino acid
-> absent from `rpmi_medium.json`, behaves like the 19 that are in it (report 11 §8.5).
+## Two phases, and we are in the first
+
+1. **Validation (current): can MetChange describe real metabolic phenotypes?** Not "is MetChange a valid FBA
+   method" — that was Zielinski's work and is published. The question is whether integrating expression with
+   stoichiometry yields something that tracks measured metabolic phenotypes in a way transcriptomics alone
+   does not.
+2. **The FNN**: feed the validated signature to the drug-target framework. Unchanged, see below.
+
+## What the end product is, and why MetChange is a candidate rather than a commitment
+
+The goal is a tool for **drug repurposing for metabolic reprogramming**. That does not require a
+metabolite-centric method. A method that raises the rate of specific *reactions* is also metabolic
+reprogramming — reaction-centric rather than metabolite-centric, but reprogramming all the same. **METAFlux
+and other reaction-centric methods are therefore in scope**, and an earlier note in this file that ruled them
+out as "the wrong unit" was too narrow: it answered the question "what predicts per-metabolite production
+capacity", not the question the project is actually asking. The repo already carries both METAFlux media
+mapped to Human-GEM 2.0 ids (`data/GEMs/gem_mediums/Human-GEM/notes.md`, all 108 exchanges resolving 1:1).
+
+## The two strongest validation findings
+
+**A. Membrane potential ↔ central carbon metabolite production (HepG2).** `tca` and `pyruvate` separate
+MMP-down from inactive drugs, AUROC 0.357–0.395 at the random-set floor (p 0.005), n=144/475. Report 09 §3–4,
+report 11 §10.
+
+**B. Proliferation ↔ nucleotide production (PRISM).** The pre-registered conditional prediction confirmed:
++0.291 raw, +0.302 partial, 104% retention, 10/10 cell pairs, on five non-HepG2 lines. Report 10 §10, §12.
+
+## What finding A has survived
+
+| challenge | result |
+|---|---|
+| producer-average null (same genes, same metabolites, **no LP**) | producer-average is **null** (rand 0.10–0.92) where MetChange is at the floor |
+| removing the dominant global component | signal retained (rand 0.010–0.040) |
+| cross-cell control (HepG2 phenotype × A549 labels) | **passes** — A549 labels carry no information (18/18 rows at chance), so it is not compound chemistry |
+| a clean metabolite set | holds — `tca_endpoints` (6 canonical intermediates) gives 0.357–0.366, same as the contaminated `tca` |
+| expression baseline | null (0.405, rand 0.12) |
+
+So the association is not chemistry, not the global component, not an artefact of a sloppy set, and not
+reproducible by averaging the relevant enzymes without the LP.
+
+## What is wrong with finding A, and is being worked on now
+
+**No absolute direction.** `sign_mean` — the only uncentred directional statistic in the pipeline — gives
+AUROC **0.523 at random-set p 0.995** for `tca all_nohub`. There is no significant absolute movement of the
+TCA set in MMP-down drugs. Only the *relative* statistic is significant.
+
+**The direction was misreported twice**, which is why this is stated so carefully now. First as "easier to
+produce", from reading `z` as though it were a log2FC. Then as "harder to produce" (+29.56), from a raw mean
+of a heavy-tailed distribution. Both wrong. Report 11 §10.3b.
+
+**Heavy tails.** For the TCA endpoints over MMP-down perturbations: mean +29.56, **median −0.30**, 49.5% of
+values positive, 1st/99th percentile −765/+926. The mean is carried by a tail; the typical perturbation shows
+essentially nothing.
+
+**The sparing is not visible in the producer genes.** TCA producers sit at the **42nd percentile of 79
+subsystems** on penalty change — middle of the pack — while the TCA metabolites are strongly spared relative
+to other metabolites. That gap is the LP's **minimum over routes**: cost follows the cheapest route, not the
+average producer. Evidence-backed, confirmable only with Gurobi.
+
+**What the reallocation actually is.** Coherent biology: steroid metabolism +0.0109, fatty-acid elongation
++0.0093, androgen +0.0091, cholesterol biosynthesis +0.0061 — lipid and sterol synthesis suppressed under
+mitochondrial stress. `corr(|d_penalty|, gene penalty SD) = +0.519`, so about half of which genes move is
+variability rather than pathway identity.
+
+So the defensible version of A is narrow: **in MMP-down drugs the TCA endpoints sit lower against the rest of
+the metabolome than in inactive drugs, with no established absolute direction.** Whether that is a real
+metabolic phenotype or a property of the scoring is the open question.
+
+## Facts about the method that constrain every result
+
+**Every set-level statistic in reports 08–11 is RELATIVE.** `z` subtracts each perturbation's mean over all
+features; `auroc` is a within-column ECDF; `sign_dev`, `sig_dev` and `sig_signed_dev` subtract their column
+mean. Only `sign_mean` is uncentred. So "pathway X associates with phenotype Y" has always meant "X moves
+differently from the rest of the metabolome", never "X moves up" or "X moves down". The reports word several
+of these as absolute. `reproduce_report11.sh` now runs `--mode value --mode sign` so that `sign_mean` is
+always available alongside.
+
+**The label matrix is effectively one-dimensional.** PC1 = 95.5% (HepG2) / 95.0% (A549), participation ratio
+**1.10 / 1.11**, one eigenvalue for 90% of variance, random metabolite pairs correlating at **0.97**. The
+expression arm on the same cells and perturbations gives 52–58 eigenvalues and r = 0.045–0.066, so the
+collapse happens in the expression→MetChange step, not in the data. **Whether the rank penalty or the LP
+causes it is UNKNOWN** — an earlier claim here that it was the LP was retracted, because the comparison used
+(producer-average, 5.18 dimensions) never passes through the penalty. The chain test is implemented in
+`scripts/utilities/check_mmp_down_tca_sign.ipynb` and needs `expr_ensembl_rank.csv`. This decides whether
+changing the penalty could help at all.
+
+**Pooled differences are confounded; limma is not.** Raw case-minus-control MetChange differences and the
+fitted limma coefficients disagree in sign on **20 of 20** TCA metabolites, r = **−0.869**. The limma design
+fits each perturbation against same-timepoint controls in its batches. Never use a pooled difference here.
+
+**The rank penalty is blind to global transcriptional shifts by construction.** Penalties are per-sample
+ranks, so every sample has an identical marginal distribution. Producer genes genuinely fall in MMP-down
+samples (AUROC 0.4055 absolute) and the penalty reports nothing (0.4969) because they fall about as much as
+everything else. For the drug-perturbation work this is arguably a feature — it discards the cytotoxicity
+axis that reports 08–10 spent their effort controlling for. For any **cross-cell-line, absolute** comparison
+(NCI-60 against measured exchange fluxes) it is a defect, because absolute capacity differences between lines
+are erased.
+
+**`SUBSYSTEMS['tca']` is under half citrate cycle.** The Human-GEM annotation is the merged KEGG map
+`Tricarboxylic acid cycle and glyoxylate/dicarboxylate metabolism`. Its 45 genes include **7 LDH isoforms, 3
+aldolases and 8 ALDH isoforms**; its `all_nohub` metabolite set includes DHAP, 2-phosphoglycerate and
+D-xylulose. `tca_endpoints` is the clean alternative on the metabolite side; **there is no clean gene-set
+counterpart**, so the expression arm cannot be run on a clean TCA gene list.
+
+**Folate is a dead MetChange feature** — 0th-percentile SD in both cell lines — so the NCI-60 design is **25
+metabolites, not 26**.
+
+## Open, in priority order
+
+1. **Run the chain test** (absolute expression → penalties → MetChange, same samples) and settle whether the
+   penalty or the LP collapses the representation. It gates whether the penalty question is worth pursuing.
+2. **Decide the penalty question.** `create_penalties.py` offers `rank` (current) and `mixture`. The mixture
+   penalty in use is `saturating` (`1 - p_main(x)`), which compresses the middle of the distribution where
+   rank is uniform, so it would likely give *fewer* dimensions, not more; `graded_0` / `combined_0` in
+   `make_penalties()` are the smooth alternatives. Keep `rank` for the LINCS work unless the chain test says
+   otherwise; run NCI-60 **both ways**, where an absolute penalty is defensible and CellMiner RNA-seq makes
+   the mixture's bimodality assumption plausible.
+3. **Evaluate a reaction-centric method**, METAFlux included, as a genuine alternative rather than a
+   comparator. For NCI-60 it is also the natural baseline, since exchange fluxes are its native output.
+4. **Confirm min-over-routes** by extracting the reactions carrying flux in each metabolite's optimal
+   solution (Gurobi, cluster).
+5. **Correct the wording of reports 08–10** wherever a direction is asserted from a relative statistic.
+6. **A second phenotype measured in HepG2** (Hallinger OCR is mapped and ready) — the only way to test
+   generality of finding A, since varying the label cell line cannot: the phenotype's assay cell line is fixed.
+7. The NCI-60 run itself (report 11 §1–7), 25 metabolites, after 1–3.
+
+## Reproducing any of this
+
+`scripts/mc_phenotype_assoc/REPRODUCING.md` maps every reported result to its launcher, and records the
+conventions that must not drift: symbol→Ensembl mapping, duplicate aggregation, and the MetChange score
+direction.
+
+---
 
 # Project state — 2026-11-19
 

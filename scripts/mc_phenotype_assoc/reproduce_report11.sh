@@ -102,10 +102,21 @@ sec() {
 # NO_NSIG is set when the arms had to be restricted: the carried-over q-values and
 # n_sig diagnostics index the unrestricted perturbation set, so they are absent from
 # the derived dirs by design and must not be looked for. See build_derived_labels.py.
+# --mode sign is NOT optional here. `--mode value` gives `z` and `auroc`, both of which
+# are computed WITHIN a perturbation (z subtracts that perturbation's mean over all
+# features; auroc is a within-column ECDF), so both are RELATIVE statistics and neither
+# carries an absolute direction. `--mode sign` adds `sign_mean`, whose baseline is 'raw'
+# and which is therefore the only uncentred directional statistic in the pipeline:
+# positive = the set's members moved UP (harder to produce), negative = down.
+#
+# Running value alone is how the TCA/MMP direction was misreported twice (report 11
+# 10.3b): first as "easier" by reading z as a log2FC, then as "harder" from a raw mean of
+# a heavy-tailed distribution. `sign_mean` settles it in one number - and for
+# `tca all_nohub` it is AUROC 0.523 at random-set p 0.995, i.e. no absolute effect at all.
 assoc() {
     "$py" -I "$here/mc_phenotype_assoc.py" \
         --labels "$1" --sets "$2" --phenotype "$PH" \
-        --mode value ${NO_NSIG:-} \
+        --mode value --mode sign ${NO_NSIG:-} \
         --case MMP_down --control inactive --extra-contrast MMP_up:inactive \
         --out-dir "$3"
 }
@@ -209,10 +220,18 @@ fi
 
 ############################################################################
 if sec 11 "the four-way table"; then
+    echo "--- z: the set RELATIVE to the rest of the matrix (what reports 09-11 quote) ---"
     "$py" -I "$here/compare_arms.py" --base "$out_root" --statistic z
     echo
-    echo "--- same, rank-based statistic ---"
+    echo "--- auroc: the same, rank-based, so robust to the heavy tails ---"
     "$py" -I "$here/compare_arms.py" --base "$out_root" --statistic auroc
+    echo
+    echo "--- sign_mean: UNCENTRED, the only absolute DIRECTION available ---"
+    echo "    median_case > 0 means the set moved UP (harder to produce) in the cases."
+    "$py" -I "$here/compare_arms.py" --base "$out_root" --statistic sign_mean
+    echo
+    echo "--- sign_dev: direction relative to the perturbation's own mean sign ---"
+    "$py" -I "$here/compare_arms.py" --base "$out_root" --statistic sign_dev
 fi
 
 echo

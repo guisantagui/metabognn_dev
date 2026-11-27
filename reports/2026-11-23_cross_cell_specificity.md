@@ -1,3 +1,22 @@
+> **CORRECTION, 2026-11-27 — every set-level association in this report is a RELATIVE statement.**
+> `mc_phenotype_assoc.py` computes `z` as *subtract the column mean, divide by the column SD*, where the
+> column is one perturbation across all features (line 346, applied at line 400); `auroc` is a within-column
+> ECDF; `sign_dev`, `sig_dev` and `sig_signed_dev` subtract their own column mean. **Only `sign_mean` is
+> uncentred.** So a statement of the form "pathway X associates with phenotype Y" in this report means
+> **"X moves differently from the rest of the metabolome in those drugs"** — never "X moves up" or "X moves
+> down". Wherever the text below reads as absolute impairment or absolute gain, read it as relative.
+>
+> This is not pedantry. On the strongest result in the project (`tca` / MMP-down in HepG2) the uncentred
+> statistic is **null**: `sign_mean` AUROC 0.523 at random-set p **0.995**, against `z` 0.383 at p 0.005. The
+> absolute direction was written up twice and wrongly in both directions before this was noticed — see
+> report 11 §10.3b–10.3c. The underlying log2FC are heavy-tailed (TCA endpoints over MMP-down perturbations:
+> mean +29.56, **median −0.30**, 49.5% positive, 1st/99th percentile −765/+926), so a raw mean is not a
+> usable summary either.
+>
+> `reproduce_report11.sh` now runs `--mode value --mode sign`, and `compare_arms.py --statistic sign_mean`
+> prints the directional table. Results in this report predate that and have no `sign_mean` column; the runs
+> would need repeating with `--mode sign` to get one.
+
 # Report 09 — The MetChange / membrane-potential association is specific to the cell line the phenotype was measured in
 
 *2026-11-23. Cross-cell-line run of the label-level association of reports 07-08, over the 8 LINCS core cell

@@ -143,3 +143,31 @@ AUROC has to flip one of them, and an apparent disagreement between the arms may
 §10.3 found exactly that: producer-average 0.259 against MetChange 0.630 on the same contrast are the same
 biological statement. A set-level AUROC below 0.5 on the MetChange arm means the case drugs find that set
 *easier* to produce, which is not what "the pathway is impaired" would predict.
+
+### Which statistics are relative, and which carries a direction
+
+`mc_phenotype_assoc.py` baselines each statistic against its own **column** — one perturbation across all
+features:
+
+| statistic | baseline | relative? |
+|---|---|---|
+| `z` | subtract column mean, divide by column SD | **yes** |
+| `auroc` | within-column ECDF | **yes** |
+| `sign_dev` | subtract column mean sign | **yes** |
+| `sig_dev`, `sig_signed_dev` | subtract column fraction | **yes** |
+| **`sign_mean`** | **`'raw'` — none** | **NO: the only absolute direction** |
+
+So a significant `z` or `auroc` means *the set moved differently from the rest of the matrix*, not that it
+moved up or down. **Always run `--mode value --mode sign` and report `sign_mean` beside `z`.** Running
+`--mode value` alone is how the TCA/MMP direction came to be written up twice and wrongly in both
+directions (report 11 §10.3b–10.3c); the uncentred statistic turned out to be null there, AUROC 0.523 at
+random-set p 0.995.
+
+Two further traps on the same result, both verified:
+
+* **Never use a pooled case-minus-control difference** of MetChange scores. Pooled and limma-fitted
+  differences disagree in **sign on 20 of 20** TCA metabolites, r = **-0.869**: the pooled comparison is
+  confounded with batch and timepoint, which the limma design removes.
+* **The log2FC are heavy-tailed**, so a raw mean is not a summary. TCA endpoints over MMP-down
+  perturbations: mean +29.56, median **-0.30**, 49.5% positive, 1st/99th percentile -765/+926. Use `auroc`
+  (rank-based) when magnitude robustness matters.

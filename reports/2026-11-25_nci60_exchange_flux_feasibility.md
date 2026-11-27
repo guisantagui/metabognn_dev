@@ -372,8 +372,23 @@ the relevant enzymes.
 | expression (genes) | 19.6% | 13.96 | 0.066 |
 
 Aggregating expression to metabolites by producer set does induce correlation - metabolites share producing
-enzymes, so r = 0.37 is expected - but it leaves 5.18 effective dimensions. **The LP takes that to 1.10.**
-Section 8's collapse is attributable to the LP step specifically, not to metabolite-level aggregation.
+enzymes, so r = 0.37 is expected - but it leaves 5.18 effective dimensions, where MetChange has 1.10.
+
+**CORRECTION (2026-11-27): this does NOT show the LP is responsible, and an earlier version of this section
+claimed it did.** The producer-average is built from expression log2FC and never passes through the rank
+penalty:
+
+    MetChange        : absolute expr -> RANK PENALTY -> LP -> limma log2FC
+    producer-average : absolute expr ->              ->    -> limma log2FC -> mean over producers
+
+So the comparison eliminates *metabolite-level aggregation* as the cause, not the penalty. The rank transform
+forces every sample to an identical marginal distribution, which is exactly the kind of operation that can
+remove between-feature independence, and it was never tested. The decisive comparison is the chain itself -
+absolute expression, then the penalty matrix, then the MetChange scores, on the same samples - which needs
+`expr_ensembl_rank.csv` and so runs only where that file is. It is implemented in
+`scripts/utilities/check_mmp_down_tca_sign.ipynb`. Until it has run, **the step that collapses the
+representation is unknown**, and that matters: if it is the penalty, a different transform could change it; if
+it is the LP, no transform will.
 
 ## 10. Four arms, one design: the result
 
@@ -428,7 +443,64 @@ label is therefore a **cost**: higher means *harder* to produce. Expression log2
 So the apparent MMP_up contradiction in 10.2 - producer-average 0.259 against MetChange 0.630 - is
 **agreement**: enzyme expression down and production cost up both say nucleotide capacity falls.
 
-### 10.3b The MMP_down direction CONFLICTS with both expression arms, and is unexplained
+### 10.3b RESOLVED (2026-11-27, superseded within the day): there is NO established absolute direction
+
+**Read 10.3c below before this subsection.** This text concluded the direction was impairment, from a raw
+mean of +29.56. That mean is of a heavy-tailed distribution whose median is -0.30, and the uncentred
+directional statistic (`sign_mean`) is null at random-set p 0.995. So the conclusion here is wrong too; it is
+kept because the chain evidence in it - producer genes down, penalties up, pooled-versus-limma confounded -
+is sound and is what 10.3c builds on.
+
+### 10.3b-i The superseded "direction is impairment" reading
+
+A first version of this section reported the MMP_down direction as conflicting with both expression arms and
+unexplained. It is neither. The four-layer diagnostic in
+`scripts/utilities/check_mmp_down_tca_sign.ipynb` localises the sign to **limma**, and once the fitted
+coefficient rather than a pooled difference is used, every layer agrees.
+
+**The chain, HepG2, 2587 MMP_down samples against 2895 DMSO:**
+
+| layer | quantity | result |
+|---|---|---|
+| 1 expression | 168 producer genes, absolute | AUROC 0.4055 - genes **down** |
+| 2 penalty | same genes | mean d_penalty **+0.0012** - penalties slightly **worse** |
+| 3 LP, pooled | MetChange cost, case minus control | -74.66 - **confounded, see below** |
+| 4 limma | fitted coefficient, mean over 605 perturbations | **+29.56 - HARDER to produce** |
+
+Layers 3 and 4 disagree on **20 of 20 metabolites**, correlation **-0.869**. The pooled difference is
+confounded with batch and timepoint; limma fits each perturbation against controls of the same timepoint in
+its batches, so the fitted coefficient is the valid one. With it, the chain is consistent end to end:
+producer genes down, penalties up, production cost up.
+
+**Why the reported AUROC is then 0.362.** `z` is the set's position relative to all other metabolites within
+each perturbation. In MMP-down drugs everything becomes harder to produce; the TCA endpoints become harder
+**by less than the metabolome average**, so their `z` sits low. The correct wording is **"TCA is relatively
+spared"** - absolutely impaired, comparatively less so. That contradicts nothing, and in particular the
+expression arm and MetChange were never in disagreement.
+
+**Two hypotheses this kills.**
+
+* *Rank-relativity* is not the explanation. Across the 168 producer genes, `corr(d_expr, d_penalty) = -0.924`,
+  the ordinary within-sample relation, with 91% of genes concordant and only 9% discordant. The earlier
+  version of this report named it the leading candidate on the strength of two z statistics of 0.4896 and
+  0.4917 - both of which are null, not evidence of a direction.
+* *The expression arms point the other way* is false as stated. They point the **same** way: the producer
+  genes go down, which is what a rising production cost requires.
+
+**What the reallocation looks like.** Mean penalty change per GEM subsystem puts the worsening ones in a
+coherent group - steroid metabolism +0.0109, fatty acid elongation +0.0093, androgen +0.0091, cholesterol
+biosynthesis +0.0061 - i.e. lipid and sterol biosynthesis suppressed under mitochondrial stress.
+`corr(|d_penalty|, gene penalty SD) = +0.519`, so roughly half of which genes move is variability rather than
+pathway identity: not noise, not pure biology.
+
+**The one thing still open.** The TCA producers sit at the **42nd percentile of 79 subsystems** on penalty
+change - middle of the pack - yet the TCA metabolites' cost is strongly spared relative to other metabolites.
+Average producer penalties with a sparing effect at the LP output is the signature of the LP taking a
+**minimum over routes**: cost follows the cheapest route, not the average producer. That is now supported by
+evidence rather than being a hypothesis, and confirming it requires the reactions carrying flux in each
+metabolite's optimal solution (Gurobi, cluster).
+
+### 10.3b-ii The original "unexplained conflict" reading, kept for the record
 
 No sign flip is applied anywhere in the pipeline: the statistics are computed on the raw log2FC matrix. So
 AUROC 0.362 means MMP-down drugs have **more negative** TCA log2FC, i.e. a **gain** of consistency with the
@@ -470,6 +542,56 @@ The statistical claim - that MetChange carries information neither expression ar
 strengthened by the disagreement, since a proxy for TCA gene expression could not disagree with TCA gene
 expression. But what it is tracking instead is currently unknown, and section 11's framing should be read
 with that limit in mind.
+
+### 10.3c The actual answer: the association is relative-only, with no absolute direction
+
+`mc_phenotype_assoc.py` already provides the statistic that answers sign and significance together.
+`--mode value` gives `z` and `auroc`, both computed WITHIN a perturbation and therefore relative.
+`--mode sign` gives `sign_mean`, whose baseline is `'raw'`:
+
+```python
+cells['sign_mean'] = (sg, 'raw')     # mean of sign(log2FC) over the set, UNCENTRED
+cells['sign_dev']  = (sg, 'dev')     # the same minus the column mean
+```
+
+`sign_mean` is the only uncentred statistic in the pipeline, so it is the only one carrying an absolute
+direction: positive means the set's members moved up (harder to produce). For `tca all_nohub`, HepG2,
+MMP_down vs inactive:
+
+| statistic | centred? | AUROC | median case | median control | random-set p |
+|---|---|---|---|---|---|
+| `z` | yes (column mean / SD) | 0.383 | -0.043 | +0.157 | **0.005** |
+| `auroc` | yes (within-column ECDF) | 0.360 | 0.493 | 0.567 | **0.005** |
+| `sign_dev` | yes (column mean sign) | 0.440 | -0.005 | +0.004 | 0.129 |
+| **`sign_mean`** | **NO** | **0.523** | **-0.048** | **-0.183** | **0.995** |
+
+**There is no significant absolute movement of the TCA set in MMP-down drugs.** Only the relative statistics
+are significant, and `sign_dev` - relative but directional - is also null, so the effect is not carried by a
+consistent direction of movement among the set's members. It lives in magnitudes.
+
+Which is a problem, because the magnitudes are extreme. For the 20 `tca_endpoints/all_nohub` features over
+the 605 MMP_down perturbations:
+
+| | MMP_down | inactive |
+|---|---|---|
+| mean | **+29.56** | -4.73 |
+| median | **-0.30** | -1.68 |
+| fraction > 0 (harder) | **49.5%** | 44.9% |
+| 1st / 99th percentile | -765 / +926 | -461 / +582 |
+
+The mean is carried by a right tail; the typical perturbation is at -0.3 with values split evenly either side.
+`auroc` is rank-based and survives at 0.360 (rand 0.005), so the effect is not purely the tail - but it is a
+relative effect either way.
+
+**The defensible statement.** In MMP-down drugs the TCA endpoints sit lower against the rest of the metabolome
+than they do in inactive drugs. Not "TCA production is impaired", not "TCA production is easier". Three
+readings of this result have now been written into this report and two were wrong, in both directions, from
+reading a relative statistic as an absolute one.
+
+**Pipeline consequence.** `reproduce_report11.sh` now runs `--mode value --mode sign`, and
+`compare_arms.py --statistic sign_mean` prints the directional table, so the absolute direction is available
+for every arm and every set rather than having to be reconstructed. That table has not yet been produced for
+the four-arm comparison; it is the first thing to run.
 
 ### 10.4 Caveats that limit how far 10.1 can be pushed
 

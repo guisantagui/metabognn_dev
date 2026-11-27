@@ -128,7 +128,12 @@ def table(data, statistic="z", contrast=None, sets=None, max_rows=40,
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--base", default="results/mc_phenotype_assoc/HEPG2")
-    ap.add_argument("--statistic", default="z", choices=["z", "auroc"])
+    ap.add_argument("--statistic", default="z",
+                    choices=["z", "auroc", "sign_mean", "sign_dev", "sig_dev",
+                             "sig_signed_dev"],
+                    help="z and auroc are RELATIVE (computed within a perturbation); "
+                         "sign_mean is the only UNCENTRED one and so the only absolute "
+                         "direction. Needs the run to have used --mode sign.")
     ap.add_argument("--contrast", default=None,
                     help="e.g. MMP_down_vs_inactive; default prints each in turn")
     ap.add_argument("--sets", nargs="*", default=None)
