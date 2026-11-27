@@ -51,10 +51,20 @@ SETS_OF_INTEREST = [
 ]
 
 
-def label_path(cell="HEPG2", arm="metchange", stat="log2FC"):
-    """Path to one label matrix. arm is 'metchange' or 'expr'."""
+# On the cluster the label matrices live on scratch, not in the repo; on a laptop they
+# are in the repo. `mc_phenotype_assoc_common.sh` resolves this for the shell launchers
+# as `labels_base`, and reproduce_report11.sh exports it as LABELS_BASE for this module.
+LABELS_BASE = os.environ.get("LABELS_BASE") or REPO
+
+
+def label_path(cell="HEPG2", arm="metchange", stat="log2FC", base=None):
+    """Path to one label matrix. arm is 'metchange' or 'expr'.
+
+    Honours $LABELS_BASE so the same code runs against the repo (laptop) or scratch
+    (cluster) without editing. Pass `base` to override explicitly.
+    """
     sub = "metchange/rank" if arm == "metchange" else "expr"
-    return os.path.join(REPO, "results/labels", cell, sub, "%s.csv" % stat)
+    return os.path.join(base or LABELS_BASE, "results/labels", cell, sub, "%s.csv" % stat)
 
 
 def load_matrix(path, max_rows=None, min_finite=0.9):

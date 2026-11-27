@@ -294,7 +294,8 @@ def main():
                     help="producer_average: keep ATP/NAD/H2O etc., whose producer "
                          "sets are most of the model")
     a = ap.parse_args()
-    out = a.out or os.path.join(REPO, "results/labels", a.cell, a.mode)
+    base = os.environ.get("LABELS_BASE") or REPO
+    out = a.out or os.path.join(base, "results/labels", a.cell, a.mode)
     source = os.path.dirname(label_path(a.cell, "metchange"))
     cols_want = shared_columns(a.cell) if a.restrict_to_shared else None
     if a.mode == "producer_average":

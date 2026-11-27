@@ -33,6 +33,19 @@ cd "$repo"
 require_python || exit 1
 
 cell="${cell:-HEPG2}"
+
+# WHERE THE LABELS LIVE. On the cluster they are on scratch, on a laptop in the repo.
+# mc_phenotype_assoc_common.sh already resolves this as `labels_base`; ask it rather than
+# assuming repo-relative paths, which is what every other launcher here does and what an
+# earlier version of this script failed to do (it would have reported "needs BOTH label
+# arms locally" on the cluster while the matrices sat on scratch).
+if [ -z "${labels_base:-}" ]; then
+    labels_base="$(cell="$cell"; . "$here/mc_phenotype_assoc_common.sh" >/dev/null 2>&1; printf '%s' "$labels_base")"
+fi
+: "${labels_base:=$repo}"
+export LABELS_BASE="$labels_base"      # read by feature_dimensionality.py / build_derived_labels.py
+echo "repo        : $repo"
+echo "labels base : $labels_base"
 # The ASSAY cell line of each phenotype. The phenotype never changes cell line when
 # `cell` changes - only the LABELS do. So running a HepG2-measured phenotype against
 # another cell's labels is the cross-cell CONTROL of report 08 section 8.3, not a
@@ -40,17 +53,17 @@ cell="${cell:-HEPG2}"
 # than a compound property. Printed below because this reading has been inverted
 # once already (report 11, 12.0).
 pheno_cell="HEPG2"
-sets_dir="results/mc_phenotype_assoc/metabolite_sets"
-PH="results/mc_phenotype_assoc/phenotypes_ALL/attene_ramos_mmp.tsv"
-out_root="results/mc_phenotype_assoc/${cell}"
+sets_dir="$labels_base/results/mc_phenotype_assoc/metabolite_sets"
+PH="$labels_base/results/mc_phenotype_assoc/phenotypes_ALL/attene_ramos_mmp.tsv"
+out_root="$labels_base/results/mc_phenotype_assoc/${cell}"
 mkdir -p "$out_root"
 
-if [ ! -f "results/labels/${cell}/metchange/rank/log2FC.csv" ] ||
-   [ ! -f "results/labels/${cell}/expr/log2FC.csv" ]; then
+if [ ! -f "$labels_base/results/labels/${cell}/metchange/rank/log2FC.csv" ] ||
+   [ ! -f "$labels_base/results/labels/${cell}/expr/log2FC.csv" ]; then
     echo "ERROR: ${cell} needs BOTH label arms locally:" >&2
-    echo "  results/labels/${cell}/metchange/rank/log2FC.csv" >&2
-    echo "  results/labels/${cell}/expr/log2FC.csv" >&2
-    echo "available: $(ls results/labels 2>/dev/null | tr '\n' ' ')" >&2
+    echo "  $labels_base/results/labels/${cell}/metchange/rank/log2FC.csv" >&2
+    echo "  $labels_base/results/labels/${cell}/expr/log2FC.csv" >&2
+    echo "available: $(ls "$labels_base/results/labels" 2>/dev/null | tr '\n' ' ')" >&2
     exit 1
 fi
 
@@ -58,18 +71,18 @@ fi
 # perturbations or the comparison is between different drug sets, not between
 # representations. HEPG2 matches exactly (15,032 both); A549 does not (44,396 vs
 # 7,636, sharing 7,633). Decided here, once, rather than left to the caller.
-n_mc=$(head -1 "results/labels/${cell}/metchange/rank/log2FC.csv" | tr ',' '\n' | wc -l | tr -d ' ')
-n_ex=$(head -1 "results/labels/${cell}/expr/log2FC.csv" | tr ',' '\n' | wc -l | tr -d ' ')
+n_mc=$(head -1 "$labels_base/results/labels/${cell}/metchange/rank/log2FC.csv" | tr ',' '\n' | wc -l | tr -d ' ')
+n_ex=$(head -1 "$labels_base/results/labels/${cell}/expr/log2FC.csv" | tr ',' '\n' | wc -l | tr -d ' ')
 if [ "$n_mc" != "$n_ex" ]; then
     RESTRICT="--restrict-to-shared"
     NO_NSIG="--no-nsig"
-    MC_ARM="results/labels/${cell}/metchange_shared"
+    MC_ARM="$labels_base/results/labels/${cell}/metchange_shared"
     echo "NOTE: ${cell} arms are NOT co-extensive (metchange $((n_mc-1)) vs expr $((n_ex-1)))."
     echo "      Restricting every arm to the shared perturbations."
 else
     RESTRICT=""
     NO_NSIG=""
-    MC_ARM="results/labels/${cell}/metchange/rank"
+    MC_ARM="$labels_base/results/labels/${cell}/metchange/rank"
     echo "NOTE: ${cell} arms are co-extensive ($((n_mc-1)) perturbations); no restriction needed."
 fi
 echo
@@ -150,9 +163,9 @@ import sys, os
 sys.path.insert(0, os.path.join(os.getcwd(), 'scripts/mc_phenotype_assoc'))
 from feature_dimensionality import load_matrix, spectrum
 cell = os.environ.get('cell', 'HEPG2')
-for lab, p in [('MetChange (LP)', 'results/labels/%s/metchange/rank/log2FC.csv' % cell),
-               ('producer-average (no LP)', 'results/labels/%s/producer_average/log2FC.csv' % cell),
-               ('expression (genes)', 'results/labels/%s/expr/log2FC.csv' % cell)]:
+for lab, p in [('MetChange (LP)', os.path.join(os.environ.get('LABELS_BASE','.'), 'results/labels/%s/metchange/rank/log2FC.csv' % cell)),
+               ('producer-average (no LP)', os.path.join(os.environ.get('LABELS_BASE','.'), 'results/labels/%s/producer_average/log2FC.csv' % cell)),
+               ('expression (genes)', os.path.join(os.environ.get('LABELS_BASE','.'), 'results/labels/%s/expr/log2FC.csv' % cell))]:
     if not os.path.exists(p):
         continue
     X, _, _ = load_matrix(p, max_rows=8000)
@@ -196,10 +209,10 @@ if sec 10 "does the advantage survive removing the global component?"; then
             ldir="$MC_ARM"; sf="${sets_dir}/metabolite_sets.tsv"
             odir="${out_root}/attene_mc_ref"
         else
-            ldir="results/labels/${cell}/expr"; sf="${sets_dir}/gene_sets.tsv"
+            ldir="$labels_base/results/labels/${cell}/expr"; sf="${sets_dir}/gene_sets.tsv"
             odir="${out_root}/attene_expr_ref"
             if [ -n "$RESTRICT" ]; then
-                ex_arm="results/labels/${cell}/expr_shared"
+                ex_arm="$labels_base/results/labels/${cell}/expr_shared"
                 if [ ! -f "$ex_arm/log2FC.csv" ]; then
                     "$py" -I - <<PYEOF
 import sys, os
