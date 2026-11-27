@@ -183,6 +183,19 @@ a result or chasing one.
 
 ## 8. The MetChange label matrix is one-dimensional (2026-11-25, added after section 7)
 
+> **SUPERSEDED IN PART by report 12 (`2026-11-27_why_metchange_is_one_dimensional.md`).** The dimensionality
+> figures here stand. What report 12 adds or corrects:
+> - the collapse is at the **LP**, now properly tested (absolute expression PR 10.69 → penalties 9.70 →
+>   MetChange 1.10). §9.2's retraction below was right about its evidence and wrong about its conclusion.
+> - it is an **averaging effect**, not information destruction: summing 50–100 penalties per route averages
+>   independent variation down and preserves the common part.
+> - PC1 **is** the uniform mean (r = −1.0000, flat loadings), and **68%** of it is the average rank of
+>   metabolic genes within the whole transcriptome (r² = 68.3%).
+> - the remedy is to **remove one component** (PR 1.10 → 6.36, plateauing), not to change the penalty.
+> - §8.5's conclusion that medium-supplied metabolites are not saturated is **wrong for that set**: nine or
+>   more share identical scores to six significant figures.
+
+
 This section came out of a question about the growth medium and ended somewhere more consequential. It
 changes how every set-level result in reports 09 and 10 should be read, so it is recorded here rather than
 in a separate file.

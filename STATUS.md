@@ -81,14 +81,38 @@ differently from the rest of the metabolome", never "X moves up" or "X moves dow
 of these as absolute. `reproduce_report11.sh` now runs `--mode value --mode sign` so that `sign_mean` is
 always available alongside.
 
-**The label matrix is effectively one-dimensional.** PC1 = 95.5% (HepG2) / 95.0% (A549), participation ratio
-**1.10 / 1.11**, one eigenvalue for 90% of variance, random metabolite pairs correlating at **0.97**. The
-expression arm on the same cells and perturbations gives 52–58 eigenvalues and r = 0.045–0.066, so the
-collapse happens in the expression→MetChange step, not in the data. **Whether the rank penalty or the LP
-causes it is UNKNOWN** — an earlier claim here that it was the LP was retracted, because the comparison used
-(producer-average, 5.18 dimensions) never passes through the penalty. The chain test is implemented in
-`scripts/utilities/check_mmp_down_tca_sign.ipynb` and needs `expr_ensembl_rank.csv`. This decides whether
-changing the penalty could help at all.
+**The label matrix is one-dimensional, and we now know why (report 12, 2026-11-27).** PC1 = 95.5% (HepG2) /
+95.0% (A549), participation ratio **1.10 / 1.11**, random metabolite pairs at **0.97**. The chain test places
+it: absolute expression PR 10.69 → rank penalties **9.70** → MetChange **1.10**. The penalty transform loses
+nothing; the LP does all of it.
+
+But not by destroying information. **The LP is an averaging operator**: each metabolite's cost sums penalties
+over 50–100 reactions, which averages independent variation down by ~√n while preserving anything common to
+all routes. A small shared component in the penalties therefore dominates the output.
+
+**That shared component is the sample's overall metabolic cost, and 68% of it is one scalar** — the average
+rank of metabolic genes within the whole transcriptome (r = 0.826, r² = 68.3%; mean GEM penalty median 0.3761,
+SD 0.00665, range 0.346–0.419). It arises because ranks are taken over all ~20,587 genes while only the
+~2,783 GEM genes are used. PC1 is exactly the uniform mean: r(PC1, g) = **−1.0000**, loadings flat at
+0.0228 = 1/√2000, so attributing PC1 to particular supply metabolites is ruled out.
+
+**It is not an artefact, and the all-genes ranking is defensible.** The median GEM penalty of 0.376 rather
+than 0.5 *is* the information "metabolic genes sit high in this transcriptome", and ranking within the GEM
+subset would force it to 0.5 by construction and lose it. It also keeps `rank` comparable to `mixture`, which
+is fitted on all genes. So re-ranking is **not the first move**: post-hoc removal is more complete (it takes
+the whole axis, not the 68%), far cheaper, and reversible.
+
+**But re-ranking within the GEM genes stays OPEN as a sensitivity test** — see the open list. The argument
+above says what it would *lose*, not that it would fail to help. There is a real counter-argument: for a
+*metabolic* signature, making every metabolic penalty depend on non-metabolic transcription couples in a
+dependency that may be the wrong biology for this task, however real it is in itself. Which ranking produces
+the better signature is empirical, and the test is one HepG2 run rather than a full campaign.
+
+**The information survives underneath.** Removing one component: PR 1.10 → **6.36** (log2FC) / **5.24**
+(absolute), eig@90% 1 → 12, median r +0.974 → −0.058. It **plateaus** — a second and third component gain
+nothing — so the remedy is "subtract one axis and supply it as one feature", not a projection onto several.
+Report 05's finding that top-100 selection is driven by metabolite scale is this axis, so selection is
+currently choosing on the common component.
 
 **Pooled differences are confounded; limma is not.** Raw case-minus-control MetChange differences and the
 fitted limma coefficients disagree in sign on **20 of 20** TCA metabolites, r = **−0.869**. The limma design
@@ -113,22 +137,44 @@ metabolites, not 26**.
 
 ## Open, in priority order
 
-1. **Run the chain test** (absolute expression → penalties → MetChange, same samples) and settle whether the
-   penalty or the LP collapses the representation. It gates whether the penalty question is worth pursuing.
-2. **Decide the penalty question.** `create_penalties.py` offers `rank` (current) and `mixture`. The mixture
-   penalty in use is `saturating` (`1 - p_main(x)`), which compresses the middle of the distribution where
-   rank is uniform, so it would likely give *fewer* dimensions, not more; `graded_0` / `combined_0` in
-   `make_penalties()` are the smooth alternatives. Keep `rank` for the LINCS work unless the chain test says
-   otherwise; run NCI-60 **both ways**, where an absolute penalty is defensible and CellMiner RNA-seq makes
-   the mixture's bimodality assumption plausible.
-3. **Evaluate a reaction-centric method**, METAFlux included, as a genuine alternative rather than a
-   comparator. For NCI-60 it is also the natural baseline, since exchange fluxes are its native output.
-4. **Confirm min-over-routes** by extracting the reactions carrying flux in each metabolite's optimal
-   solution (Gurobi, cluster).
-5. **Correct the wording of reports 08–10** wherever a direction is asserted from a relative statistic.
-6. **A second phenotype measured in HepG2** (Hallinger OCR is mapped and ready) — the only way to test
-   generality of finding A, since varying the label cell line cannot: the phenotype's assay cell line is fixed.
-7. The NCI-60 run itself (report 11 §1–7), 25 metabolites, after 1–3.
+Items 1 and 2 of the previous list are **done**: the chain test located the collapse at the LP, and the
+penalty question is settled — keep `rank` over all genes, remove the common axis post hoc (report 12).
+
+1. **Is the MetChange residual complementary to expression, or a lossy summary of it?** Residual PR **6.36**
+   against expression's **13.96** — ~6 dimensions of metabolite-specific information plus one global axis,
+   against ~14 at gene level. Canonical correlation between the two residual matrices, or a
+   target-prediction comparison, settles it and needs no new MetChange run. **This is the only thing now
+   blocking the FNN decision** (report 12 §10).
+2. **Try ranking the penalties within the GEM genes only, on HepG2, as a sensitivity test.** One-line
+   change in `create_penalties.py` (`rankdata(x[gem_rows])`), then one MetChange run and
+   `feature_dimensionality.py`. It fixes the mean penalty at ~0.5 per sample by construction, so it removes
+   the 68% level-shift component at source. Prediction: PC1 falls and PR rises, magnitude unknown — it could
+   land anywhere from ~2 to ~6, and if it stays near 1.10 the level shift was not the binding mechanism. It
+   would lose the "metabolic genes sit high in the transcriptome" information (median penalty 0.376 → 0.5),
+   so compare the two on a downstream task, not on dimensionality alone. Also check the `--threshold 2`
+   ceiling does not introduce its own artefact: it would then force a different ~56 genes to penalty 1.
+3. **Remove the common axis before feature selection in the FNN path**, and supply it as one extra feature.
+   Report 05 found top-100 selection is driven by metabolite scale, which is this axis, so selection is
+   currently choosing on the common component (report 12 §8.2).
+4. **Re-run the four-arm comparison with `--mode sign`**, now that `reproduce_report11.sh` includes it, for
+   the absolute-direction table across all four representations. `sbatch launch_report11_slurm.sh`.
+5. **Confirm the averaging mechanism** by extracting the flux-carrying reactions per optimal solution and
+   measuring route overlap across metabolites. Needs Gurobi, cluster-side. The same run confirms
+   min-over-routes for report 11 §10.3b.
+6. **Evaluate a reaction-centric method**, METAFlux included, as a genuine alternative rather than a
+   comparator — raising reaction rates is metabolic reprogramming too. For NCI-60 it is also the natural
+   baseline, since exchange fluxes are its native output. Note report 12 weakens the *dimensionality*
+   argument for switching: the collapse is understood, largely reversible, and leaves ~12-dimensional
+   structure underneath.
+7. **Drop the dead medium-supplied features** — nine or more are scored by import alone and carry no
+   information (identical values to six significant figures; report 12 §9).
+8. **Correct the wording of reports 08–10** wherever a direction is asserted from a relative statistic.
+9. **A second phenotype measured in HepG2** (Hallinger OCR is mapped and ready) — the only way to test
+   generality of finding A, since varying the label cell line cannot: the phenotype's assay cell line is
+   fixed.
+10. **The NCI-60 run** (report 11 §1–7), 25 metabolites, run both penalty ways since the absolute
+   cross-cell-line case differs from the LINCS case.
+
 
 ## Reproducing any of this
 
@@ -874,7 +920,7 @@ prospective tracing only.
    enzyme. Caveat: plasma / urine pools.
 6. **Prospective**: isotope tracing / exometabolomics for a few top predictions (link d, the only direct test of
    the claim).
-7. **Seahorse (OCR / ECAR) as a query** (design in report 06 section 7, nothing run). Real flux readout, so it
+8. **Seahorse (OCR / ECAR) as a query** (design in report 06 section 7, nothing run). Real flux readout, so it
    tests the capacity claim that pools cannot; coarse (whole-cell respiration / glycolysis only). Query: not
    "every TCA + ETC metabolite up" (at higher flux intermediates often stay flat or fall) but the **endpoints**
    (O2 / NADH / acetyl-CoA consumed, CO2 / ATP produced; glucose consumed, lactate produced), and the two rates
